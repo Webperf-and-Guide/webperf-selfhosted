@@ -5,9 +5,9 @@ This repo is the self-hosted edition of Webperf and Guide.
 ## Working Principles
 
 - Keep runtime and persistence choices self-host friendly.
-- Keep core domain logic reusable through `packages/domain-core` and `packages/report-engine`.
+- Keep core domain logic reusable through `packages/domain-core` and `packages/report-core`.
 - Prefer generic contracts and extension points over provider-specific assumptions.
-- Keep the console, control service, and probe runnable on a small single-org installation.
+- Keep the console, API service, scheduler, and probe runnable on a small single-org installation.
 
 ## Local Checks
 
@@ -15,7 +15,7 @@ Run these before opening a PR:
 
 ```sh
 bun run check
-bun test apps/control/test
+bun test apps/api/test
 cargo test --workspace --manifest-path apps/probe-rs/Cargo.toml
 ```
 

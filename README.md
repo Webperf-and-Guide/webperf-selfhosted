@@ -10,10 +10,11 @@ WebPerf has two distinct product surfaces:
 This repository is the self-hosted source of truth for:
 
 - `apps/console`: SvelteKit UI for configuring checks and reviewing runs
-- `apps/control`: Bun + SQLite control service for saved config, run dispatch, history, comparisons, and reports
+- `apps/api`: Bun + SQLite API service for saved config, run dispatch, history, comparisons, and reports
+- `apps/scheduler`: polling worker for scheduled check dispatch
 - `apps/probe-rs`: Rust probe runtime
-- `packages/contracts`, `packages/domain-core`, `packages/env-schema`, `packages/report-engine`, `packages/ui`
-- `infra/compose`: Docker Compose bundle
+- `packages/contracts`, `packages/domain-core`, `packages/config`, `packages/report-core`, `packages/ui`
+- `infra/docker-compose`: Docker Compose bundle
 - `infra/docker`: probe image metadata
 
 This repository is intentionally not the home for:
@@ -26,8 +27,8 @@ This repository is intentionally not the home for:
 
 See:
 
-- [docs/scope.md](docs/scope.md)
-- [docs/cloud-vs-selfhosted.md](docs/cloud-vs-selfhosted.md)
+- [docs/self-hosting/feature-scope.md](docs/self-hosting/feature-scope.md)
+- [docs/comparison/cloud-vs-selfhosted.md](docs/comparison/cloud-vs-selfhosted.md)
 
 ## Local Development
 
@@ -39,26 +40,27 @@ bun run dev
 Default local URLs:
 
 - console: `http://localhost:5173`
-- control: `http://127.0.0.1:8788`
+- api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
 
 ## Useful Commands
 
 ```bash
 bun run check
-bun test apps/control/test
-bun run test:report-engine
+bun test apps/api/test
+bun run test:report-core
 bun run compose:config
 ```
 
 ## Compose Bundle
 
-Compose assets live in [infra/compose/docker-compose.yml](infra/compose/docker-compose.yml).
+Compose assets live in [infra/docker-compose/docker-compose.yml](infra/docker-compose/docker-compose.yml).
 
 Install and scheduling notes live in:
 
-- [docs/install.md](docs/install.md)
-- [docs/examples/github-actions-scheduler.yml](docs/examples/github-actions-scheduler.yml)
+- [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md)
+- [docs/architecture/execution-model.md](docs/architecture/execution-model.md)
+- [examples/github-actions/scheduler-dispatch.yml](examples/github-actions/scheduler-dispatch.yml)
 
 ## Release Tooling
 

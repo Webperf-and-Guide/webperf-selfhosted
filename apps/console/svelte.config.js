@@ -20,10 +20,10 @@ const config = {
       '@webperf/contracts/*': path.resolve(projectDir, '../../packages/contracts/src/*'),
       '@webperf/domain-core': path.resolve(projectDir, '../../packages/domain-core/src/index.ts'),
       '@webperf/domain-core/*': path.resolve(projectDir, '../../packages/domain-core/src/*'),
-      '@webperf/env-schema': path.resolve(projectDir, '../../packages/env-schema/src/index.ts'),
-      '@webperf/env-schema/*': path.resolve(projectDir, '../../packages/env-schema/src/*'),
-      '@webperf/report-engine': path.resolve(projectDir, '../../packages/report-engine/src/index.ts'),
-      '@webperf/report-engine/*': path.resolve(projectDir, '../../packages/report-engine/src/*'),
+      '@webperf/config': path.resolve(projectDir, '../../packages/config/src/index.ts'),
+      '@webperf/config/*': path.resolve(projectDir, '../../packages/config/src/*'),
+      '@webperf/report-core': path.resolve(projectDir, '../../packages/report-core/src/index.ts'),
+      '@webperf/report-core/*': path.resolve(projectDir, '../../packages/report-core/src/*'),
       '@webperf/ui': path.resolve(projectDir, '../../packages/ui/src/index.ts'),
       '@webperf/ui/*': path.resolve(projectDir, '../../packages/ui/src/*')
     }

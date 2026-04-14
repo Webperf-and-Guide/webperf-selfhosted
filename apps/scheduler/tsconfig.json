@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@webperf/config": ["../../packages/config/src/index.ts"],
+      "@webperf/config/*": ["../../packages/config/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

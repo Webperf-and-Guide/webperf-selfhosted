@@ -35,8 +35,8 @@
     "@tanstack/svelte-query": "^6.1.16",
     "@webperf/contracts": "workspace:*",
     "@webperf/domain-core": "workspace:*",
-    "@webperf/env-schema": "workspace:*",
-    "@webperf/report-engine": "workspace:*",
+    "@webperf/config": "workspace:*",
+    "@webperf/report-core": "workspace:*",
     "@webperf/ui": "workspace:*"
   }
 }

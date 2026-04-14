@@ -1,0 +1,63 @@
+services:
+  console:
+    build:
+      context: ../..
+      dockerfile: apps/console/Dockerfile
+    image: webperf-console:local
+    depends_on:
+      - api
+    environment:
+      CONTROL_BASE_URL: "${CONTROL_BASE_URL:-http://api:8788}"
+      DEPLOY_TARGET: "${DEPLOY_TARGET:-pages}"
+      TURNSTILE_SITE_KEY: "${TURNSTILE_SITE_KEY:-}"
+      ORIGIN: "${CONSOLE_ORIGIN:-http://localhost:5173}"
+      HOST: "${CONSOLE_HOST:-0.0.0.0}"
+      PORT: "${CONSOLE_PORT:-3000}"
+    ports:
+      - "${CONSOLE_PUBLIC_PORT:-5173}:${CONSOLE_PORT:-3000}"
+
+  probe:
+    build:
+      context: ../../apps/probe-rs
+      dockerfile: Dockerfile
+    image: webperf-probe:local
+    environment:
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:-dev-shared-secret}"
+    ports:
+      - "${PROBE_PUBLIC_PORT:-8080}:8080"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    image: webperf-api:local
+    depends_on:
+      - probe
+    environment:
+      SELFHOST_API_HOST: "${SELFHOST_API_HOST:-0.0.0.0}"
+      SELFHOST_API_PORT: "${SELFHOST_API_PORT:-8788}"
+      SELFHOST_DATABASE_PATH: "${SELFHOST_DATABASE_PATH:-/data/webperf.sqlite}"
+      SELFHOST_RETENTION_DAYS: "${SELFHOST_RETENTION_DAYS:-30}"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:-dev-shared-secret}"
+      SELFHOST_ACTIVE_REGION_CODES_JSON: '${SELFHOST_ACTIVE_REGION_CODES_JSON:-["tokyo"]}'
+      SELFHOST_REGION_IDS_JSON: '${SELFHOST_REGION_IDS_JSON:-{"tokyo":"JP"}}'
+      SELFHOST_PROBE_BASE_URLS_JSON: '${SELFHOST_PROBE_BASE_URLS_JSON:-{"tokyo":"http://probe:8080"}}'
+      SELFHOST_MAX_TARGET_ATTEMPTS: "${SELFHOST_MAX_TARGET_ATTEMPTS:-1}"
+    ports:
+      - "${SELFHOST_API_PUBLIC_PORT:-8788}:${SELFHOST_API_PORT:-8788}"
+    volumes:
+      - webperf-data:/data
+
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: apps/scheduler/Dockerfile
+    image: webperf-scheduler:local
+    depends_on:
+      - api
+    environment:
+      SELFHOST_SCHEDULER_API_BASE_URL: "${SELFHOST_SCHEDULER_API_BASE_URL:-http://api:8788}"
+      SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
+
+volumes:
+  webperf-data:

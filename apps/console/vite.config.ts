@@ -7,8 +7,8 @@ export default defineConfig({
     alias: {
       '@webperf/contracts': path.resolve(__dirname, '../../packages/contracts/src/index.ts'),
       '@webperf/domain-core': path.resolve(__dirname, '../../packages/domain-core/src/index.ts'),
-      '@webperf/env-schema': path.resolve(__dirname, '../../packages/env-schema/src/index.ts'),
-      '@webperf/report-engine': path.resolve(__dirname, '../../packages/report-engine/src/index.ts'),
+      '@webperf/config': path.resolve(__dirname, '../../packages/config/src/index.ts'),
+      '@webperf/report-core': path.resolve(__dirname, '../../packages/report-core/src/index.ts'),
       '@webperf/ui': path.resolve(__dirname, '../../packages/ui/src/index.ts')
     }
   },

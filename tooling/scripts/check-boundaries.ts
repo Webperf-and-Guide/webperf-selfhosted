@@ -29,10 +29,11 @@ const rules: Rule[] = [
     name: 'public-safe modules must not depend on cloud-only entrypoints',
     targets: [
       'apps/console/src',
-      'apps/control/src',
+      'apps/api/src',
+      'apps/scheduler/src',
       'packages/contracts/src',
       'packages/domain-core/src',
-      'packages/report-engine/src',
+      'packages/report-core/src',
       'packages/ui/src'
     ],
     banned: [
@@ -57,11 +58,12 @@ const rules: Rule[] = [
         message: 'pricing constants are cloud-only'
       },
       {
-        pattern: /^@webperf\/env-schema$/,
-        message: 'use @webperf/env-schema/public or @webperf/env-schema/selfhost instead of the mixed root export'
+        pattern: /^@webperf\/config$/,
+        message:
+          'use @webperf/config/public, @webperf/config/selfhost, or @webperf/config/selfhost-scheduler instead of the mixed root export'
       },
       {
-        pattern: /^@webperf\/env-schema\/cloud$/,
+        pattern: /^@webperf\/config\/cloud$/,
         message: 'cloud env parsing must stay out of public-safe modules'
       },
       {
@@ -92,15 +94,41 @@ const rules: Rule[] = [
   },
   {
     name: 'public/selfhost env entrypoints must stay isolated from cloud parsing',
-    targets: ['packages/env-schema/src/public.ts', 'packages/env-schema/src/selfhost.ts'],
+    targets: [
+      'packages/config/src/public.ts',
+      'packages/config/src/selfhost.ts',
+      'packages/config/src/selfhost-scheduler.ts'
+    ],
     banned: [
       {
         pattern: /^\.\/cloud$/,
         message: 'public or selfhost env entrypoints cannot import cloud parser internals'
       },
       {
-        pattern: /^@webperf\/env-schema\/cloud$/,
+        pattern: /^@webperf\/config\/cloud$/,
         message: 'public or selfhost env entrypoints cannot import cloud parser internals'
+      }
+    ]
+  },
+  {
+    name: 'retired topology names must not come back',
+    targets: ['package.json', 'README.md', 'AGENTS.md', 'tooling', 'apps', 'packages', 'docs', 'infra'],
+    banned: [
+      {
+        pattern: /apps\/control\//,
+        message: 'use apps/api instead of the retired apps/control path'
+      },
+      {
+        pattern: /packages\/env-schema\//,
+        message: 'use packages/config instead of the retired packages/env-schema path'
+      },
+      {
+        pattern: /packages\/report-engine\//,
+        message: 'use packages/report-core instead of the retired packages/report-engine path'
+      },
+      {
+        pattern: /infra\/compose\//,
+        message: 'use infra/docker-compose instead of the retired infra/compose path'
       }
     ]
   }

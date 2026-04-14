@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { parseWebEnv } from '@webperf/env-schema/public';
+import { parseWebEnv } from '@webperf/config/public';
 import type {
   CheckProfileComparisonResponse,
   CheckProfileLatestComparisonResponse,

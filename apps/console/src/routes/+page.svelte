@@ -1074,7 +1074,7 @@
       <div>
         <span>Saved checks</span>
         <strong>{savedChecks ? `${checkProfiles.length} reusable checks` : 'Manual runs only'}</strong>
-        <small>{savedChecks ? 'Promote stable runs into schedules, baselines, and exports.' : 'Connect the full self-host control service to unlock persistent resources.'}</small>
+        <small>{savedChecks ? 'Promote stable runs into schedules, baselines, and exports.' : 'Connect the full self-host API service to unlock persistent resources.'}</small>
       </div>
     </div>
   </div>
@@ -1948,7 +1948,7 @@
   {:else}
     <div class="empty-state">
       <p>This control endpoint is running in live-check mode only.</p>
-      <small>Manual runs still work, but persistent sites, route groups, region sets, baselines, and exports require the full self-host control service.</small>
+      <small>Manual runs still work, but persistent sites, route groups, region sets, baselines, and exports require the full self-host API service.</small>
     </div>
   {/if}
 </section>

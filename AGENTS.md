@@ -28,7 +28,7 @@ Role split:
 - `webperf.and.guide` is the managed cloud product and business layer
 
 This repo is the source of truth for:
-- self-host console/control/probe behavior
+- self-host console/api/scheduler/probe behavior
 - public contracts and schemas
 - public domain models
 - deterministic reporting and comparison logic
@@ -49,30 +49,31 @@ Boundary rule:
 
 Included here:
 - `apps/console`
-- `apps/control`
+- `apps/api`
+- `apps/scheduler`
 - `apps/probe-rs`
 - `packages/contracts`
 - `packages/domain-core`
-- `packages/env-schema`
-- `packages/report-engine`
+- `packages/config`
+- `packages/report-core`
 - `packages/ui`
-- `infra/compose`
+- `infra/docker-compose`
 - `infra/docker`
 - `docs`
 
 ## Snapshot
 
 Current repo state as of 2026-04-14:
-- the console, control service, and Rust probe run together locally
-- the control service persists saved config, runs, baselines, comparisons, and reports in SQLite
-- local compose packaging lives under `infra/compose`
+- the console, API service, scheduler, and Rust probe run together locally
+- the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
+- local compose packaging lives under `infra/docker-compose`
 - shared packages are versioned as `@webperf/*`
 - release metadata tooling uses Sampo via `.sampo/`
 - `packages/contracts` now exports split `public`, `app`, and `ops` oRPC contracts alongside the legacy compatibility `control` contract
 - `packages/contracts` now builds a public OpenAPI skeleton from the resource-oriented `public` contract
-- `apps/control` now serves `/rpc/public`, `/rpc/app`, `/rpc/ops`, and legacy `/rpc`, plus `/openapi/public.json` and `/openapi/control.json`
-- `apps/control` now exposes public REST aliases for `sites`, `routeGroups`, `regionSets`, `checks`, `runs`, and `capabilities` while keeping the older `/v1/properties`, `/v1/route-sets`, `/v1/region-packs`, and `/v1/check-profiles` endpoints for compatibility
-- `apps/control` now exposes first-class public `comparisons`, `exports`, and `analyses` resources backed by persisted derived payloads
+- `apps/api` now serves `/rpc/public`, `/rpc/app`, `/rpc/ops`, and legacy `/rpc`, plus `/openapi/public.json` and `/openapi/control.json`
+- `apps/api` now exposes public REST aliases for `sites`, `routeGroups`, `regionSets`, `checks`, `runs`, and `capabilities` while keeping the older `/v1/properties`, `/v1/route-sets`, `/v1/region-packs`, and `/v1/check-profiles` endpoints for compatibility
+- `apps/api` now exposes first-class public `comparisons`, `exports`, and `analyses` resources backed by persisted derived payloads
 - `apps/console` now proxies through merged split `app` and `ops` oRPC clients directly, replacing the hand-written control-plane façade while keeping SSE reconstruction and typed report export handling
 - console runtime config now centers on `CONTROL_BASE_URL` for self-hosted access instead of the older binding-oriented env surface
 - the console now leans into an operator-facing self-host workflow: manual run first, reusable checks second, region catalog third, with product copy using site/route group/region set/check terminology instead of implementation-heavy labels
@@ -81,19 +82,20 @@ Current repo state as of 2026-04-14:
 Current local dev entrypoints:
 - `bun run dev`
 - `bun run dev:console`
-- `bun run dev:control`
+- `bun run dev:api`
+- `bun run dev:scheduler`
 - `bun run dev:probe`
 
 Current local URLs:
 - console: `http://localhost:5173`
-- control: `http://127.0.0.1:8788`
+- api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
 
 ## Working Rules
 
 - keep the repo self-host coherent
 - avoid adding managed runtime assumptions into public packages
-- prefer extracting reusable logic into `packages/domain-core` or `packages/report-engine`
+- prefer extracting reusable logic into `packages/domain-core` or `packages/report-core`
 - keep setup simple enough for a small single-org deployment
 - keep public packages as the source of truth that cloud code consumes rather than forks
 - keep browser-audit extension points vendor-neutral and optional

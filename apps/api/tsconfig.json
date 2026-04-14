@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@webperf/contracts": ["../../packages/contracts/src/index.ts"],
+      "@webperf/domain-core": ["../../packages/domain-core/src/index.ts"],
+      "@webperf/config": ["../../packages/config/src/index.ts"],
+      "@webperf/report-core": ["../../packages/report-core/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

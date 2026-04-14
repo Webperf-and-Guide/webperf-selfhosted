@@ -13,6 +13,23 @@
         "typescript": "^5.9.3",
       },
     },
+    "apps/api": {
+      "name": "webperf-api",
+      "dependencies": {
+        "@orpc/openapi": "^1.13.14",
+        "@orpc/server": "^1.13.14",
+        "@webperf/config": "workspace:*",
+        "@webperf/contracts": "workspace:*",
+        "@webperf/domain-core": "workspace:*",
+        "@webperf/report-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@orpc/client": "^1.13.14",
+        "@orpc/contract": "^1.13.14",
+        "@types/bun": "^1.3.11",
+        "typescript": "^5.9.3",
+      },
+    },
     "apps/console": {
       "name": "webperf-console",
       "dependencies": {
@@ -20,10 +37,10 @@
         "@orpc/contract": "^1.13.14",
         "@sveltejs/adapter-node": "^5.3.1",
         "@tanstack/svelte-query": "^6.1.16",
+        "@webperf/config": "workspace:*",
         "@webperf/contracts": "workspace:*",
         "@webperf/domain-core": "workspace:*",
-        "@webperf/env-schema": "workspace:*",
-        "@webperf/report-engine": "workspace:*",
+        "@webperf/report-core": "workspace:*",
         "@webperf/ui": "workspace:*",
       },
       "devDependencies": {
@@ -39,20 +56,23 @@
         "wrangler": "^4.80.0",
       },
     },
-    "apps/control": {
-      "name": "webperf-control",
+    "apps/scheduler": {
+      "name": "webperf-scheduler",
       "dependencies": {
-        "@orpc/openapi": "^1.13.14",
-        "@orpc/server": "^1.13.14",
-        "@webperf/contracts": "workspace:*",
-        "@webperf/domain-core": "workspace:*",
-        "@webperf/env-schema": "workspace:*",
-        "@webperf/report-engine": "workspace:*",
+        "@webperf/config": "workspace:*",
       },
       "devDependencies": {
-        "@orpc/client": "^1.13.14",
-        "@orpc/contract": "^1.13.14",
         "@types/bun": "^1.3.11",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/config": {
+      "name": "@webperf/config",
+      "version": "0.1.0",
+      "dependencies": {
+        "zod": "^4.1.12",
+      },
+      "peerDependencies": {
         "typescript": "^5.9.3",
       },
     },
@@ -78,18 +98,8 @@
         "typescript": "^5.9.3",
       },
     },
-    "packages/env-schema": {
-      "name": "@webperf/env-schema",
-      "version": "0.1.0",
-      "dependencies": {
-        "zod": "^4.1.12",
-      },
-      "peerDependencies": {
-        "typescript": "^5.9.3",
-      },
-    },
-    "packages/report-engine": {
-      "name": "@webperf/report-engine",
+    "packages/report-core": {
+      "name": "@webperf/report-core",
       "version": "0.1.0",
       "dependencies": {
         "@webperf/contracts": "file:../contracts",
@@ -439,13 +449,13 @@
 
     "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
 
+    "@webperf/config": ["@webperf/config@workspace:packages/config"],
+
     "@webperf/contracts": ["@webperf/contracts@workspace:packages/contracts"],
 
     "@webperf/domain-core": ["@webperf/domain-core@workspace:packages/domain-core"],
 
-    "@webperf/env-schema": ["@webperf/env-schema@workspace:packages/env-schema"],
-
-    "@webperf/report-engine": ["@webperf/report-engine@workspace:packages/report-engine"],
+    "@webperf/report-core": ["@webperf/report-core@workspace:packages/report-core"],
 
     "@webperf/ui": ["@webperf/ui@workspace:packages/ui"],
 
@@ -479,7 +489,7 @@
 
     "concurrently": ["concurrently@9.2.1", "", { "dependencies": { "chalk": "4.1.2", "rxjs": "7.8.2", "shell-quote": "1.8.3", "supports-color": "8.1.1", "tree-kill": "1.2.2", "yargs": "17.7.2" }, "bin": { "conc": "dist/bin/concurrently.js", "concurrently": "dist/bin/concurrently.js" } }, "sha512-fsfrO0MxV64Znoy8/l1vVIjjHa29SZyyqPgQBwhiDcaW8wJc2W3XWVOGx4M3oJBnv/zdUZIIp1gDeS98GzP8Ng=="],
 
-    "cookie": ["cookie@0.6.0", "", {}, "sha512-U71cyTamuh1CRNCfpGY6to28lxvNwPG4Guz/EVjgf3Jmzv0vlDp1atT9eS5dDjMYHucpHbWns6Lwf3BKz6svdw=="],
+    "cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
 
     "cross-fetch": ["cross-fetch@4.1.0", "", { "dependencies": { "node-fetch": "^2.7.0" } }, "sha512-uKm5PU+MHTootlWEY+mZ4vvXoCn4fLQxT9dSc1sXVMSFkINTJVN8cAQROpwcKm8bJ/c7rgZVIBWzH5T78sNZZw=="],
 
@@ -685,9 +695,11 @@
 
     "webidl-conversions": ["webidl-conversions@3.0.1", "", {}, "sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ=="],
 
+    "webperf-api": ["webperf-api@workspace:apps/api"],
+
     "webperf-console": ["webperf-console@workspace:apps/console"],
 
-    "webperf-control": ["webperf-control@workspace:apps/control"],
+    "webperf-scheduler": ["webperf-scheduler@workspace:apps/scheduler"],
 
     "whatwg-url": ["whatwg-url@5.0.0", "", { "dependencies": { "tr46": "~0.0.3", "webidl-conversions": "^3.0.0" } }, "sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw=="],
 
@@ -717,15 +729,15 @@
 
     "@cspotcode/source-map-support/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
 
-    "@orpc/server/cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
-
     "@poppinss/dumper/supports-color": ["supports-color@10.2.2", "", {}, "sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g=="],
 
     "@rollup/plugin-commonjs/is-reference": ["is-reference@1.2.1", "", { "dependencies": { "@types/estree": "*" } }, "sha512-U82MsXXiFIrjCK4otLT+o2NA2Cd2g5MLoOVXUZjIOhLurrRxpEXzI8O0KZHr3IjLvlAH1kTPYSuqer5T9ZVBKQ=="],
 
+    "@sveltejs/kit/cookie": ["cookie@0.6.0", "", {}, "sha512-U71cyTamuh1CRNCfpGY6to28lxvNwPG4Guz/EVjgf3Jmzv0vlDp1atT9eS5dDjMYHucpHbWns6Lwf3BKz6svdw=="],
+
     "@webperf/domain-core/@webperf/contracts": ["@webperf/contracts@file:packages/contracts", { "dependencies": { "@orpc/contract": "^1.13.14", "zod": "^4.1.12" }, "peerDependencies": { "typescript": "^5.9.3" } }],
 
-    "@webperf/report-engine/@webperf/contracts": ["@webperf/contracts@file:packages/contracts", { "dependencies": { "@orpc/contract": "^1.13.14", "zod": "^4.1.12" }, "peerDependencies": { "typescript": "^5.9.3" } }],
+    "@webperf/report-core/@webperf/contracts": ["@webperf/contracts@file:packages/contracts", { "dependencies": { "@orpc/contract": "^1.13.14", "zod": "^4.1.12" }, "peerDependencies": { "typescript": "^5.9.3" } }],
 
     "chalk/supports-color": ["supports-color@7.2.0", "", { "dependencies": { "has-flag": "^4.0.0" } }, "sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw=="],
 
@@ -739,13 +751,13 @@
 
     "vite/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
+    "webperf-api/@webperf/contracts": ["@webperf/contracts@file:packages/contracts", { "dependencies": { "@orpc/contract": "^1.13.14", "zod": "^4.1.12" }, "peerDependencies": { "typescript": "^5.9.3" } }],
+
     "webperf-console/@webperf/contracts": ["@webperf/contracts@file:packages/contracts", { "dependencies": { "@orpc/contract": "^1.13.14", "zod": "^4.1.12" }, "peerDependencies": { "typescript": "^5.9.3" } }],
 
     "wrangler/esbuild": ["esbuild@0.27.3", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.27.3", "@esbuild/android-arm": "0.27.3", "@esbuild/android-arm64": "0.27.3", "@esbuild/android-x64": "0.27.3", "@esbuild/darwin-arm64": "0.27.3", "@esbuild/darwin-x64": "0.27.3", "@esbuild/freebsd-arm64": "0.27.3", "@esbuild/freebsd-x64": "0.27.3", "@esbuild/linux-arm": "0.27.3", "@esbuild/linux-arm64": "0.27.3", "@esbuild/linux-ia32": "0.27.3", "@esbuild/linux-loong64": "0.27.3", "@esbuild/linux-mips64el": "0.27.3", "@esbuild/linux-ppc64": "0.27.3", "@esbuild/linux-riscv64": "0.27.3", "@esbuild/linux-s390x": "0.27.3", "@esbuild/linux-x64": "0.27.3", "@esbuild/netbsd-arm64": "0.27.3", "@esbuild/netbsd-x64": "0.27.3", "@esbuild/openbsd-arm64": "0.27.3", "@esbuild/openbsd-x64": "0.27.3", "@esbuild/openharmony-arm64": "0.27.3", "@esbuild/sunos-x64": "0.27.3", "@esbuild/win32-arm64": "0.27.3", "@esbuild/win32-ia32": "0.27.3", "@esbuild/win32-x64": "0.27.3" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-8VwMnyGCONIs6cWue2IdpHxHnAjzxnw2Zr7MkVxB2vjmQ2ivqGFb4LEG3SMnv0Gb2F/G/2yA8zUaiL1gywDCCg=="],
 
     "wrangler/fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
-
-    "youch/cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
 
     "wrangler/esbuild/@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.3", "", { "os": "aix", "cpu": "ppc64" }, "sha512-9fJMTNFTWZMh5qwrBItuziu834eOCUcEqymSH7pY+zoMVEZg3gcPuBNxH1EvfVYe9h0x/Ptw8KBzv7qxb7l8dg=="],
 

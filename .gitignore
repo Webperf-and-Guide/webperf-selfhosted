@@ -14,5 +14,5 @@ coverage
 apps/probe-go/bin
 apps/probe-rs/target
 apps/console/build
-apps/selfhost-control/data
+apps/api/data
 output

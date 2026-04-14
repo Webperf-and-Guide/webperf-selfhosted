@@ -4,14 +4,17 @@ default:
 dev-console:
   bash tooling/scripts/dev-console.sh
 
-dev-control:
-  bun run --cwd apps/control dev
+dev-api:
+  bun run --cwd apps/api dev
+
+dev-scheduler:
+  bun run --cwd apps/scheduler dev
 
 dev:
   bun run dev
 
 compose-config:
-  docker compose -f infra/compose/docker-compose.yml config >/dev/null
+  docker compose -f infra/docker-compose/docker-compose.yml config >/dev/null
 
 dev-probe:
   cargo run -p probe-server --manifest-path apps/probe-rs/Cargo.toml

@@ -3,7 +3,7 @@ import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
 import type { ExportResource, JobSnapshotEvent, ListQuery } from '@webperf/contracts';
 import { appContract, opsContract } from '@webperf/contracts';
-import { parseWebEnv } from '@webperf/env-schema/public';
+import { parseWebEnv } from '@webperf/config/public';
 import { env as privateEnv } from '$env/dynamic/private';
 
 type Platform = App.Platform | undefined;

@@ -1769,6 +1769,7 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
       request: requestConfig,
       monitorPolicy,
       alerts,
+      browserAuditPolicy: existing?.browserAuditPolicy ?? null,
       schedule: buildProfileSchedule(existing, parsed.data.scheduleIntervalMinutes, now),
       baseline: resolveUpdatedProfileBaseline(existing, routeSet.id, regionPack.id),
       createdAt: existing?.createdAt ?? now,
@@ -2374,13 +2375,15 @@ function createCheckProfileRunRecord(
     trigger,
     createdAt: new Date().toISOString(),
     routeCount: createdJobs.length,
+    browserAuditSummary: null,
     evaluation: null,
     alertDeliveries: [],
     routes: createdJobs.map((item) => ({
       routeId: item.routeId,
       routeLabel: item.routeLabel,
       url: item.url,
-      jobId: item.job.id
+      jobId: item.job.id,
+      browserAudit: null
     }))
   };
 

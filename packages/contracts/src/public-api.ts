@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  browserAuditExecutionSummarySchema,
+  browserAuditPolicySchema,
+  browserAuditRunSummarySchema
+} from './browser-audit';
 import { probeImplementationSchema, probeMeasurementSchema } from './probe-model';
 import { regionCodes, regionCodeSchema } from './regions';
 
@@ -306,6 +311,7 @@ export const checkProfileSchema = z.object({
   request: customRequestConfigSchema.optional(),
   monitorPolicy: monitorPolicySchema.optional(),
   alerts: checkProfileAlertConfigSchema.optional(),
+  browserAuditPolicy: browserAuditPolicySchema.nullable().default(null),
   schedule: checkProfileScheduleSchema.nullable(),
   baseline: checkProfileBaselineSchema.nullable().default(null),
   createdAt: z.string().datetime(),
@@ -322,6 +328,7 @@ export const createCheckProfileSchema = z.object({
   request: customRequestConfigSchema.optional(),
   monitorPolicy: monitorPolicySchema.optional(),
   alerts: createCheckProfileAlertConfigSchema.optional(),
+  browserAuditPolicy: browserAuditPolicySchema.optional(),
   scheduleIntervalMinutes: z.number().int().min(5).optional()
 });
 export type CreateCheckProfileInput = z.infer<typeof createCheckProfileSchema>;
@@ -353,7 +360,8 @@ export const checkProfileRunRouteSchema = z.object({
   routeId: z.string().min(1),
   routeLabel: z.string().min(1).max(120),
   url: z.string().url(),
-  jobId: z.string().min(1)
+  jobId: z.string().min(1),
+  browserAudit: browserAuditExecutionSummarySchema.nullable().default(null)
 });
 export type CheckProfileRunRoute = z.infer<typeof checkProfileRunRouteSchema>;
 
@@ -364,6 +372,7 @@ export const checkProfileRunSchema = z.object({
   createdAt: z.string().datetime(),
   routeCount: z.number().int().positive(),
   routes: z.array(checkProfileRunRouteSchema).min(1),
+  browserAuditSummary: browserAuditRunSummarySchema.nullable().default(null),
   evaluation: monitorEvaluationSchema.nullable().default(null),
   alertDeliveries: z.array(checkProfileAlertDeliverySchema).default([])
 });

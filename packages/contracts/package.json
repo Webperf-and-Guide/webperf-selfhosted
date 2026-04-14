@@ -43,6 +43,10 @@
       "types": "./src/probe-api.ts",
       "import": "./src/probe-api.ts"
     },
+    "./browser-audit": {
+      "types": "./src/browser-audit.ts",
+      "import": "./src/browser-audit.ts"
+    },
     "./events": {
       "types": "./src/events.ts",
       "import": "./src/events.ts"

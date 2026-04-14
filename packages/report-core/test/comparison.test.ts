@@ -110,6 +110,7 @@ const createRun = (id: string, jobId: string): CheckProfileRun => ({
   trigger: 'manual',
   createdAt: '2026-04-09T00:00:00.000Z',
   routeCount: 1,
+  browserAuditSummary: null,
   evaluation: null,
   alertDeliveries: [],
   routes: [
@@ -117,7 +118,8 @@ const createRun = (id: string, jobId: string): CheckProfileRun => ({
       routeId: 'route_home',
       routeLabel: 'Homepage',
       url: 'https://example.com',
-      jobId
+      jobId,
+      browserAudit: null
     }
   ]
 });

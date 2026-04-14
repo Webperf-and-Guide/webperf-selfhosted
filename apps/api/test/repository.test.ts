@@ -179,6 +179,7 @@ const createCheckProfile = (overrides: Partial<CheckProfile> = {}): CheckProfile
       onRegression: false
     }
   },
+  browserAuditPolicy: null,
   schedule: null,
   baseline: null,
   createdAt: '2026-04-08T00:00:00.000Z',
@@ -192,6 +193,7 @@ const createCheckProfileRun = (overrides: Partial<CheckProfileRun> = {}): CheckP
   trigger: 'manual',
   createdAt: '2026-04-08T00:05:00.000Z',
   routeCount: 1,
+  browserAuditSummary: null,
   evaluation: null,
   alertDeliveries: [],
   routes: [
@@ -199,7 +201,8 @@ const createCheckProfileRun = (overrides: Partial<CheckProfileRun> = {}): CheckP
       routeId: 'route_home',
       routeLabel: 'Homepage',
       url: 'https://example.com',
-      jobId: 'job_test'
+      jobId: 'job_test',
+      browserAudit: null
     }
   ],
   ...overrides

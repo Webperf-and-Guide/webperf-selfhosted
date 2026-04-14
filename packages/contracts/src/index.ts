@@ -1,5 +1,6 @@
 export * from './regions';
 export * from './probe-model';
+export * from './browser-audit';
 export * from './public-api';
 export * from './public-contract';
 export * from './app-contract';

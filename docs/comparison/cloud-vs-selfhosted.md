@@ -66,6 +66,7 @@ That applies to:
 - `@webperf/domain-core`
 - `@webperf/report-core`
 - `@webperf/config`
+- browser-audit flow DSL, result, artifact, and worker request-response schemas
 - other future public-safe adapters or schema packages
 
 `webperf.and.guide` should consume those artifacts through versioned dependencies or local development links, not copied source trees.

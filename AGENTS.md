@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
 
 ## Mission
 
@@ -63,7 +63,7 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-04-14:
+Current repo state as of 2026-04-15:
 - the console, API service, scheduler, and Rust probe run together locally
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
 - local compose packaging lives under `infra/docker-compose`
@@ -78,6 +78,8 @@ Current repo state as of 2026-04-14:
 - console runtime config now centers on `CONTROL_BASE_URL` for self-hosted access instead of the older binding-oriented env surface
 - the console now leans into an operator-facing self-host workflow: manual run first, reusable checks second, region catalog third, with product copy using site/route group/region set/check terminology instead of implementation-heavy labels
 - docs now explicitly treat this repo as the public source of truth for self-hosted contracts, schemas, and deterministic reporting behavior
+- `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
+- self-hosted runtime still does not own a managed browser-audit executor; browser-audit container orchestration remains cloud-only even though the contracts live here
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -109,6 +111,7 @@ Current local URLs:
 4. decide how package publishing should work once the repo is public
 5. decide whether public comparison/export resources should get richer server-side pagination and filtering
 6. keep tightening the console around operator workflows and reduce any remaining marketing-style presentation drift
+7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 
 ## Update Protocol
 

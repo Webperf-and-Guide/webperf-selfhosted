@@ -74,6 +74,7 @@ describe('monitor evaluation', () => {
             onRegression: false
           }
         },
+        browserAuditPolicy: null,
         schedule: null,
         baseline: null,
         createdAt: '2026-04-12T00:00:00.000Z',

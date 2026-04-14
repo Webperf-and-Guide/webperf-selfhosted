@@ -11,7 +11,8 @@ export const brandPalette = {
 
 export const shellLinks = [
   { href: '#measure', label: 'Measure' },
-  { href: '#regions', label: 'Regions' },
   { href: '#results', label: 'Results' },
+  { href: '#saved-checks', label: 'Checks' },
+  { href: '#regions', label: 'Regions' },
   { href: '/api/control/health', label: 'Control Health' }
 ] as const;

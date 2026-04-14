@@ -1,1 +1,1 @@
-export const appTitle = 'Latency Atlas Console';
+export const appTitle = 'WebPerf Console';

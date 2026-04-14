@@ -360,10 +360,10 @@
     value ? new Date(value).toLocaleString() : 'n/a';
   const formatSchedule = (minutes: number | null | undefined) =>
     minutes == null ? 'manual only' : `every ${minutes} min`;
-  const getPropertyName = (profile: CheckProfile) => propertyById.get(profile.propertyId)?.name ?? 'Unknown property';
-  const getRouteSetName = (profile: CheckProfile) => routeSetById.get(profile.routeSetId)?.name ?? 'Unknown route set';
+  const getPropertyName = (profile: CheckProfile) => propertyById.get(profile.propertyId)?.name ?? 'Unknown site';
+  const getRouteSetName = (profile: CheckProfile) => routeSetById.get(profile.routeSetId)?.name ?? 'Unknown route group';
   const getRegionPackName = (profile: CheckProfile) =>
-    regionPackById.get(profile.regionPackId)?.name ?? 'Unknown region pack';
+    regionPackById.get(profile.regionPackId)?.name ?? 'Unknown region set';
   const getProfileMeta = (profileId: string) => profileMetaById.get(profileId) ?? null;
   const getLatestComparison = (profileId: string): CheckProfileLatestComparisonResponse | null =>
     getProfileMeta(profileId)?.latestComparison ?? null;
@@ -377,6 +377,18 @@
   const activeRegionOptions = $derived.by(() =>
     regions.filter((region: RegionAvailability) => region.selectable)
   );
+  const controlModeLabel = $derived.by(() =>
+    savedChecks ? 'Persistent self-host mode' : 'Live-check mode'
+  );
+  const controlModeDetail = $derived.by(() =>
+    savedChecks
+      ? 'Sites, saved checks, diffs, exports, and scheduler dispatch are available.'
+      : 'Manual checks are available while saved resources stay offline.'
+  );
+  const activeRegionPreview = $derived.by(() => {
+    const labels = activeRegionOptions.slice(0, 4).map((region: RegionAvailability) => region.label);
+    return labels.length > 0 ? labels.join(' · ') : 'No active regions';
+  });
   const isConfigBusy = (prefix: string) => savingConfigKind?.startsWith(prefix) ?? false;
 
   const resetPropertyForm = () => {
@@ -523,14 +535,14 @@
       };
 
       if (!response.ok) {
-        profileActionError = payload.error ?? 'Failed to run the saved check profile.';
+        profileActionError = payload.error ?? 'Failed to run the saved check.';
         return;
       }
 
       profileActionMessage = `Triggered ${payload.jobs?.length ?? 0} route checks for ${profileId}.`;
       await refreshControlData();
     } catch (error) {
-      profileActionError = error instanceof Error ? error.message : 'Failed to run the saved check profile.';
+      profileActionError = error instanceof Error ? error.message : 'Failed to run the saved check.';
     } finally {
       runningProfileId = null;
     }
@@ -611,7 +623,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? `Failed to ${editingPropertyId ? 'update' : 'create'} property.`);
+        throw new Error(payload.error ?? `Failed to ${editingPropertyId ? 'update' : 'create'} site.`);
       }
 
       const actionLabel = editingPropertyId ? 'updated' : 'created';
@@ -639,7 +651,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? `Failed to ${editingRouteSetId ? 'update' : 'create'} route set.`);
+        throw new Error(payload.error ?? `Failed to ${editingRouteSetId ? 'update' : 'create'} route group.`);
       }
 
       const actionLabel = editingRouteSetId ? 'updated' : 'created';
@@ -668,7 +680,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? `Failed to ${editingRegionPackId ? 'update' : 'create'} region pack.`);
+        throw new Error(payload.error ?? `Failed to ${editingRegionPackId ? 'update' : 'create'} region set.`);
       }
 
       const actionLabel = editingRegionPackId ? 'updated' : 'created';
@@ -724,7 +736,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? `Failed to ${editingProfileId ? 'update' : 'create'} check profile.`);
+        throw new Error(payload.error ?? `Failed to ${editingProfileId ? 'update' : 'create'} saved check.`);
       }
 
       const actionLabel = editingProfileId ? 'updated' : 'created';
@@ -734,7 +746,7 @@
   };
 
   const deleteProperty = async (propertyId: string) => {
-    if (!confirm('Delete this property? Route sets and profiles must already be removed.')) {
+    if (!confirm('Delete this site? Route groups and saved checks must already be removed.')) {
       return;
     }
 
@@ -749,7 +761,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Failed to delete property.');
+        throw new Error(payload.error ?? 'Failed to delete site.');
       }
 
       resetPropertyForm();
@@ -758,7 +770,7 @@
   };
 
   const deleteRouteSet = async (routeSetId: string) => {
-    if (!confirm('Delete this route set? Check profiles that use it must already be removed or reassigned.')) {
+    if (!confirm('Delete this route group? Saved checks that use it must already be removed or reassigned.')) {
       return;
     }
 
@@ -773,7 +785,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Failed to delete route set.');
+        throw new Error(payload.error ?? 'Failed to delete route group.');
       }
 
       resetRouteSetForm();
@@ -782,7 +794,7 @@
   };
 
   const deleteRegionPack = async (regionPackId: string) => {
-    if (!confirm('Delete this region pack? Check profiles that use it must already be removed or reassigned.')) {
+    if (!confirm('Delete this region set? Saved checks that use it must already be removed or reassigned.')) {
       return;
     }
 
@@ -797,7 +809,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Failed to delete region pack.');
+        throw new Error(payload.error ?? 'Failed to delete region set.');
       }
 
       resetRegionPackForm();
@@ -806,7 +818,7 @@
   };
 
   const deleteCheckProfile = async (profileId: string) => {
-    if (!confirm('Delete this check profile and its recorded run links?')) {
+    if (!confirm('Delete this saved check and its recorded run links?')) {
       return;
     }
 
@@ -821,7 +833,7 @@
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? 'Failed to delete check profile.');
+        throw new Error(payload.error ?? 'Failed to delete saved check.');
       }
 
       resetProfileForm();
@@ -836,7 +848,7 @@
     }
 
     if (regionPackCodes.length >= maxSelectableRegions) {
-      configActionError = `A region pack can include up to ${maxSelectableRegions} active regions right now.`;
+      configActionError = `A region set can include up to ${maxSelectableRegions} active regions right now.`;
       return;
     }
 
@@ -868,7 +880,7 @@
       .filter(Boolean);
 
     if (lines.length === 0) {
-      throw new Error('Enter at least one route in the route set.');
+      throw new Error('Enter at least one route in the route group.');
     }
 
     return lines.map((line, index) => {
@@ -1040,31 +1052,43 @@
 
 <section class="hero" id="measure">
   <div class="hero-copy">
-    <p class="eyebrow">Pages UI, Worker control plane, Bunny slot pool</p>
-    <h1>Measure from four hot regions now, grow to forty-one without changing the product shape.</h1>
+    <p class="eyebrow">Self-host operator console</p>
+    <h1>Run a check now, then turn it into a reusable release gate.</h1>
     <p class="lede">
-      The public app stays simple: enter a site, pick up to four active regions, and stream the
-      control plane as it allocates a Bunny slot, deploys the probe, measures, and cools down
-      again.
+      This is the working surface for one self-hosted WebPerf deployment: launch a manual
+      verification, inspect the live control-plane stream, then save repeatable checks with route
+      groups, region sets, baselines, schedules, and exports.
     </p>
 
     <div class="hero-metrics">
       <div>
-        <span>Catalog</span>
-        <strong>{regions.length} Bunny regions</strong>
+        <span>Control plane</span>
+        <strong>{controlModeLabel}</strong>
+        <small>{controlModeDetail}</small>
       </div>
       <div>
-        <span>Active today</span>
-        <strong>{selectableCount} selectable</strong>
+        <span>Active regions</span>
+        <strong>{selectableCount} active / {regions.length} modeled</strong>
+        <small>{activeRegionPreview}</small>
       </div>
       <div>
-        <span>Per run</span>
-        <strong>{maxSelectableRegions} regions max</strong>
+        <span>Saved checks</span>
+        <strong>{savedChecks ? `${checkProfiles.length} reusable checks` : 'Manual runs only'}</strong>
+        <small>{savedChecks ? 'Promote stable runs into schedules, baselines, and exports.' : 'Connect the full self-host control service to unlock persistent resources.'}</small>
       </div>
     </div>
   </div>
 
   <form class="control-card" onsubmit={submitJob}>
+    <div class="card-intro">
+      <p class="eyebrow">Manual run</p>
+      <h2>Launch a one-off verification</h2>
+      <p class="card-copy">
+        Use this for deploy smoke checks and incident verification, then save the setup as a
+        reusable check if it belongs in the long-term release workflow.
+      </p>
+    </div>
+
     <label class="field">
       <span>Site URL</span>
       <input bind:value={targetUrl} name="url" type="url" placeholder="https://example.com" />
@@ -1073,42 +1097,6 @@
     <label class="field">
       <span>Run note</span>
       <input bind:value={note} name="note" maxlength="200" placeholder="release canary, home page, pricing flow..." />
-    </label>
-
-    <label class="field">
-      <span>Request method</span>
-      <select bind:value={requestMethod}>
-        <option value="GET">GET</option>
-        <option value="HEAD">HEAD</option>
-        <option value="POST">POST</option>
-        <option value="PUT">PUT</option>
-        <option value="PATCH">PATCH</option>
-        <option value="DELETE">DELETE</option>
-        <option value="OPTIONS">OPTIONS</option>
-      </select>
-    </label>
-
-    <label class="field">
-      <span>Custom headers</span>
-      <textarea
-        bind:value={requestHeadersText}
-        rows="3"
-        placeholder="Authorization: Bearer sample-token&#10;X-Env: staging"
-      ></textarea>
-    </label>
-
-    <label class="field">
-      <span>Request body</span>
-      <textarea
-        bind:value={requestBody}
-        rows="3"
-        placeholder="&#123;&quot;release&quot;:&quot;2026.04.12&quot;&#125;"
-      ></textarea>
-    </label>
-
-    <label class="field">
-      <span>Body content type</span>
-      <input bind:value={requestContentType} placeholder="application/json" />
     </label>
 
     <label class="field">
@@ -1128,6 +1116,48 @@
       <span>Selected regions</span>
       <strong>{selectedRegions.length} / {maxSelectableRegions}</strong>
     </div>
+
+    <details class="advanced-panel">
+      <summary>Advanced request overrides</summary>
+
+      <div class="advanced-grid">
+        <label class="field">
+          <span>Request method</span>
+          <select bind:value={requestMethod}>
+            <option value="GET">GET</option>
+            <option value="HEAD">HEAD</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="DELETE">DELETE</option>
+            <option value="OPTIONS">OPTIONS</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Custom headers</span>
+          <textarea
+            bind:value={requestHeadersText}
+            rows="3"
+            placeholder="Authorization: Bearer sample-token&#10;X-Env: staging"
+          ></textarea>
+        </label>
+
+        <label class="field">
+          <span>Request body</span>
+          <textarea
+            bind:value={requestBody}
+            rows="3"
+            placeholder="&#123;&quot;release&quot;:&quot;2026.04.12&quot;&#125;"
+          ></textarea>
+        </label>
+
+        <label class="field">
+          <span>Body content type</span>
+          <input bind:value={requestContentType} placeholder="application/json" />
+        </label>
+      </div>
+    </details>
 
     {#if turnstileSiteKey}
       <div class="turnstile-shell">
@@ -1151,42 +1181,10 @@
   </form>
 </section>
 
-<section class="regions-section" id="regions">
-  <div class="section-heading">
-    <p class="eyebrow">Region catalog</p>
-    <h2>Forty-one cities are modeled now, even though only the launch corridor is active.</h2>
-  </div>
-
-  <div class="continents">
-    {#each groupedRegions as group (group.continent)}
-      <article class="continent-card">
-        <header>
-          <h3>{group.continent}</h3>
-          <small>{group.regions.length} regions</small>
-        </header>
-
-        <div class="region-list">
-          {#each group.regions as region (region.code)}
-            <button
-              class:selected={selectedRegions.includes(region.code)}
-              class:disabled={!region.selectable}
-              type="button"
-              onclick={() => toggleRegion(region)}
-            >
-              <strong>{region.label}</strong>
-              <span>{region.launchStage === 'core' ? 'launch active' : 'catalog only'}</span>
-            </button>
-          {/each}
-        </div>
-      </article>
-    {/each}
-  </div>
-</section>
-
 <section class="results-section" id="results">
   <div class="section-heading">
-    <p class="eyebrow">Run output</p>
-    <h2>Job snapshots stream back from the Worker as each regional target advances.</h2>
+    <p class="eyebrow">Live run state</p>
+    <h2>Watch the current verification stream back from the control plane.</h2>
   </div>
 
   {#if job}
@@ -1305,26 +1303,49 @@
     </div>
   {:else}
     <div class="empty-state">
-      <p>No measurement is running yet.</p>
-      <small>The control plane snapshot will appear here as soon as you submit a site URL.</small>
+      <p>No verification is running yet.</p>
+      <small>Start a manual run above and the control-plane stream will appear here immediately.</small>
     </div>
   {/if}
 </section>
 
 <section class="saved-section" id="saved-checks">
   <div class="section-heading">
-    <p class="eyebrow">Saved checks</p>
-    <h2>Self-host backends can keep reusable profiles, route sets, and latest-vs-previous diffs.</h2>
+    <p class="eyebrow">Reusable checks</p>
+    <h2>Save operator-ready checks, schedules, baselines, and exports.</h2>
   </div>
 
   {#if savedChecks}
+    <div class="saved-summary setup-flow">
+      <div>
+        <span>1. Site</span>
+        <strong>Define the deployment root</strong>
+        <small>Store the base URL once so route groups and checks can reference it.</small>
+      </div>
+      <div>
+        <span>2. Route group</span>
+        <strong>Bundle the release-critical URLs</strong>
+        <small>Keep homepage, pricing, auth, or SEO-sensitive routes together.</small>
+      </div>
+      <div>
+        <span>3. Region set</span>
+        <strong>Choose the active corridor</strong>
+        <small>Pin the launch regions you want each reusable check to cover.</small>
+      </div>
+      <div>
+        <span>4. Saved check</span>
+        <strong>Schedule, run, diff, and export</strong>
+        <small>Promote stable manual runs into baseline-aware release gates.</small>
+      </div>
+    </div>
+
     <div class="builder-grid">
       <form class="builder-card" onsubmit={submitProperty}>
-        <h3>{editingPropertyId ? 'Edit property' : 'Create property'}</h3>
+        <h3>{editingPropertyId ? 'Edit site' : 'Create site'}</h3>
         <label class="field">
-          <span>Existing</span>
+          <span>Existing site</span>
           <select bind:value={editingPropertyId} onchange={(event) => loadPropertyEditor((event.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Create new property</option>
+            <option value="">Create new site</option>
             {#each properties as property (property.id)}
               <option value={property.id}>{property.name}</option>
             {/each}
@@ -1340,7 +1361,7 @@
         </label>
         <div class="builder-actions">
           <button class="secondary-button" disabled={isConfigBusy('property')}>
-            {#if isConfigBusy('property')}{editingPropertyId ? 'Updating...' : 'Saving...'}{:else}{editingPropertyId ? 'Update property' : 'Save property'}{/if}
+            {#if isConfigBusy('property')}{editingPropertyId ? 'Updating...' : 'Saving...'}{:else}{editingPropertyId ? 'Update site' : 'Save site'}{/if}
           </button>
           {#if editingPropertyId}
             <button class="ghost-button" type="button" onclick={resetPropertyForm} disabled={isConfigBusy('property')}>Cancel</button>
@@ -1350,22 +1371,22 @@
       </form>
 
       <form class="builder-card" onsubmit={submitRouteSet}>
-        <h3>{editingRouteSetId ? 'Edit route set' : 'Create route set'}</h3>
+        <h3>{editingRouteSetId ? 'Edit route group' : 'Create route group'}</h3>
         <label class="field">
-          <span>Existing</span>
+          <span>Existing route group</span>
           <select bind:value={editingRouteSetId} onchange={(event) => loadRouteSetEditor((event.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Create new route set</option>
+            <option value="">Create new route group</option>
             {#each routeSets as routeSet (routeSet.id)}
               <option value={routeSet.id}>
-                {routeSet.name} · {propertyById.get(routeSet.propertyId)?.name ?? 'Unknown property'}
+                {routeSet.name} · {propertyById.get(routeSet.propertyId)?.name ?? 'Unknown site'}
               </option>
             {/each}
           </select>
         </label>
         <label class="field">
-          <span>Property</span>
+          <span>Site</span>
           <select bind:value={routeSetPropertyId}>
-            <option value="">Select property</option>
+            <option value="">Select site</option>
             {#each properties as property (property.id)}
               <option value={property.id}>{property.name}</option>
             {/each}
@@ -1385,7 +1406,7 @@
         </label>
         <div class="builder-actions">
           <button class="secondary-button" disabled={isConfigBusy('route-set')}>
-            {#if isConfigBusy('route-set')}{editingRouteSetId ? 'Updating...' : 'Saving...'}{:else}{editingRouteSetId ? 'Update route set' : 'Save route set'}{/if}
+            {#if isConfigBusy('route-set')}{editingRouteSetId ? 'Updating...' : 'Saving...'}{:else}{editingRouteSetId ? 'Update route group' : 'Save route group'}{/if}
           </button>
           {#if editingRouteSetId}
             <button class="ghost-button" type="button" onclick={resetRouteSetForm} disabled={isConfigBusy('route-set')}>Cancel</button>
@@ -1395,11 +1416,11 @@
       </form>
 
       <form class="builder-card" onsubmit={submitRegionPack}>
-        <h3>{editingRegionPackId ? 'Edit region pack' : 'Create region pack'}</h3>
+        <h3>{editingRegionPackId ? 'Edit region set' : 'Create region set'}</h3>
         <label class="field">
-          <span>Existing</span>
+          <span>Existing region set</span>
           <select bind:value={editingRegionPackId} onchange={(event) => loadRegionPackEditor((event.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Create new region pack</option>
+            <option value="">Create new region set</option>
             {#each regionPacks as regionPack (regionPack.id)}
               <option value={regionPack.id}>{regionPack.name}</option>
             {/each}
@@ -1426,7 +1447,7 @@
         </div>
         <div class="builder-actions">
           <button class="secondary-button" disabled={isConfigBusy('region-pack')}>
-            {#if isConfigBusy('region-pack')}{editingRegionPackId ? 'Updating...' : 'Saving...'}{:else}{editingRegionPackId ? 'Update region pack' : 'Save region pack'}{/if}
+            {#if isConfigBusy('region-pack')}{editingRegionPackId ? 'Updating...' : 'Saving...'}{:else}{editingRegionPackId ? 'Update region set' : 'Save region set'}{/if}
           </button>
           {#if editingRegionPackId}
             <button class="ghost-button" type="button" onclick={resetRegionPackForm} disabled={isConfigBusy('region-pack')}>Cancel</button>
@@ -1436,38 +1457,38 @@
       </form>
 
       <form class="builder-card" onsubmit={submitCheckProfile}>
-        <h3>{editingProfileId ? 'Edit check profile' : 'Create check profile'}</h3>
+        <h3>{editingProfileId ? 'Edit saved check' : 'Create saved check'}</h3>
         <label class="field">
-          <span>Existing</span>
+          <span>Existing check</span>
           <select bind:value={editingProfileId} onchange={(event) => loadProfileEditor((event.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Create new check profile</option>
+            <option value="">Create new saved check</option>
             {#each checkProfiles as profile (profile.id)}
               <option value={profile.id}>{profile.name}</option>
             {/each}
           </select>
         </label>
         <label class="field">
-          <span>Property</span>
+          <span>Site</span>
           <select bind:value={profilePropertyId}>
-            <option value="">Select property</option>
+            <option value="">Select site</option>
             {#each properties as property (property.id)}
               <option value={property.id}>{property.name}</option>
             {/each}
           </select>
         </label>
         <label class="field">
-          <span>Route set</span>
+          <span>Route group</span>
           <select bind:value={profileRouteSetId}>
-            <option value="">Select route set</option>
+            <option value="">Select route group</option>
             {#each routeSets as routeSet (routeSet.id)}
               <option value={routeSet.id}>{routeSet.name}</option>
             {/each}
           </select>
         </label>
         <label class="field">
-          <span>Region pack</span>
+          <span>Region set</span>
           <select bind:value={profileRegionPackId}>
-            <option value="">Select region pack</option>
+            <option value="">Select region set</option>
             {#each regionPacks as regionPack (regionPack.id)}
               <option value={regionPack.id}>{regionPack.name}</option>
             {/each}
@@ -1559,7 +1580,7 @@
         </label>
         <div class="builder-actions">
           <button class="secondary-button" disabled={isConfigBusy('check-profile')}>
-            {#if isConfigBusy('check-profile')}{editingProfileId ? 'Updating...' : 'Saving...'}{:else}{editingProfileId ? 'Update check profile' : 'Save check profile'}{/if}
+            {#if isConfigBusy('check-profile')}{editingProfileId ? 'Updating...' : 'Saving...'}{:else}{editingProfileId ? 'Update saved check' : 'Save saved check'}{/if}
           </button>
           {#if editingProfileId}
             <button class="ghost-button" type="button" onclick={resetProfileForm} disabled={isConfigBusy('check-profile')}>Cancel</button>
@@ -1579,19 +1600,19 @@
 
     <div class="saved-summary">
       <div>
-        <span>Properties</span>
+        <span>Sites</span>
         <strong>{properties.length}</strong>
       </div>
       <div>
-        <span>Route sets</span>
+        <span>Route groups</span>
         <strong>{routeSets.length}</strong>
       </div>
       <div>
-        <span>Region packs</span>
+        <span>Region sets</span>
         <strong>{regionPacks.length}</strong>
       </div>
       <div>
-        <span>Profiles</span>
+        <span>Saved checks</span>
         <strong>{checkProfiles.length}</strong>
       </div>
     </div>
@@ -1610,7 +1631,7 @@
       <div class="list-toolbar">
         <label class="field grow">
           <span>Browse saved checks</span>
-          <input bind:value={checkProfileFilterDraft} placeholder="name, note, property, route set" />
+          <input bind:value={checkProfileFilterDraft} placeholder="check name, note, site, route group" />
         </label>
         <label class="field inline-field">
           <span>Page size</span>
@@ -1663,7 +1684,7 @@
                   Delete
                 </button>
                 <button class="secondary-button" disabled={runningProfileId === profile.id} onclick={() => runCheckProfile(profile.id)}>
-                  {#if runningProfileId === profile.id}Running...{:else}Run profile{/if}
+                  {#if runningProfileId === profile.id}Running...{:else}Run check{/if}
                 </button>
               </div>
             </div>
@@ -1920,16 +1941,48 @@
       </div>
     {:else}
       <div class="empty-state">
-        <p>No saved check profiles yet.</p>
-        <small>Create them from the builders above, then run them manually or through the scheduler endpoint.</small>
+        <p>No saved checks yet.</p>
+        <small>Create a site, route group, region set, and saved check above, then run it manually or through the scheduler endpoint.</small>
       </div>
     {/if}
   {:else}
     <div class="empty-state">
-      <p>Saved check management is not available on this backend.</p>
-      <small>The current control plane still supports live measurements, but reusable profiles live on the self-host path for now.</small>
+      <p>This control endpoint is running in live-check mode only.</p>
+      <small>Manual runs still work, but persistent sites, route groups, region sets, baselines, and exports require the full self-host control service.</small>
     </div>
   {/if}
+</section>
+
+<section class="regions-section" id="regions">
+  <div class="section-heading">
+    <p class="eyebrow">Execution regions</p>
+    <h2>Reference the active corridor, then widen it only when the self-host footprint is ready.</h2>
+  </div>
+
+  <div class="continents">
+    {#each groupedRegions as group (group.continent)}
+      <article class="continent-card">
+        <header>
+          <h3>{group.continent}</h3>
+          <small>{group.regions.length} regions</small>
+        </header>
+
+        <div class="region-list">
+          {#each group.regions as region (region.code)}
+            <button
+              class:selected={selectedRegions.includes(region.code)}
+              class:disabled={!region.selectable}
+              type="button"
+              onclick={() => toggleRegion(region)}
+            >
+              <strong>{region.label}</strong>
+              <span>{region.launchStage === 'core' ? 'launch active' : 'catalog only'}</span>
+            </button>
+          {/each}
+        </div>
+      </article>
+    {/each}
+  </div>
 </section>
 
 <style>
@@ -1939,8 +1992,9 @@
   }
 
   .hero {
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 0.72fr);
     align-items: start;
+    gap: 20px;
   }
 
   .hero-copy,
@@ -1972,6 +2026,9 @@
 
   .hero-copy {
     min-height: 100%;
+    display: grid;
+    align-content: start;
+    gap: 18px;
   }
 
   .eyebrow,
@@ -1995,10 +2052,10 @@
   }
 
   h1 {
-    margin-top: 12px;
-    max-width: 12ch;
-    font-size: clamp(2.9rem, 5vw, 5.2rem);
-    line-height: 0.95;
+    margin-top: 6px;
+    max-width: 9.5ch;
+    font-size: clamp(2.5rem, 4.2vw, 4.4rem);
+    line-height: 0.97;
   }
 
   h2 {
@@ -2026,13 +2083,25 @@
 
   .hero-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    margin-top: 26px;
+    margin-top: 4px;
   }
 
   .hero-metrics div,
   .job-summary div {
     display: grid;
     gap: 6px;
+  }
+
+  .hero-metrics div {
+    padding-top: 12px;
+    border-top: 1px solid rgba(173, 192, 207, 0.14);
+  }
+
+  .hero-metrics small,
+  .card-copy,
+  .setup-flow small {
+    color: #adc0cf;
+    line-height: 1.55;
   }
 
   .measurement-details {
@@ -2064,6 +2133,17 @@
     display: grid;
     gap: 16px;
     background: linear-gradient(180deg, rgba(12, 24, 38, 0.98) 0%, rgba(22, 43, 59, 0.96) 100%);
+  }
+
+  .card-intro {
+    display: grid;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(173, 192, 207, 0.14);
+  }
+
+  .card-intro h2 {
+    font-size: 1.32rem;
   }
 
   .field {
@@ -2130,6 +2210,27 @@
     cursor: wait;
   }
 
+  .advanced-panel {
+    display: grid;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid rgba(173, 192, 207, 0.16);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .advanced-panel summary {
+    cursor: pointer;
+    color: #f6f4ef;
+    font-weight: 700;
+  }
+
+  .advanced-grid {
+    display: grid;
+    gap: 16px;
+    padding-top: 8px;
+  }
+
   .continents,
   .result-grid,
   .builder-grid,
@@ -2187,7 +2288,7 @@
   }
 
   .job-summary {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .result-grid {
@@ -2246,6 +2347,10 @@
   .recent-runs div {
     display: grid;
     gap: 6px;
+  }
+
+  .setup-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .comparison-section-list,

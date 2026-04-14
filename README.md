@@ -1,8 +1,13 @@
 # webperf-selfhosted
 
-Self-hosted global release verification with manual checks, scheduled runs, and baseline diffing.
+Self-hosted open-core WebPerf for global release verification, scheduled checks, and baseline diffing.
 
-This repository ships the self-hosted edition of Webperf and Guide:
+WebPerf has two distinct product surfaces:
+
+- `webperf-selfhosted`: the self-hosted OSS/open-core product
+- `webperf.and.guide`: the managed cloud product and business layer
+
+This repository is the self-hosted source of truth for:
 
 - `apps/console`: SvelteKit UI for configuring checks and reviewing runs
 - `apps/control`: Bun + SQLite control service for saved config, run dispatch, history, comparisons, and reports
@@ -10,6 +15,19 @@ This repository ships the self-hosted edition of Webperf and Guide:
 - `packages/contracts`, `packages/domain-core`, `packages/env-schema`, `packages/report-engine`, `packages/ui`
 - `infra/compose`: Docker Compose bundle
 - `infra/docker`: probe image metadata
+
+This repository is intentionally not the home for:
+
+- billing, pricing, usage metering, or quotas
+- tenant/workspace auth and seat management
+- cloud-only orchestration, managed runner scaling, or private admin surfaces
+- hosted artifact retention and internal ops automation
+- AI analyst product features beyond structured deterministic outputs
+
+See:
+
+- [docs/scope.md](docs/scope.md)
+- [docs/cloud-vs-selfhosted.md](docs/cloud-vs-selfhosted.md)
 
 ## Local Development
 

@@ -16,6 +16,35 @@ This repo should optimize for:
 - representative route sets over one-off URLs
 - a real self-hosted workflow, not a viewer-only demo
 
+## Product Boundary
+
+Brand:
+- product name: `WebPerf`
+- managed cloud domain/product: `webperf.and.guide`
+- public OSS repo: `webperf-selfhosted`
+
+Role split:
+- `webperf-selfhosted` is the self-hosted/open-core product
+- `webperf.and.guide` is the managed cloud product and business layer
+
+This repo is the source of truth for:
+- self-host console/control/probe behavior
+- public contracts and schemas
+- public domain models
+- deterministic reporting and comparison logic
+- self-host deployment docs and examples
+
+This repo must not absorb:
+- billing, quotas, or usage metering
+- multi-tenant auth/workspace logic
+- managed cloud orchestration or hosted runner fleet logic
+- private provider credentials or internal ops tooling
+- AI analyst product features
+
+Boundary rule:
+- if a self-host operator can use the feature independently, it belongs here
+- if it only becomes valuable through managed hosting, automation, billing, or SaaS collaboration, it belongs in `webperf.and.guide`
+
 ## Repo Shape
 
 Included here:
@@ -29,10 +58,11 @@ Included here:
 - `packages/ui`
 - `infra/compose`
 - `infra/docker`
+- `docs`
 
 ## Snapshot
 
-Current repo state as of 2026-04-13:
+Current repo state as of 2026-04-14:
 - the console, control service, and Rust probe run together locally
 - the control service persists saved config, runs, baselines, comparisons, and reports in SQLite
 - local compose packaging lives under `infra/compose`
@@ -45,6 +75,8 @@ Current repo state as of 2026-04-13:
 - `apps/control` now exposes first-class public `comparisons`, `exports`, and `analyses` resources backed by persisted derived payloads
 - `apps/console` now proxies through merged split `app` and `ops` oRPC clients directly, replacing the hand-written control-plane façade while keeping SSE reconstruction and typed report export handling
 - console runtime config now centers on `CONTROL_BASE_URL` for self-hosted access instead of the older binding-oriented env surface
+- the console now leans into an operator-facing self-host workflow: manual run first, reusable checks second, region catalog third, with product copy using site/route group/region set/check terminology instead of implementation-heavy labels
+- docs now explicitly treat this repo as the public source of truth for self-hosted contracts, schemas, and deterministic reporting behavior
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -63,6 +95,9 @@ Current local URLs:
 - avoid adding managed runtime assumptions into public packages
 - prefer extracting reusable logic into `packages/domain-core` or `packages/report-engine`
 - keep setup simple enough for a small single-org deployment
+- keep public packages as the source of truth that cloud code consumes rather than forks
+- keep browser-audit extension points vendor-neutral and optional
+- keep AI-specific product logic out of the OSS core
 
 ## Immediate Next Tasks
 
@@ -71,6 +106,7 @@ Current local URLs:
 3. keep refining install docs and compose ergonomics
 4. decide how package publishing should work once the repo is public
 5. decide whether public comparison/export resources should get richer server-side pagination and filtering
+6. keep tightening the console around operator workflows and reduce any remaining marketing-style presentation drift
 
 ## Update Protocol
 

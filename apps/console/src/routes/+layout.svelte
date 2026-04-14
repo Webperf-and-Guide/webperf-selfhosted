@@ -28,10 +28,10 @@
   <div class="shell" style={paletteStyle}>
     <header class="topbar">
       <a class="brand" href="/">
-        <span class="mark">LM</span>
+        <span class="mark">WP</span>
         <span>
           <strong>{appTitle}</strong>
-          <small>Release verification and regional performance diffing</small>
+          <small>Self-host release verification operator console</small>
         </span>
       </a>
 
@@ -140,7 +140,14 @@
     }
 
     .nav {
-      justify-content: flex-start;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      justify-content: stretch;
+    }
+
+    .nav a {
+      text-align: center;
+      border: 1px solid rgba(173, 192, 207, 0.12);
     }
   }
 </style>

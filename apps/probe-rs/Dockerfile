@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.86-slim AS build
+FROM rust:1.86-slim AS build
 
 WORKDIR /src
 

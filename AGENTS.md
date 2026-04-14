@@ -67,6 +67,7 @@ Current repo state as of 2026-04-15:
 - the console, API service, scheduler, and Rust probe run together locally
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
 - local compose packaging lives under `infra/docker-compose`
+- the Rust probe Dockerfile now builds for the requested target platform instead of accidentally pinning builds to the host architecture; both native and `linux/amd64` images have been smoke-tested with `/healthz` and signed `/measure` requests
 - shared packages are versioned as `@webperf/*`
 - release metadata tooling uses Sampo via `.sampo/`
 - `packages/contracts` now exports split `public`, `app`, and `ops` oRPC contracts alongside the legacy compatibility `control` contract

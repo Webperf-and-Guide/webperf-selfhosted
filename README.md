@@ -16,7 +16,7 @@ This repository is the self-hosted source of truth for:
 - `apps/browser-audit-worker`: optional Bun-first browser audit runtime
 - `packages/contracts`, `packages/domain-core`, `packages/config`, `packages/report-core`, `packages/ui`
 - `infra/docker-compose`: Docker Compose bundle
-- `infra/docker`: runtime image metadata
+- `infra/docker`: runtime image metadata consumed by the managed cloud repo
 
 This repository is intentionally not the home for:
 

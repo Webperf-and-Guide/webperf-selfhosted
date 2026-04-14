@@ -19,6 +19,7 @@ It is the source of truth for:
 - deterministic reporting and diff logic
 - self-host console and API behavior
 - Rust probe runtime and portable execution flow
+- optional browser-audit runtime source and compatibility profile
 - self-host deployment examples and install docs
 
 It should include:
@@ -29,11 +30,13 @@ It should include:
 - JSON and CSV exports
 - generic webhook delivery
 - extension points for optional browser-audit adapters
+- the optional Bun browser-audit worker runtime itself, when used without managed orchestration
 
 It should not include:
 
 - billing, quotas, or usage metering
 - cloud-only orchestration and provider-managed runner fleets
+- managed queueing, retention, and fleet logic around browser-audit execution
 - tenant/workspace auth and SaaS permission models
 - hosted artifact retention policy
 - private provider credentials or internal anti-abuse logic

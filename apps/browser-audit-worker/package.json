@@ -1,0 +1,21 @@
+{
+  "name": "browser-audit-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "bunx tsc -p tsconfig.json --noEmit",
+    "check": "bunx tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@puppeteer/browsers": "2.13.0",
+    "@webperf/contracts": "workspace:*",
+    "lighthouse": "13.1.0",
+    "puppeteer-core": "24.40.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "typescript": "^5.9.3"
+  }
+}

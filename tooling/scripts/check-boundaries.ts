@@ -31,6 +31,7 @@ const rules: Rule[] = [
       'apps/console/src',
       'apps/api/src',
       'apps/scheduler/src',
+      'apps/browser-audit-worker/src',
       'packages/contracts/src',
       'packages/domain-core/src',
       'packages/report-core/src',

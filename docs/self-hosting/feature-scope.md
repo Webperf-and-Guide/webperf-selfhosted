@@ -19,6 +19,7 @@ It should remain useful on its own for release verification without requiring th
 ## Allowed But Optional
 
 - browser-audit adapters such as sitespeed integrations, when shipped as optional self-host extensions
+- the Bun browser-audit worker runtime, when shipped as an optional self-host app rather than a default requirement
 - machine-readable outputs that make later AI analysis easier without embedding AI product behavior here
 
 ## Not Included

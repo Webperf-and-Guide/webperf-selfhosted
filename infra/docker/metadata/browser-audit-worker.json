@@ -1,0 +1,5 @@
+{
+  "image": "ghcr.io/your-org/webperf-browser-audit-worker:sha-placeholder",
+  "runtime": "bun",
+  "scope": "optional-selfhost-runtime"
+}

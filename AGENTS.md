@@ -52,6 +52,7 @@ Included here:
 - `apps/api`
 - `apps/scheduler`
 - `apps/probe-rs`
+- `apps/browser-audit-worker`
 - `packages/contracts`
 - `packages/domain-core`
 - `packages/config`
@@ -65,9 +66,11 @@ Included here:
 
 Current repo state as of 2026-04-15:
 - the console, API service, scheduler, and Rust probe run together locally
+- the optional Bun browser-audit worker now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
 - local compose packaging lives under `infra/docker-compose`
 - the Rust probe Dockerfile now builds for the requested target platform instead of accidentally pinning builds to the host architecture; both native and `linux/amd64` images have been smoke-tested with `/healthz` and signed `/measure` requests
+- Bun service images now run as the `bun` user, and the Compose bundle no longer publishes the internal probe port or falls back to a known shared secret
 - shared packages are versioned as `@webperf/*`
 - release metadata tooling uses Sampo via `.sampo/`
 - `packages/contracts` now exports split `public`, `app`, and `ops` oRPC contracts alongside the legacy compatibility `control` contract
@@ -80,10 +83,11 @@ Current repo state as of 2026-04-15:
 - the console now leans into an operator-facing self-host workflow: manual run first, reusable checks second, region catalog third, with product copy using site/route group/region set/check terminology instead of implementation-heavy labels
 - docs now explicitly treat this repo as the public source of truth for self-hosted contracts, schemas, and deterministic reporting behavior
 - `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
-- self-hosted runtime still does not own a managed browser-audit executor; browser-audit container orchestration remains cloud-only even though the contracts live here
+- `apps/browser-audit-worker` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
 
 Current local dev entrypoints:
 - `bun run dev`
+- `bun run dev:browser-audit-worker`
 - `bun run dev:console`
 - `bun run dev:api`
 - `bun run dev:scheduler`
@@ -93,6 +97,7 @@ Current local URLs:
 - console: `http://localhost:5173`
 - api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
+- browser-audit worker when run separately: `http://127.0.0.1:8081`
 
 ## Working Rules
 
@@ -113,6 +118,7 @@ Current local URLs:
 5. decide whether public comparison/export resources should get richer server-side pagination and filtering
 6. keep tightening the console around operator workflows and reduce any remaining marketing-style presentation drift
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
+8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 
 ## Update Protocol
 

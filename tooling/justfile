@@ -7,6 +7,9 @@ dev-console:
 dev-api:
   bun run --cwd apps/api dev
 
+dev-browser-audit-worker:
+  PORT=8081 bun run --cwd apps/browser-audit-worker dev
+
 dev-scheduler:
   bun run --cwd apps/scheduler dev
 
@@ -14,7 +17,7 @@ dev:
   bun run dev
 
 compose-config:
-  docker compose -f infra/docker-compose/docker-compose.yml config >/dev/null
+  docker compose --env-file infra/docker-compose/.env.example -f infra/docker-compose/docker-compose.yml config >/dev/null
 
 dev-probe:
   cargo run -p probe-server --manifest-path apps/probe-rs/Cargo.toml

@@ -13,9 +13,10 @@ This repository is the self-hosted source of truth for:
 - `apps/api`: Bun + SQLite API service for saved config, run dispatch, history, comparisons, and reports
 - `apps/scheduler`: polling worker for scheduled check dispatch
 - `apps/probe-rs`: Rust probe runtime
+- `apps/browser-audit-worker`: optional Bun-first browser audit runtime
 - `packages/contracts`, `packages/domain-core`, `packages/config`, `packages/report-core`, `packages/ui`
 - `infra/docker-compose`: Docker Compose bundle
-- `infra/docker`: probe image metadata
+- `infra/docker`: runtime image metadata
 
 This repository is intentionally not the home for:
 
@@ -42,11 +43,13 @@ Default local URLs:
 - console: `http://localhost:5173`
 - api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
+- browser-audit worker when run separately: `http://127.0.0.1:8081`
 
 ## Useful Commands
 
 ```bash
 bun run check
+bun run dev:browser-audit-worker
 bun test apps/api/test
 bun run test:report-core
 bun run compose:config
@@ -60,6 +63,7 @@ Install and scheduling notes live in:
 
 - [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md)
 - [docs/architecture/execution-model.md](docs/architecture/execution-model.md)
+- [docs/self-hosting/browser-audit-worker.md](docs/self-hosting/browser-audit-worker.md)
 - [examples/github-actions/scheduler-dispatch.yml](examples/github-actions/scheduler-dispatch.yml)
 
 ## Release Tooling

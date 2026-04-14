@@ -22,9 +22,9 @@ services:
       dockerfile: Dockerfile
     image: webperf-probe:local
     environment:
-      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:-dev-shared-secret}"
-    ports:
-      - "${PROBE_PUBLIC_PORT:-8080}:8080"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET in infra/docker-compose/.env}"
+    expose:
+      - "8080"
 
   api:
     build:
@@ -38,7 +38,7 @@ services:
       SELFHOST_API_PORT: "${SELFHOST_API_PORT:-8788}"
       SELFHOST_DATABASE_PATH: "${SELFHOST_DATABASE_PATH:-/data/webperf.sqlite}"
       SELFHOST_RETENTION_DAYS: "${SELFHOST_RETENTION_DAYS:-30}"
-      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:-dev-shared-secret}"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET in infra/docker-compose/.env}"
       SELFHOST_ACTIVE_REGION_CODES_JSON: '${SELFHOST_ACTIVE_REGION_CODES_JSON:-["tokyo"]}'
       SELFHOST_REGION_IDS_JSON: '${SELFHOST_REGION_IDS_JSON:-{"tokyo":"JP"}}'
       SELFHOST_PROBE_BASE_URLS_JSON: '${SELFHOST_PROBE_BASE_URLS_JSON:-{"tokyo":"http://probe:8080"}}'
@@ -58,6 +58,24 @@ services:
     environment:
       SELFHOST_SCHEDULER_API_BASE_URL: "${SELFHOST_SCHEDULER_API_BASE_URL:-http://api:8788}"
       SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
+
+  browser-audit-worker:
+    profiles:
+      - browser-audit
+    build:
+      context: ../..
+      dockerfile: apps/browser-audit-worker/Dockerfile
+    image: webperf-browser-audit-worker:local
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      BROWSER_AUDIT_SHARED_SECRET: "${BROWSER_AUDIT_SHARED_SECRET:-replace-with-a-long-random-browser-audit-shared-secret}"
+      BROWSER_AUDIT_SHARED_SECRET_NEXT: "${BROWSER_AUDIT_SHARED_SECRET_NEXT:-}"
+      BROWSER_AUDIT_ALLOW_NO_SANDBOX: "${BROWSER_AUDIT_ALLOW_NO_SANDBOX:-false}"
+    ports:
+      - "${BROWSER_AUDIT_PUBLIC_PORT:-8081}:8080"
 
 volumes:
   webperf-data:

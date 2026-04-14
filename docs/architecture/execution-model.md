@@ -11,6 +11,9 @@ Today the default execution path is:
 - `apps/probe-rs` performs network measurements
 - `packages/contracts` and `packages/report-core` shape the stored results
 
+Optional runtimes may live alongside that path without becoming a default dependency.
+Today that includes `apps/browser-audit-worker`, which remains a standalone runtime surface.
+
 ## Design Rule
 
 Execution details should stay behind a small boundary:
@@ -20,6 +23,7 @@ Execution details should stay behind a small boundary:
 - the API stores state and exposes dispatch surfaces
 - the scheduler decides when to trigger scheduled work
 - probe runtimes decide how to execute the measurement
+- optional runtimes can expose extra capabilities without forcing them into the default self-host stack
 
 ## Result Metadata
 

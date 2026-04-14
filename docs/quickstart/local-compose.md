@@ -31,17 +31,42 @@ curl http://127.0.0.1:8788/health
 - `console`: SvelteKit UI
 - `api`: Bun-based API service with SQLite persistence
 - `scheduler`: Bun polling worker for scheduled dispatch
-- `probe`: Rust measurement runtime
+- `probe`: Rust measurement runtime on the internal Compose network
+- `browser-audit-worker`: optional Bun browser-audit runtime when you enable the `browser-audit` profile
 
 ## Useful Env Vars
 
 - `CONTROL_BASE_URL`: where the console proxies API requests
-- `PROBE_SHARED_SECRET`: shared secret used between the API and probe
+- `PROBE_SHARED_SECRET`: shared secret used between the API and probe; replace the example value before you boot the stack
+- `BROWSER_AUDIT_SHARED_SECRET`: shared secret used for signed browser-audit requests when the optional worker is enabled
+- `BROWSER_AUDIT_SHARED_SECRET_NEXT`: optional rollover secret accepted alongside the current browser-audit key
+- `BROWSER_AUDIT_ALLOW_NO_SANDBOX`: explicit opt-in for local runtimes that cannot keep Chrome sandboxing enabled
 - `SELFHOST_ACTIVE_REGION_CODES_JSON`: active region list
 - `SELFHOST_PROBE_BASE_URLS_JSON`: region to probe URL map
 - `SELFHOST_DATABASE_PATH`: SQLite file path inside the API container
 - `SELFHOST_SCHEDULER_API_BASE_URL`: base URL the scheduler polls
 - `SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS`: scheduler polling interval
+
+The probe is intentionally not published on a host port by default.
+If you need direct host access for debugging, add a temporary port mapping in your local Compose override instead of exposing it permanently.
+
+## Optional Browser Audit Worker
+
+The browser-audit worker is intentionally not part of the default stack.
+
+Enable it only when you want to run the optional Bun + Chrome + Puppeteer + Lighthouse runtime:
+
+```sh
+docker compose \
+  --env-file infra/docker-compose/.env \
+  --profile browser-audit \
+  -f infra/docker-compose/docker-compose.yml \
+  up --build
+```
+
+When enabled, it is published on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
+The self-host API does not orchestrate it yet; this remains a standalone optional runtime.
+The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
 
 ## Scheduling
 

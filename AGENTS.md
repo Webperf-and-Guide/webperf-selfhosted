@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-13
+Last updated: 2026-04-14
 
 ## Mission
 
@@ -43,7 +43,8 @@ Current repo state as of 2026-04-13:
 - `apps/control` now serves `/rpc/public`, `/rpc/app`, `/rpc/ops`, and legacy `/rpc`, plus `/openapi/public.json` and `/openapi/control.json`
 - `apps/control` now exposes public REST aliases for `sites`, `routeGroups`, `regionSets`, `checks`, `runs`, and `capabilities` while keeping the older `/v1/properties`, `/v1/route-sets`, `/v1/region-packs`, and `/v1/check-profiles` endpoints for compatibility
 - `apps/control` now exposes first-class public `comparisons`, `exports`, and `analyses` resources backed by persisted derived payloads
-- `apps/console` now uses the split `app` and `ops` oRPC contracts for its fallback control-plane client, including job snapshot polling for SSE reconstruction and typed report export resources instead of direct REST-only fetches
+- `apps/console` now proxies through merged split `app` and `ops` oRPC clients directly, replacing the hand-written control-plane façade while keeping SSE reconstruction and typed report export handling
+- console runtime config now centers on `CONTROL_BASE_URL` for self-hosted access instead of the older binding-oriented env surface
 
 Current local dev entrypoints:
 - `bun run dev`

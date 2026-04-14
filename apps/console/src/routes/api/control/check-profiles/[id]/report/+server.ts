@@ -2,4 +2,6 @@ import type { RequestHandler } from './$types';
 import { getControlPlaneClient, proxyControlResponse } from '$lib/server/control-plane';
 
 export const GET: RequestHandler = async ({ params, platform }) =>
-  proxyControlResponse(getControlPlaneClient(platform).getCheckProfileReport(params.id));
+  proxyControlResponse(
+    getControlPlaneClient(platform).app.checkProfiles.report({ params: { id: params.id } })
+  );

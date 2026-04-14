@@ -22,7 +22,6 @@ trap restore_config EXIT INT TERM
 
 cat >"$config_path" <<'EOF'
 CONTROL_BASE_URL=http://127.0.0.1:8788
-CONTROL_BINDING_MODE=disabled
 DEPLOY_TARGET=pages
 TURNSTILE_SITE_KEY=
 EOF

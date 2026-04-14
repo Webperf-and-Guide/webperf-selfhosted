@@ -1,10 +1,10 @@
-const baseUrl = process.env.EDGE_CONTROL_BASE_URL;
+const baseUrl = process.env.CONTROL_BASE_URL;
 const opsSecret = process.env.OPS_SHARED_SECRET;
 const smokeRegion = process.env.SMOKE_REGION ?? 'tokyo';
 const smokeUrl = process.env.SMOKE_URL ?? 'https://example.com';
 
 if (!baseUrl) {
-  throw new Error('EDGE_CONTROL_BASE_URL is required');
+  throw new Error('CONTROL_BASE_URL is required');
 }
 
 if (!opsSecret) {

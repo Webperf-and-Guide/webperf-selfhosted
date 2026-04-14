@@ -34,8 +34,6 @@ type LoaderFetch = typeof fetch;
 export const load: PageServerLoad = async ({ fetch, platform }) => {
   const runtime = parseWebEnv({
     CONTROL_BASE_URL: platform?.env?.CONTROL_BASE_URL ?? privateEnv.CONTROL_BASE_URL,
-    EDGE_CONTROL_BASE_URL: platform?.env?.EDGE_CONTROL_BASE_URL ?? privateEnv.EDGE_CONTROL_BASE_URL,
-    CONTROL_BINDING_MODE: platform?.env?.CONTROL_BINDING_MODE ?? privateEnv.CONTROL_BINDING_MODE,
     DEPLOY_TARGET: platform?.env?.DEPLOY_TARGET ?? privateEnv.DEPLOY_TARGET,
     TURNSTILE_SITE_KEY: platform?.env?.TURNSTILE_SITE_KEY ?? privateEnv.TURNSTILE_SITE_KEY
   });

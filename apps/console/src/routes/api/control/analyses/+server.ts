@@ -1,6 +1,6 @@
 import type { RequestHandler } from './$types';
-import { getControlPlaneClient, proxyControlResponse } from '$lib/server/control-plane';
+import { getControlPlaneClient, proxyControlResponse, toListInput } from '$lib/server/control-plane';
 import { readListQuery } from '$lib/server/list-query';
 
 export const GET: RequestHandler = async ({ platform, url }) =>
-  proxyControlResponse(getControlPlaneClient(platform).listAnalyses(readListQuery(url)));
+  proxyControlResponse(getControlPlaneClient(platform).app.analyses.list(toListInput(readListQuery(url))));

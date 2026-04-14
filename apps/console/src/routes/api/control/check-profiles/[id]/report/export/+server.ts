@@ -1,10 +1,11 @@
+import type { ReportExportFormat } from '@webperf/contracts';
 import type { RequestHandler } from './$types';
-import { getControlPlaneClient, proxyControlResponse } from '$lib/server/control-plane';
+import { getControlPlaneClient, proxyControlDownload } from '$lib/server/control-plane';
 
 export const GET: RequestHandler = async ({ params, platform, url }) =>
-  proxyControlResponse(
-    getControlPlaneClient(platform).exportCheckProfileReport(
-      params.id,
-      url.searchParams.get('format') ?? 'json'
-    )
+  proxyControlDownload(
+    getControlPlaneClient(platform).app.checkProfiles.reportExport({
+      params: { id: params.id },
+      body: { format: (url.searchParams.get('format') ?? 'json') as ReportExportFormat }
+    })
   );

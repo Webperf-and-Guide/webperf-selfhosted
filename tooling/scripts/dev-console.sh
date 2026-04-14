@@ -27,4 +27,5 @@ TURNSTILE_SITE_KEY=
 EOF
 
 cd "$root_dir"
+export WEBPERF_CONSOLE_ADAPTER=node
 bun run --cwd apps/console dev -- "$@"

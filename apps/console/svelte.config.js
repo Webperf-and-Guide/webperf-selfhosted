@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
-const targetAdapter = process.env.WEBPERF_CONSOLE_ADAPTER === 'node' ? 'node' : 'cloudflare';
+const targetAdapter = process.env.WEBPERF_CONSOLE_ADAPTER === 'cloudflare' ? 'cloudflare' : 'node';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {

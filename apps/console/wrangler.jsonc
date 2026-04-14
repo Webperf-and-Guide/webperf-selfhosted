@@ -1,0 +1,27 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "webperf-console",
+  "compatibility_date": "2026-04-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "pages_build_output_dir": ".svelte-kit/cloudflare",
+  "vars": {
+    "CONTROL_BASE_URL": "http://127.0.0.1:8788",
+    "CONTROL_BINDING_MODE": "disabled",
+    "DEPLOY_TARGET": "pages",
+    "TURNSTILE_SITE_KEY": ""
+  },
+  "env": {
+    "local": {
+      "vars": {
+        "CONTROL_BASE_URL": "http://127.0.0.1:8788",
+        "CONTROL_BINDING_MODE": "disabled",
+        "DEPLOY_TARGET": "pages",
+        "TURNSTILE_SITE_KEY": ""
+      }
+    }
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

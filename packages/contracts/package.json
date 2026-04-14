@@ -1,0 +1,61 @@
+{
+  "name": "@webperf/contracts",
+  "private": false,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./control-contract": {
+      "types": "./src/control-contract.ts",
+      "import": "./src/control-contract.ts"
+    },
+    "./control-openapi": {
+      "types": "./src/control-openapi.ts",
+      "import": "./src/control-openapi.ts"
+    },
+    "./public-contract": {
+      "types": "./src/public-contract.ts",
+      "import": "./src/public-contract.ts"
+    },
+    "./app-contract": {
+      "types": "./src/app-contract.ts",
+      "import": "./src/app-contract.ts"
+    },
+    "./ops-contract": {
+      "types": "./src/ops-contract.ts",
+      "import": "./src/ops-contract.ts"
+    },
+    "./public-openapi": {
+      "types": "./src/public-openapi.ts",
+      "import": "./src/public-openapi.ts"
+    },
+    "./public-api": {
+      "types": "./src/public-api.ts",
+      "import": "./src/public-api.ts"
+    },
+    "./probe-api": {
+      "types": "./src/probe-api.ts",
+      "import": "./src/probe-api.ts"
+    },
+    "./events": {
+      "types": "./src/events.ts",
+      "import": "./src/events.ts"
+    }
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@orpc/contract": "^1.13.14",
+    "zod": "^4.1.12"
+  }
+}

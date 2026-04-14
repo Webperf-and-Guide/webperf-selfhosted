@@ -1,0 +1,15 @@
+[package]
+name = "probe-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono.workspace = true
+hex.workspace = true
+hmac.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+url.workspace = true

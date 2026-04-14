@@ -1,0 +1,22 @@
+default:
+  @just --list
+
+dev-console:
+  bash tooling/scripts/dev-console.sh
+
+dev-control:
+  bun run --cwd apps/control dev
+
+dev:
+  bun run dev
+
+compose-config:
+  docker compose -f infra/compose/docker-compose.yml config >/dev/null
+
+dev-probe:
+  cargo run -p probe-server --manifest-path apps/probe-rs/Cargo.toml
+
+check:
+  bun run check
+  cargo clippy --workspace --all-targets --manifest-path apps/probe-rs/Cargo.toml -- -D warnings
+  cargo test --workspace --manifest-path apps/probe-rs/Cargo.toml

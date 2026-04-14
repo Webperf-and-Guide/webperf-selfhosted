@@ -1,0 +1,18 @@
+name: Selfhost Scheduler Dispatch
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger self-host scheduler
+        env:
+          SELFHOST_CONTROL_URL: ${{ secrets.SELFHOST_CONTROL_URL }}
+        run: |
+          curl --fail --show-error --silent \
+            -X POST \
+            "${SELFHOST_CONTROL_URL%/}/v1/scheduler/dispatch"

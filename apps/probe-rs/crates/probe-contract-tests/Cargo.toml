@@ -1,0 +1,13 @@
+[package]
+name = "probe-contract-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+probe-core = { path = "../probe-core" }
+probe-server = { path = "../probe-server" }
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

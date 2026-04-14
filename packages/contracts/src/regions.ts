@@ -1,0 +1,48 @@
+import { z } from 'zod';
+
+export const regionCodes = [
+  'ashburn',
+  'atlanta',
+  'boston',
+  'chicago',
+  'dallas',
+  'denver',
+  'losangeles',
+  'miami',
+  'newyork',
+  'sanjose',
+  'seattle',
+  'toronto',
+  'amsterdam',
+  'athens',
+  'bucharest',
+  'copenhagen',
+  'frankfurt',
+  'london',
+  'madrid',
+  'milan',
+  'paris',
+  'prague',
+  'stockholm',
+  'vienna',
+  'warsaw',
+  'zagreb',
+  'bangkok',
+  'hongkong',
+  'istanbul',
+  'jakarta',
+  'kualalumpur',
+  'manila',
+  'singapore',
+  'telaviv',
+  'tokyo',
+  'bogota',
+  'mexicocity',
+  'saopaulo',
+  'sydney',
+  'johannesburg',
+  'lagos'
+] as const;
+
+export const regionCodeSchema = z.enum(regionCodes);
+export type RegionCode = z.infer<typeof regionCodeSchema>;

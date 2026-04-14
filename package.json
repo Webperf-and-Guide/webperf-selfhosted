@@ -1,0 +1,41 @@
+{
+  "name": "webperf-selfhosted",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bunx concurrently -n console,control,probe \"bun run dev:console\" \"bun run dev:control\" \"bun run dev:probe\"",
+    "dev:console": "bash tooling/scripts/dev-console.sh",
+    "dev:console:cf": "bun run --cwd apps/console dev:cf",
+    "dev:control": "bun run --cwd apps/control dev",
+    "dev:web": "bun run dev:console",
+    "dev:web:cf": "bun run dev:console:cf",
+    "dev:probe": "cargo run -p probe-server --manifest-path apps/probe-rs/Cargo.toml",
+    "build": "bun run --cwd apps/console build",
+    "build:cf": "bun run --cwd apps/console build:cf",
+    "check:boundaries": "bun run tooling/scripts/check-boundaries.ts",
+    "check": "bun run check:boundaries && bun run types:cf:check && bun run --cwd apps/console check && bun run --cwd apps/control check && bunx tsc -p packages/contracts/tsconfig.json --noEmit && bunx tsc -p packages/domain-core/tsconfig.json --noEmit && bunx tsc -p packages/report-engine/tsconfig.json --noEmit && bunx tsc -p packages/env-schema/tsconfig.json --noEmit && bunx tsc -p packages/ui/tsconfig.json --noEmit",
+    "test:report-engine": "bun test packages/report-engine/test/*.test.ts",
+    "test:probe": "cargo test --workspace --manifest-path apps/probe-rs/Cargo.toml",
+    "smoke:console": "bash tooling/scripts/smoke-web.sh",
+    "smoke:web": "bun run smoke:console",
+    "compose:config": "docker compose -f infra/compose/docker-compose.yml config >/dev/null",
+    "types:cf": "bun run --cwd apps/console types:cf",
+    "types:cf:check": "bun run --cwd apps/console types:cf:check",
+    "sampo:add": "sampo add",
+    "sampo:release": "sampo release",
+    "sampo:release:dry-run": "sampo release --dry-run",
+    "sampo:publish": "sampo publish"
+  },
+  "devDependencies": {
+    "@libsql/client": "^0.17.2",
+    "@types/bun": "^1.3.11",
+    "concurrently": "^9.2.1",
+    "drizzle-kit": "1.0.0-beta.21",
+    "playwright": "^1.54.2",
+    "typescript": "^5.9.3"
+  }
+}

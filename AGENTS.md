@@ -85,6 +85,7 @@ Current repo state as of 2026-04-15:
 - `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
 - `apps/browser-audit-worker` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
 - `infra/docker/metadata/probe.json` and `infra/docker/metadata/browser-audit-worker.json` are now the canonical checked-in image refs that the managed cloud repo consumes when it renders Cloudflare/Bunny runtime config
+- probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 
 Current local dev entrypoints:
 - `bun run dev`

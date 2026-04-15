@@ -344,7 +344,7 @@ const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => 
 };
 
 export const toProbeSignaturePayload = (request: SignedProbeMeasurementRequest) =>
-  JSON.stringify({
+  stableStringify({
     jobId: request.jobId,
     targetId: request.targetId,
     region: request.region,
@@ -370,6 +370,25 @@ export const createProbeSignature = async (
     new TextEncoder().encode(toProbeSignaturePayload(request))
   );
   return [...new Uint8Array(signature)].map((value) => value.toString(16).padStart(2, '0')).join('');
+};
+
+const stableStringify = (value: unknown): string =>
+  JSON.stringify(sortJsonValue(value));
+
+const sortJsonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortJsonValue(entry));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, sortJsonValue(nested)])
+    );
+  }
+
+  return value;
 };
 
 const isForbiddenIpLiteral = (hostname: string) => isIpv4Private(hostname) || isIpv6Private(hostname);

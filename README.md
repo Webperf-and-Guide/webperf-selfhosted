@@ -1,6 +1,6 @@
 # webperf-selfhosted
 
-Self-hosted open-core WebPerf for global release verification, scheduled checks, and baseline diffing.
+Self-hosted open-core WebPerf for release verification, scheduled checks, and baseline diffing across representative regions.
 
 WebPerf has two distinct product surfaces:
 
@@ -30,11 +30,21 @@ See:
 
 - [docs/self-hosting/feature-scope.md](docs/self-hosting/feature-scope.md)
 - [docs/comparison/cloud-vs-selfhosted.md](docs/comparison/cloud-vs-selfhosted.md)
+- [docs/github-launch.md](docs/github-launch.md)
 - [SECURITY.md](SECURITY.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
-## Local Development
+## What It Does
+
+- runs network-probe checks across representative cities instead of relying on a single URL or a single region
+- stores saved sites, route groups, region sets, checks, runs, baselines, comparisons, and exports in SQLite
+- includes a self-host console, API, scheduler, Rust probe runtime, and an optional Bun browser-audit worker
+- focuses on release verification questions like "did this deploy get worse?" rather than general-purpose observability
+
+## Quick Start
+
+Local development:
 
 ```bash
 bun install
@@ -95,3 +105,10 @@ Checked-in image refs live under:
 - [infra/docker/metadata/browser-audit-worker.json](infra/docker/metadata/browser-audit-worker.json)
 
 Those metadata files are consumed by the managed cloud repo when it renders Cloudflare/Bunny runtime config.
+
+## Public Launch Notes
+
+Before connecting the public GitHub repo, review:
+
+- [docs/github-launch.md](docs/github-launch.md) for repo description, topics, and first-release polish
+- `LICENSE` selection guidance in the same document

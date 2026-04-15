@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement to the self-hosted product
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please keep requests scoped to the self-hosted/open-core product.
+
+        If the request depends on multi-tenancy, billing, hosted orchestration, or other managed-only behavior, it may belong in the cloud product instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user need or workflow gap is this request addressing?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Share any workarounds or alternative approaches you considered.

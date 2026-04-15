@@ -86,6 +86,7 @@ Current repo state as of 2026-04-15:
 - `apps/browser-audit-worker` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
 - `infra/docker/metadata/probe.json` and `infra/docker/metadata/browser-audit-worker.json` are now the canonical checked-in image refs that the managed cloud repo consumes when it renders Cloudflare/Bunny runtime config
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
+- root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -121,6 +122,7 @@ Current local URLs:
 6. keep tightening the console around operator workflows and reduce any remaining marketing-style presentation drift
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
+9. finalize the license choice before the public GitHub launch
 
 ## Update Protocol
 

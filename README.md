@@ -30,6 +30,9 @@ See:
 
 - [docs/self-hosting/feature-scope.md](docs/self-hosting/feature-scope.md)
 - [docs/comparison/cloud-vs-selfhosted.md](docs/comparison/cloud-vs-selfhosted.md)
+- [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## Local Development
 
@@ -78,3 +81,17 @@ bun run sampo:publish
 ```
 
 Pending release notes live under `.sampo/changesets/`.
+
+## Published Images
+
+The reusable runtime images in this repo are intended to publish as:
+
+- `ghcr.io/<owner>/webperf-probe`
+- `ghcr.io/<owner>/webperf-browser-audit-worker`
+
+Checked-in image refs live under:
+
+- [infra/docker/metadata/probe.json](infra/docker/metadata/probe.json)
+- [infra/docker/metadata/browser-audit-worker.json](infra/docker/metadata/browser-audit-worker.json)
+
+Those metadata files are consumed by the managed cloud repo when it renders Cloudflare/Bunny runtime config.

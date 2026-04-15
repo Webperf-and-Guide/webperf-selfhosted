@@ -6,9 +6,11 @@ on:
       - 'apps/console/**'
       - 'apps/api/**'
       - 'apps/scheduler/**'
+      - 'apps/browser-audit-worker/**'
       - 'apps/probe-rs/**'
       - 'packages/**'
       - 'infra/docker-compose/**'
+      - 'infra/docker/**'
       - 'package.json'
       - 'bun.lock'
   push:
@@ -17,9 +19,11 @@ on:
       - 'apps/console/**'
       - 'apps/api/**'
       - 'apps/scheduler/**'
+      - 'apps/browser-audit-worker/**'
       - 'apps/probe-rs/**'
       - 'packages/**'
       - 'infra/docker-compose/**'
+      - 'infra/docker/**'
       - 'package.json'
       - 'bun.lock'
 
@@ -38,6 +42,8 @@ jobs:
       - run: bun run --cwd apps/api check
       - run: bun run --cwd apps/api test
       - run: bun run --cwd apps/scheduler check
+      - run: bun run --cwd apps/browser-audit-worker check
       - run: docker compose -f infra/docker-compose/docker-compose.yml config >/dev/null
       - run: docker buildx build --platform linux/amd64 --load -t webperf-console:selfhost -f apps/console/Dockerfile .
       - run: docker buildx build --platform linux/amd64 --load -t webperf-api:ci -f apps/api/Dockerfile .
+      - run: docker buildx build --platform linux/amd64 --load -t webperf-browser-audit-worker:ci -f apps/browser-audit-worker/Dockerfile .

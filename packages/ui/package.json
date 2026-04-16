@@ -22,6 +22,7 @@
     "./hooks/*": "./src/hooks/*",
     "./actions/*": "./src/actions/*",
     "./components/ui/*": "./src/lib/components/ui/*/index.ts",
+    "./components/operator/*": "./src/lib/components/operator/*/index.ts",
     "./styles/theme.css": "./src/styles/theme.css",
     "./styles/operator-app.css": "./src/styles/operator-app.css",
     "./styles/marketing-app.css": "./src/styles/marketing-app.css",

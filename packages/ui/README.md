@@ -19,6 +19,9 @@ Shared UI package for `WebPerf`.
 - `@webperf/ui/components/ui/field-set`
 - `@webperf/ui/components/ui/underline-tabs`
 - `@webperf/ui/components/ui/copy-button`
+- `@webperf/ui/components/operator/metric-grid`
+- `@webperf/ui/components/operator/saved-check-summary-card`
+- `@webperf/ui/components/operator/derived-resource-panel`
 - `@webperf/ui/utils`
 
 ## Consumption model
@@ -35,6 +38,7 @@ During local cross-repo development, the cloud repo should consume this package 
 The preferred screen-level import style is:
 
 - `@webperf/ui/components/ui/*` for components
+- `@webperf/ui/components/operator/*` for shared console-level composites
 - `@webperf/ui/styles/*` for shared CSS entrypoints
 - `@webperf/ui/utils` for utility helpers
 
@@ -66,3 +70,13 @@ Currently adopted extras:
 - `number-field`
 - `tags-input`
 - `copy-button`
+
+Current shared operator composites:
+
+- `metric-grid`
+- `resource-count-strip`
+- `region-quick-pick`
+- `run-status-panel`
+- `comparison-summary-panel`
+- `saved-check-summary-card`
+- `derived-resource-panel`

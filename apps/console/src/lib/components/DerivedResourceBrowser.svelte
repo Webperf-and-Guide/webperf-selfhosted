@@ -1,21 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { createQuery } from '@tanstack/svelte-query';
-  import Button from '@webperf/ui/components/ui/button';
-  import { Card } from '@webperf/ui/components/ui/card';
-  import { Input } from '@webperf/ui/components/ui/input';
-  import {
-    NumberField,
-    NumberFieldDecrement,
-    NumberFieldGroup,
-    NumberFieldIncrement,
-    NumberFieldInput
-  } from '@webperf/ui/components/ui/number-field';
-  import {
-    UnderlineTabs,
-    UnderlineTabsList,
-    UnderlineTabsTrigger
-  } from '@webperf/ui/components/ui/underline-tabs';
+  import { DerivedResourcePanel } from '@webperf/ui/components/operator/derived-resource-panel';
   import type {
     AnalysisListResponse,
     AnalysisResource,
@@ -44,6 +30,12 @@
   let pageSize = $state(6);
   let pageToken = $state<string | null>(null);
   let previousTokens = $state<string[]>([]);
+
+  const resourceTabs = [
+    { value: 'comparisons', label: 'comparisons' },
+    { value: 'exports', label: 'exports' },
+    { value: 'analyses', label: 'analyses' }
+  ] satisfies { value: ResourceKind; label: string }[];
 
   const resourceQuery = createQuery(() => ({
     queryKey: ['control', 'derived', kind, filter, pageSize, pageToken],
@@ -91,6 +83,13 @@
 
   const pageInfo = $derived.by<PageInfo>(() => getPageInfo(resourceQuery.data));
   const items = $derived.by<ResourceItem[]>(() => getItems(resourceQuery.data));
+  const panelItems = $derived.by(() =>
+    items.map((item: ResourceItem) => ({
+      id: item.id,
+      createdAtLabel: new Date(item.createdAt).toLocaleString(),
+      summary: summarizeItem(item)
+    }))
+  );
 
   const resetPaging = () => {
     pageToken = null;
@@ -102,8 +101,8 @@
     resetPaging();
   };
 
-  const changeKind = (nextKind: ResourceKind) => {
-    kind = nextKind;
+  const changeKind = (nextKind: string) => {
+    kind = nextKind as ResourceKind;
     filterDraft = '';
     filter = '';
     resetPaging();
@@ -157,171 +156,23 @@
   };
 </script>
 
-<section class="derived-section">
-  <div class="section-heading compact">
-    <div>
-      <p class="eyebrow">Derived resources</p>
-      <h3>Comparisons, exports, and analyses now page on the client.</h3>
-    </div>
-
-      <div class="toolbar">
-        <UnderlineTabs value={kind} class="w-full max-w-xl">
-          <UnderlineTabsList>
-            {#each ['comparisons', 'exports', 'analyses'] as option (option)}
-              <UnderlineTabsTrigger value={option} onclick={() => changeKind(option as ResourceKind)}>
-                {option}
-              </UnderlineTabsTrigger>
-            {/each}
-          </UnderlineTabsList>
-        </UnderlineTabs>
-
-        <label class="field inline-field">
-          <span>Page size</span>
-          <NumberField bind:value={pageSize} max={10} min={4} step={2}>
-            <NumberFieldGroup>
-              <NumberFieldDecrement />
-              <NumberFieldInput aria-label="Derived resource page size" oninput={() => resetPaging()} />
-              <NumberFieldIncrement />
-            </NumberFieldGroup>
-          </NumberField>
-        </label>
-      </div>
-  </div>
-
-  <div class="list-controls">
-    <label class="field grow">
-      <span>Filter</span>
-      <Input bind:value={filterDraft} placeholder="name, id, status, source" />
-    </label>
-    <Button variant="secondary" type="button" onclick={applyFilter}>Apply</Button>
-  </div>
-
-  {#if resourceQuery.isPending}
-    <div class="empty-state">
-      <p>Loading {kind}…</p>
-    </div>
-  {:else if resourceQuery.isError}
-    <p class="error">{resourceQuery.error?.message ?? `Failed to load ${kind}.`}</p>
-  {:else if items.length === 0}
-    <div class="empty-state">
-      <p>No {kind} matched this view.</p>
-      <small>Try clearing the filter or generating a fresh run first.</small>
-    </div>
-  {:else}
-    <div class="derived-grid">
-      {#each items as item (item.id)}
-        <Card class="derived-card">
-          <div class="derived-head">
-            <strong>{item.id}</strong>
-            <span>{new Date(item.createdAt).toLocaleString()}</span>
-          </div>
-
-          <div class="derived-summary">
-            {#each summarizeItem(item) as summary (`${item.id}:${summary}`)}
-              <div>{summary}</div>
-            {/each}
-          </div>
-        </Card>
-      {/each}
-    </div>
-  {/if}
-
-  <div class="pagination-bar">
-    <small>
-      Showing {items.length} of {pageInfo.totalCount}
-      {#if pageInfo.filter}
-        for "{pageInfo.filter}"
-      {/if}
-    </small>
-
-    <div class="saved-actions">
-      <Button variant="ghost" type="button" onclick={goToPreviousPage} disabled={previousTokens.length === 0}>
-        Previous
-      </Button>
-      <Button variant="ghost" type="button" onclick={goToNextPage} disabled={!pageInfo.nextPageToken}>
-        Next
-      </Button>
-    </div>
-  </div>
-</section>
-
-<style>
-  .derived-section {
-    display: grid;
-    gap: 18px;
-    padding: 24px;
-    border: 1px solid var(--line);
-    border-radius: 24px;
-    background: rgba(8, 18, 28, 0.72);
-  }
-
-  .compact {
-    display: flex;
-    gap: 18px;
-    align-items: end;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-
-  .toolbar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .list-controls {
-    display: flex;
-    gap: 12px;
-    align-items: end;
-    flex-wrap: wrap;
-  }
-
-  .inline-field {
-    min-width: 120px;
-  }
-
-  .grow {
-    flex: 1 1 220px;
-  }
-
-  .derived-grid {
-    display: grid;
-    gap: 14px;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  }
-
-  :global(.derived-card) {
-    display: grid;
-    gap: 14px;
-    padding: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 18px;
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .derived-head {
-    display: grid;
-    gap: 6px;
-  }
-
-  .derived-head span {
-    color: var(--muted);
-    font-size: 0.85rem;
-  }
-
-  .derived-summary {
-    display: grid;
-    gap: 8px;
-    color: var(--accent-soft);
-    font-size: 0.92rem;
-  }
-
-  .pagination-bar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-</style>
+<DerivedResourcePanel
+  appliedFilter={pageInfo.filter}
+  bind:filterValue={filterDraft}
+  bind:kind
+  bind:pageSize={pageSize}
+  canGoNext={Boolean(pageInfo.nextPageToken)}
+  canGoPrevious={previousTokens.length > 0}
+  description="Comparisons, exports, and analyses now page on the client."
+  errorMessage={resourceQuery.isError ? resourceQuery.error?.message ?? `Failed to load ${kind}.` : null}
+  isPending={resourceQuery.isPending}
+  items={panelItems}
+  onApplyFilter={applyFilter}
+  onKindChange={changeKind}
+  onNext={goToNextPage}
+  onPageSizeChange={() => resetPaging()}
+  onPrevious={goToPreviousPage}
+  tabs={resourceTabs}
+  title="Comparisons, exports, and analyses now page on the client."
+  totalCount={pageInfo.totalCount}
+/>

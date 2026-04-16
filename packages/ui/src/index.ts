@@ -41,6 +41,8 @@ export {
 export { Card } from './lib/components/ui/card';
 export { Checkbox } from './lib/components/ui/checkbox';
 export { CopyButton } from './lib/components/ui/copy-button';
+export { ComparisonSummaryPanel } from './lib/components/operator/comparison-summary-panel';
+export { DerivedResourcePanel } from './lib/components/operator/derived-resource-panel';
 export {
   Dialog,
   DialogClose,
@@ -66,6 +68,7 @@ export {
   type Variant as FieldSetVariant
 } from './lib/components/ui/field-set';
 export { Input } from './lib/components/ui/input';
+export { MetricGrid } from './lib/components/operator/metric-grid';
 export {
   NumberField,
   NumberFieldDecrement,
@@ -83,6 +86,10 @@ export {
   PopoverTitle,
   PopoverTrigger
 } from './lib/components/ui/popover';
+export { RegionQuickPick } from './lib/components/operator/region-quick-pick';
+export { ResourceCountStrip } from './lib/components/operator/resource-count-strip';
+export { RunStatusPanel } from './lib/components/operator/run-status-panel';
+export { SavedCheckSummaryCard } from './lib/components/operator/saved-check-summary-card';
 export { ScrollArea, ScrollAreaScrollbar } from './lib/components/ui/scroll-area';
 export { default as SegmentedNav } from './primitives/segmented-nav.svelte';
 export { Select } from './lib/components/ui/select';
@@ -109,3 +116,17 @@ export {
   UnderlineTabsList,
   UnderlineTabsTrigger
 } from './lib/components/ui/underline-tabs';
+export type {
+  ComparisonRegionCard,
+  ComparisonRouteGroup,
+  ComparisonSummaryData,
+  DerivedResourceItem,
+  DerivedResourceTab,
+  MetricGridItem,
+  OperatorActionItem,
+  OperatorTone,
+  RegionQuickPickItem,
+  RunHistoryEntry,
+  RunHistoryJobItem,
+  RunHistoryTargetItem
+} from './lib/components/operator/types';

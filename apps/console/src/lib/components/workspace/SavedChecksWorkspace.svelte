@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { ResourceCountStrip } from '@webperf/ui/components/operator/resource-count-strip';
 
   let {
     savedChecksEnabled,
@@ -16,6 +17,33 @@
     totalRecordedRuns: number;
     children?: Snippet;
   }>();
+
+  const summaryItems = $derived.by(() => [
+    {
+      id: 'saved-checks',
+      label: 'Saved checks',
+      value: checkProfilesCount,
+      detail: 'Reusable gates ready for manual runs or scheduled dispatch.'
+    },
+    {
+      id: 'scheduled',
+      label: 'Scheduled',
+      value: scheduledCheckCount,
+      detail: 'Checks already configured with an interval.'
+    },
+    {
+      id: 'baselines',
+      label: 'Baselines pinned',
+      value: pinnedBaselineCount,
+      detail: 'Checks with a canonical run for regression comparisons.'
+    },
+    {
+      id: 'recorded-runs',
+      label: 'Recorded runs',
+      value: totalRecordedRuns,
+      detail: 'Recent execution history available for drill-down and export.'
+    }
+  ]);
 </script>
 
 <section class="checks-section" id="checks">
@@ -25,28 +53,7 @@
   </div>
 
   {#if savedChecksEnabled}
-    <div class="saved-summary check-stage">
-      <div>
-        <span>Saved checks</span>
-        <strong>{checkProfilesCount}</strong>
-        <small>Reusable gates ready for manual runs or scheduled dispatch.</small>
-      </div>
-      <div>
-        <span>Scheduled</span>
-        <strong>{scheduledCheckCount}</strong>
-        <small>Checks already configured with an interval.</small>
-      </div>
-      <div>
-        <span>Baselines pinned</span>
-        <strong>{pinnedBaselineCount}</strong>
-        <small>Checks with a canonical run for regression comparisons.</small>
-      </div>
-      <div>
-        <span>Recorded runs</span>
-        <strong>{totalRecordedRuns}</strong>
-        <small>Recent execution history available for drill-down and export.</small>
-      </div>
-    </div>
+    <ResourceCountStrip items={summaryItems} />
 
     {@render children?.()}
   {:else}

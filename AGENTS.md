@@ -95,6 +95,7 @@ Current repo state as of 2026-04-15:
 - `packages/ui` now drives a shared token/theme system for both OSS and cloud apps, with Tailwind v4 entrypoints and minimal shadcn-compatible primitive exports
 - `packages/ui` now also acts as the canonical shared shadcn surface for both repos, with `tabs`, `scroll-area`, `dialog`, `popover`, `tooltip`, `checkbox`, `switch`, and `table` joined by jsrepo-managed `underline-tabs`, `field-set`, `number-field`, `tags-input`, and `copy-button`
 - the self-host console now uses those shared components directly through `@webperf/ui/components/ui/*`, with route-level operators also adopting shared number fields, tags input, tables, copy buttons, and action buttons instead of ad hoc controls
+- `packages/ui` now also exposes shared operator composites under `@webperf/ui/components/operator/*`, and the self-host console uses those for metric strips, quick region picks, run status cards, saved-check summaries, comparison panels, and derived-resource browsing
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 
@@ -133,7 +134,7 @@ Current local URLs:
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 9. finalize the license choice before the public GitHub launch
-10. keep the shared token layer, shadcn component exports, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
+10. keep the shared token layer, shadcn component exports, operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
 
 ## Update Protocol
 

@@ -14,6 +14,8 @@
   import SavedChecksWorkspace from '$lib/components/workspace/SavedChecksWorkspace.svelte';
   import WorkspaceMap from '$lib/components/workspace/WorkspaceMap.svelte';
   import { fetchControlJson } from '$lib/client/control-query';
+  import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
+  import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
   import Button from '@webperf/ui/components/ui/button';
   import { Card } from '@webperf/ui/components/ui/card';
   import { Checkbox } from '@webperf/ui/components/ui/checkbox';
@@ -437,7 +439,6 @@
     getProfileMeta(profileId)?.latestComparison ?? null;
   const getBaselineComparison = (profileId: string): CheckProfileComparisonResponse | null =>
     getProfileMeta(profileId)?.baselineComparison ?? null;
-  const getRecentRuns = (profileId: string) => getProfileMeta(profileId)?.runs ?? [];
   const getRecentRunDetails = (profileId: string) => getProfileMeta(profileId)?.recentRunDetails ?? [];
   const getReport = (profileId: string): CheckProfileReportResponse | null => getProfileMeta(profileId)?.report ?? null;
   const getBaselineRunId = (profile: CheckProfile) => profile.baseline?.runId ?? null;
@@ -459,6 +460,35 @@
   });
   const activeRegionCodeSuggestions = $derived.by(() =>
     activeRegionOptions.map((region: RegionAvailability) => region.code)
+  );
+  const quickRegionItems = $derived.by(() =>
+    activeRegionOptions.map((region: RegionAvailability) => ({
+      id: region.code,
+      label: region.label,
+      selected: selectedRegions.includes(region.code),
+      disabled: !region.selectable,
+      onclick: () => toggleRegion(region)
+    }))
+  );
+  const jobSummaryItems = $derived.by(() =>
+    job
+      ? [
+          { id: 'job', label: 'Job', value: job.id },
+          { id: 'status', label: 'Status', value: job.status },
+          { id: 'request', label: 'Request', value: formatRequestConfig(job.request) },
+          { id: 'stream', label: 'Stream', value: streamState },
+          {
+            id: 'targets',
+            label: 'Targets',
+            value: `${job.summary.succeeded} done / ${job.summary.failed} failed / ${job.summary.inflight} inflight`
+          },
+          {
+            id: 'monitor',
+            label: 'Monitor',
+            value: job.evaluation?.status ?? job.monitorPolicy?.monitorType ?? 'latency'
+          }
+        ]
+      : []
   );
   const isConfigBusy = (prefix: string) => savingConfigKind?.startsWith(prefix) ?? false;
 
@@ -1172,21 +1202,11 @@
             <strong>{selectedRegions.length} / {maxSelectableRegions}</strong>
           </div>
 
-          <div class="field">
-            <span>Quick region picks</span>
-            <div class="pill-grid">
-              {#each activeRegionOptions as region (region.code)}
-                <Button
-                  class={`pill-button ${selectedRegions.includes(region.code) ? 'selected' : ''}`}
-                  variant="ghost"
-                  type="button"
-                  onclick={() => toggleRegion(region)}
-                >
-                  {region.label}
-                </Button>
-              {/each}
-            </div>
-          </div>
+          <RegionQuickPick
+            items={quickRegionItems}
+            label="Quick region picks"
+            summary={`${selectedRegions.length} / ${maxSelectableRegions}`}
+          />
         </FieldSetContent>
       </FieldSet>
 
@@ -1261,32 +1281,7 @@
 
   <LiveRunResults>
     {#if job}
-    <div class="job-summary">
-      <div>
-        <span>Job</span>
-        <strong>{job.id}</strong>
-      </div>
-      <div>
-        <span>Status</span>
-        <strong>{job.status}</strong>
-      </div>
-      <div>
-        <span>Request</span>
-        <strong>{formatRequestConfig(job.request)}</strong>
-      </div>
-      <div>
-        <span>Stream</span>
-        <strong>{streamState}</strong>
-      </div>
-      <div>
-        <span>Targets</span>
-        <strong>{job.summary.succeeded} done / {job.summary.failed} failed / {job.summary.inflight} inflight</strong>
-      </div>
-      <div>
-        <span>Monitor</span>
-        <strong>{job.evaluation?.status ?? job.monitorPolicy?.monitorType ?? 'latency'}</strong>
-      </div>
-    </div>
+    <MetricGrid class="job-summary" columns={6} items={jobSummaryItems} />
 
     <div class="result-grid">
       {#each job.targets as target (target.region)}

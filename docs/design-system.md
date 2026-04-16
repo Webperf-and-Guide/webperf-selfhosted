@@ -125,11 +125,29 @@ component layer.
 Preferred app import shape:
 
 - `@webperf/ui/components/ui/*` for shared components
+- `@webperf/ui/components/operator/*` for shared console-level composites
 - `@webperf/ui/styles/*` for app entrypoint CSS
 - `@webperf/ui/utils` for `cn` and utility helpers
 
 Use the root `@webperf/ui` barrel only for shared shell metadata like nav definitions and theme
 descriptors. Shared app screens should not import primitives directly from `@webperf/ui/primitives/*`.
+
+## Operator composites
+
+Higher-level console presentation now lives under `packages/ui/src/lib/components/operator/*`.
+
+Current first-wave shared operator components:
+
+- `metric-grid`
+- `resource-count-strip`
+- `region-quick-pick`
+- `run-status-panel`
+- `comparison-summary-panel`
+- `saved-check-summary-card`
+- `derived-resource-panel`
+
+These components are presentational-first and should accept normalized props from the app layer.
+They should not fetch data, submit forms, or absorb control-plane/runtime assumptions.
 
 ## Future primitives
 

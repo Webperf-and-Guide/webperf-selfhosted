@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { ResourceCountStrip } from '@webperf/ui/components/operator/resource-count-strip';
 
   let {
     savedChecksEnabled,
@@ -8,6 +9,27 @@
     savedChecksEnabled: boolean;
     children?: Snippet;
   }>();
+
+  const summaryItems = [
+    {
+      id: 'comparisons',
+      label: 'Comparisons',
+      value: 'Latest vs previous and baseline',
+      detail: 'Keep regressions, improvements, and unchanged routes isolated from configuration.'
+    },
+    {
+      id: 'exports',
+      label: 'Exports',
+      value: 'JSON and CSV',
+      detail: 'Send deterministic report payloads to CI artifacts, handoffs, or incident notes.'
+    },
+    {
+      id: 'browser',
+      label: 'Derived resources',
+      value: 'Report browser',
+      detail: 'Browse persisted comparisons and exports without leaving the operator workspace.'
+    }
+  ];
 </script>
 
 <section class="reports-section" id="reports">
@@ -17,23 +39,7 @@
   </div>
 
   {#if savedChecksEnabled}
-    <div class="saved-summary report-summary">
-      <div>
-        <span>Comparisons</span>
-        <strong>Latest vs previous and baseline</strong>
-        <small>Keep regressions, improvements, and unchanged routes isolated from configuration.</small>
-      </div>
-      <div>
-        <span>Exports</span>
-        <strong>JSON and CSV</strong>
-        <small>Send deterministic report payloads to CI artifacts, handoffs, or incident notes.</small>
-      </div>
-      <div>
-        <span>Derived resources</span>
-        <strong>Report browser</strong>
-        <small>Browse persisted comparisons and exports without leaving the operator workspace.</small>
-      </div>
-    </div>
+    <ResourceCountStrip items={summaryItems} />
 
     {@render children?.()}
   {:else}

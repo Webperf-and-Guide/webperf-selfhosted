@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
 
   let {
     controlModeLabel,
@@ -20,6 +21,29 @@
     checkProfileCount: number;
     children?: Snippet;
   }>();
+
+  const heroMetrics = $derived.by(() => [
+    {
+      id: 'control-plane',
+      label: 'Control plane',
+      value: controlModeLabel,
+      detail: controlModeDetail
+    },
+    {
+      id: 'active-regions',
+      label: 'Active regions',
+      value: `${selectableCount} active / ${regionCount} modeled`,
+      detail: activeRegionPreview
+    },
+    {
+      id: 'saved-checks',
+      label: 'Saved checks',
+      value: savedChecksEnabled ? `${checkProfileCount} reusable checks` : 'Manual runs only',
+      detail: savedChecksEnabled
+        ? 'Promote stable runs into schedules, baselines, and exports.'
+        : 'Connect the full self-host API service to unlock persistent resources.'
+    }
+  ]);
 </script>
 
 <section class="hero" id="measure">
@@ -31,28 +55,7 @@
       verification, inspect the live control-plane stream, then save repeatable checks with route
       groups, region sets, baselines, schedules, and exports.
     </p>
-
-    <div class="hero-metrics">
-      <div>
-        <span>Control plane</span>
-        <strong>{controlModeLabel}</strong>
-        <small>{controlModeDetail}</small>
-      </div>
-      <div>
-        <span>Active regions</span>
-        <strong>{selectableCount} active / {regionCount} modeled</strong>
-        <small>{activeRegionPreview}</small>
-      </div>
-      <div>
-        <span>Saved checks</span>
-        <strong>{savedChecksEnabled ? `${checkProfileCount} reusable checks` : 'Manual runs only'}</strong>
-        <small>
-          {savedChecksEnabled
-            ? 'Promote stable runs into schedules, baselines, and exports.'
-            : 'Connect the full self-host API service to unlock persistent resources.'}
-        </small>
-      </div>
-    </div>
+    <MetricGrid columns={3} items={heroMetrics} />
   </div>
 
   {@render children?.()}

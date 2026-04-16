@@ -1,4 +1,4 @@
 {
-  "image": "ghcr.io/your-org/webperf-probe:sha-placeholder",
+  "image": "ghcr.io/webperf-and-guide/webperf-probe:main",
   "platform": "linux/amd64"
 }

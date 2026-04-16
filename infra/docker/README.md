@@ -2,8 +2,8 @@
 
 The runtime images in this repo are:
 
-- `ghcr.io/your-org/webperf-probe`
-- `ghcr.io/your-org/webperf-browser-audit-worker`
+- `ghcr.io/webperf-and-guide/webperf-probe`
+- `ghcr.io/webperf-and-guide/webperf-browser-audit-worker`
 
 Recommended builds:
 

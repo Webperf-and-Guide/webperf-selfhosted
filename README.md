@@ -96,8 +96,8 @@ Pending release notes live under `.sampo/changesets/`.
 
 The reusable runtime images in this repo are intended to publish as:
 
-- `ghcr.io/<owner>/webperf-probe`
-- `ghcr.io/<owner>/webperf-browser-audit-worker`
+- `ghcr.io/webperf-and-guide/webperf-probe`
+- `ghcr.io/webperf-and-guide/webperf-browser-audit-worker`
 
 Checked-in image refs live under:
 

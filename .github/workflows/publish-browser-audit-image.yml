@@ -25,7 +25,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/webperf-browser-audit-worker
+          images: ghcr.io/webperf-and-guide/webperf-browser-audit-worker
           tags: |
             type=sha
             type=ref,event=branch

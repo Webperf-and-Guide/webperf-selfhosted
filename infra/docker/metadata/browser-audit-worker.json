@@ -1,5 +1,5 @@
 {
-  "image": "ghcr.io/your-org/webperf-browser-audit-worker:sha-placeholder",
+  "image": "ghcr.io/webperf-and-guide/webperf-browser-audit-worker:main",
   "platform": "linux/amd64",
   "runtime": "bun",
   "scope": "optional-selfhost-runtime"

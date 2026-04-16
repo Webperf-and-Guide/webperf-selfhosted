@@ -20,5 +20,5 @@ cargo clippy --workspace --all-targets --manifest-path apps/probe-rs/Cargo.toml 
 Build for Bunny Magic Containers with `linux/amd64`:
 
 ```sh
-docker buildx build --platform linux/amd64 -t ghcr.io/your-org/webperf-probe:dev ./apps/probe-rs
+docker buildx build --platform linux/amd64 -t ghcr.io/webperf-and-guide/webperf-probe:dev ./apps/probe-rs
 ```

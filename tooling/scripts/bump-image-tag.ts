@@ -9,12 +9,12 @@ const metadataFiles = [
   {
     name: 'probe',
     path: new URL('../../infra/docker/metadata/probe.json', import.meta.url),
-    image: `ghcr.io/your-org/webperf-probe:${tag}`
+    image: `ghcr.io/webperf-and-guide/webperf-probe:${tag}`
   },
   {
     name: 'browser-audit-worker',
     path: new URL('../../infra/docker/metadata/browser-audit-worker.json', import.meta.url),
-    image: `ghcr.io/your-org/webperf-browser-audit-worker:${tag}`
+    image: `ghcr.io/webperf-and-guide/webperf-browser-audit-worker:${tag}`
   }
 ] as const;
 

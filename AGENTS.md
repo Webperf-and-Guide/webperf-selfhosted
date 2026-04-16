@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-16
+Last updated: 2026-04-17
 
 ## Mission
 
@@ -81,6 +81,9 @@ Current repo state as of 2026-04-15:
 - `apps/console` now proxies through merged split `app` and `ops` oRPC clients directly, replacing the hand-written control-plane façade while keeping SSE reconstruction and typed report export handling
 - console runtime config now centers on `CONTROL_BASE_URL` for self-hosted access instead of the older binding-oriented env surface
 - the console now leans into an operator-facing self-host workflow: manual run first, reusable checks second, region catalog third, with product copy using site/route group/region set/check terminology instead of implementation-heavy labels
+- `packages/ui` now acts as the shared token source of truth for both OSS and cloud UI surfaces, with Tailwind v4-compatible operator and marketing theme entrypoints plus a minimal shadcn-compatible primitive structure
+- the console shell and overview now consume the shared token layer and section wrappers so the IA reads as `Run / Resources / Checks / Reports / Regions` instead of one mixed document
+- `packages/ui` now also exposes a shadcn-compatible shared surface under `src/lib/components/ui/*`, with root-level `jsrepo.config.ts` routing `@ieedan/shadcn-svelte-extras` into the shared package instead of app-local copies
 - docs now explicitly treat this repo as the public source of truth for self-hosted contracts, schemas, and deterministic reporting behavior
 - `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
 - `apps/browser-audit-worker` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
@@ -88,6 +91,12 @@ Current repo state as of 2026-04-15:
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 - root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
 - the browser-audit image publish workflow now also watches workspace dependency inputs like `packages/contracts`, the root `package.json`, and `bun.lock` so GHCR refreshes do not miss compatible runtime changes
+- the console IA now has a real route split around `/`, `/resources`, `/checks`, `/reports`, and `/regions`, backed by a shared workspace component and route-loader helper
+- `packages/ui` now drives a shared token/theme system for both OSS and cloud apps, with Tailwind v4 entrypoints and minimal shadcn-compatible primitive exports
+- `packages/ui` now also acts as the canonical shared shadcn surface for both repos, with `tabs`, `scroll-area`, `dialog`, `popover`, `tooltip`, `checkbox`, `switch`, and `table` joined by jsrepo-managed `underline-tabs`, `field-set`, `number-field`, `tags-input`, and `copy-button`
+- the self-host console now uses those shared components directly through `@webperf/ui/components/ui/*`, with route-level operators also adopting shared number fields, tags input, tables, copy buttons, and action buttons instead of ad hoc controls
+- thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
+- self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -120,10 +129,11 @@ Current local URLs:
 3. keep refining install docs and compose ergonomics
 4. decide how package publishing should work once the repo is public
 5. decide whether public comparison/export resources should get richer server-side pagination and filtering
-6. keep tightening the console around operator workflows and reduce any remaining marketing-style presentation drift
+6. continue breaking the shared console workspace into smaller route-scoped components now that the operator routes exist
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 9. finalize the license choice before the public GitHub launch
+10. keep the shared token layer, shadcn component exports, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
 
 ## Update Protocol
 

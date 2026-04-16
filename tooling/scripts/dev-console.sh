@@ -27,5 +27,8 @@ TURNSTILE_SITE_KEY=
 EOF
 
 cd "$root_dir"
+export CONTROL_BASE_URL="http://127.0.0.1:8788"
+export DEPLOY_TARGET="pages"
+export TURNSTILE_SITE_KEY=""
 export WEBPERF_CONSOLE_ADAPTER=node
 bun run --cwd apps/console dev -- "$@"

@@ -24,6 +24,11 @@ const config = {
       '@webperf/config/*': path.resolve(projectDir, '../../packages/config/src/*'),
       '@webperf/report-core': path.resolve(projectDir, '../../packages/report-core/src/index.ts'),
       '@webperf/report-core/*': path.resolve(projectDir, '../../packages/report-core/src/*'),
+      '@webperf/ui/components': path.resolve(projectDir, '../../packages/ui/src/lib/components'),
+      '@webperf/ui/components/*': path.resolve(projectDir, '../../packages/ui/src/lib/components/*'),
+      '@webperf/ui/styles': path.resolve(projectDir, '../../packages/ui/src/styles'),
+      '@webperf/ui/styles/*': path.resolve(projectDir, '../../packages/ui/src/styles/*'),
+      '@webperf/ui/utils': path.resolve(projectDir, '../../packages/ui/src/lib/utils.ts'),
       '@webperf/ui': path.resolve(projectDir, '../../packages/ui/src/index.ts'),
       '@webperf/ui/*': path.resolve(projectDir, '../../packages/ui/src/*')
     }

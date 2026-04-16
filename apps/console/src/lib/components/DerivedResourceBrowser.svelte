@@ -1,6 +1,21 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { createQuery } from '@tanstack/svelte-query';
+  import Button from '@webperf/ui/components/ui/button';
+  import { Card } from '@webperf/ui/components/ui/card';
+  import { Input } from '@webperf/ui/components/ui/input';
+  import {
+    NumberField,
+    NumberFieldDecrement,
+    NumberFieldGroup,
+    NumberFieldIncrement,
+    NumberFieldInput
+  } from '@webperf/ui/components/ui/number-field';
+  import {
+    UnderlineTabs,
+    UnderlineTabsList,
+    UnderlineTabsTrigger
+  } from '@webperf/ui/components/ui/underline-tabs';
   import type {
     AnalysisListResponse,
     AnalysisResource,
@@ -94,11 +109,6 @@
     resetPaging();
   };
 
-  const changePageSize = (nextPageSize: string) => {
-    pageSize = Number(nextPageSize);
-    resetPaging();
-  };
-
   const goToNextPage = () => {
     if (!pageInfo.nextPageToken) {
       return;
@@ -154,37 +164,36 @@
       <h3>Comparisons, exports, and analyses now page on the client.</h3>
     </div>
 
-    <div class="toolbar">
-      <div class="segmented">
-        {#each ['comparisons', 'exports', 'analyses'] as option (option)}
-          <button
-            class:active={kind === option}
-            class="ghost-button"
-            type="button"
-            onclick={() => changeKind(option as ResourceKind)}
-          >
-            {option}
-          </button>
-        {/each}
-      </div>
+      <div class="toolbar">
+        <UnderlineTabs value={kind} class="w-full max-w-xl">
+          <UnderlineTabsList>
+            {#each ['comparisons', 'exports', 'analyses'] as option (option)}
+              <UnderlineTabsTrigger value={option} onclick={() => changeKind(option as ResourceKind)}>
+                {option}
+              </UnderlineTabsTrigger>
+            {/each}
+          </UnderlineTabsList>
+        </UnderlineTabs>
 
-      <label class="field inline-field">
-        <span>Page size</span>
-        <select bind:value={pageSize} onchange={(event) => changePageSize((event.currentTarget as HTMLSelectElement).value)}>
-          <option value="4">4</option>
-          <option value="6">6</option>
-          <option value="10">10</option>
-        </select>
-      </label>
-    </div>
+        <label class="field inline-field">
+          <span>Page size</span>
+          <NumberField bind:value={pageSize} max={10} min={4} step={2}>
+            <NumberFieldGroup>
+              <NumberFieldDecrement />
+              <NumberFieldInput aria-label="Derived resource page size" oninput={() => resetPaging()} />
+              <NumberFieldIncrement />
+            </NumberFieldGroup>
+          </NumberField>
+        </label>
+      </div>
   </div>
 
   <div class="list-controls">
     <label class="field grow">
       <span>Filter</span>
-      <input bind:value={filterDraft} placeholder="name, id, status, source" />
+      <Input bind:value={filterDraft} placeholder="name, id, status, source" />
     </label>
-    <button class="secondary-button" type="button" onclick={applyFilter}>Apply</button>
+    <Button variant="secondary" type="button" onclick={applyFilter}>Apply</Button>
   </div>
 
   {#if resourceQuery.isPending}
@@ -201,7 +210,7 @@
   {:else}
     <div class="derived-grid">
       {#each items as item (item.id)}
-        <article class="derived-card">
+        <Card class="derived-card">
           <div class="derived-head">
             <strong>{item.id}</strong>
             <span>{new Date(item.createdAt).toLocaleString()}</span>
@@ -212,7 +221,7 @@
               <div>{summary}</div>
             {/each}
           </div>
-        </article>
+        </Card>
       {/each}
     </div>
   {/if}
@@ -226,12 +235,12 @@
     </small>
 
     <div class="saved-actions">
-      <button class="ghost-button" type="button" onclick={goToPreviousPage} disabled={previousTokens.length === 0}>
+      <Button variant="ghost" type="button" onclick={goToPreviousPage} disabled={previousTokens.length === 0}>
         Previous
-      </button>
-      <button class="ghost-button" type="button" onclick={goToNextPage} disabled={!pageInfo.nextPageToken}>
+      </Button>
+      <Button variant="ghost" type="button" onclick={goToNextPage} disabled={!pageInfo.nextPageToken}>
         Next
-      </button>
+      </Button>
     </div>
   </div>
 </section>
@@ -261,18 +270,6 @@
     flex-wrap: wrap;
   }
 
-  .segmented {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .segmented button.active {
-    background: rgba(255, 176, 95, 0.16);
-    color: var(--accent-soft);
-    border-color: rgba(255, 176, 95, 0.4);
-  }
-
   .list-controls {
     display: flex;
     gap: 12px;
@@ -294,7 +291,7 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 
-  .derived-card {
+  :global(.derived-card) {
     display: grid;
     gap: 14px;
     padding: 18px;

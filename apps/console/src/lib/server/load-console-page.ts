@@ -1,0 +1,120 @@
+import { parseWebEnv } from '@webperf/config/public';
+import type {
+  CheckProfileComparisonResponse,
+  CheckProfileLatestComparisonResponse,
+  CheckProfileListResponse,
+  CheckProfileReportResponse,
+  CheckProfileRunDetailResponse,
+  CheckProfileRunListResponse,
+  PropertyListResponse,
+  RegionPackListResponse,
+  RegionsResponse,
+  RouteSetListResponse
+} from '@webperf/contracts';
+import { env as privateEnv } from '$env/dynamic/private';
+import type { ConsolePageData, SavedChecksData } from '$lib/console-data';
+
+type LoaderFetch = typeof fetch;
+type Platform = App.Platform | undefined;
+
+export const loadConsolePage = async ({
+  fetch,
+  platform
+}: {
+  fetch: LoaderFetch;
+  platform: Platform;
+}): Promise<ConsolePageData> => {
+  const runtime = parseWebEnv({
+    CONTROL_BASE_URL: platform?.env?.CONTROL_BASE_URL ?? privateEnv.CONTROL_BASE_URL,
+    DEPLOY_TARGET: platform?.env?.DEPLOY_TARGET ?? privateEnv.DEPLOY_TARGET,
+    TURNSTILE_SITE_KEY: platform?.env?.TURNSTILE_SITE_KEY ?? privateEnv.TURNSTILE_SITE_KEY
+  });
+
+  const regionsPayload = await fetchOptionalJson<RegionsResponse>(fetch, '/api/control/regions');
+  const savedChecks = await loadSavedChecks(fetch);
+
+  return {
+    regions: regionsPayload?.regions ?? [],
+    turnstileSiteKey: runtime.TURNSTILE_SITE_KEY ?? null,
+    savedChecks
+  };
+};
+
+const loadSavedChecks = async (fetchFn: LoaderFetch) => {
+  const checkProfilesPayload = await fetchOptionalJson<CheckProfileListResponse>(
+    fetchFn,
+    '/api/control/check-profiles?pageSize=200'
+  );
+
+  if (!checkProfilesPayload) {
+    return null satisfies SavedChecksData | null;
+  }
+
+  const [propertiesPayload, routeSetsPayload, regionPacksPayload, profileMeta] = await Promise.all([
+    fetchOptionalJson<PropertyListResponse>(fetchFn, '/api/control/properties?pageSize=200'),
+    fetchOptionalJson<RouteSetListResponse>(fetchFn, '/api/control/route-sets?pageSize=200'),
+    fetchOptionalJson<RegionPackListResponse>(fetchFn, '/api/control/region-packs?pageSize=200'),
+    Promise.all(
+      checkProfilesPayload.checkProfiles.map(async (profile) => {
+        const [runsPayload, latestComparison, baselineComparison, report] = await Promise.all([
+          fetchOptionalJson<CheckProfileRunListResponse>(
+            fetchFn,
+            `/api/control/check-profiles/${profile.id}/runs?pageSize=10`
+          ),
+          fetchOptionalJson<CheckProfileLatestComparisonResponse>(
+            fetchFn,
+            `/api/control/check-profiles/${profile.id}/compare/latest`
+          ),
+          fetchOptionalJson<CheckProfileComparisonResponse>(
+            fetchFn,
+            `/api/control/check-profiles/${profile.id}/compare/baseline`
+          ),
+          fetchOptionalJson<CheckProfileReportResponse>(fetchFn, `/api/control/check-profiles/${profile.id}/report`)
+        ]);
+
+        const recentRunIds = runsPayload?.runs.slice(0, 3).map((run) => run.id) ?? [];
+        const recentRunDetails = (
+          await Promise.all(
+            recentRunIds.map((runId) =>
+              fetchOptionalJson<CheckProfileRunDetailResponse>(
+                fetchFn,
+                `/api/control/check-profiles/${profile.id}/runs/${runId}`
+              )
+            )
+          )
+        ).filter((detail): detail is CheckProfileRunDetailResponse => detail !== null);
+
+        return {
+          profileId: profile.id,
+          runs: runsPayload?.runs ?? [],
+          latestComparison,
+          baselineComparison,
+          recentRunDetails,
+          report
+        };
+      })
+    )
+  ]);
+
+  return {
+    properties: propertiesPayload?.properties ?? [],
+    routeSets: routeSetsPayload?.routeSets ?? [],
+    regionPacks: regionPacksPayload?.regionPacks ?? [],
+    checkProfiles: checkProfilesPayload.checkProfiles,
+    profileMeta
+  } satisfies SavedChecksData;
+};
+
+const fetchOptionalJson = async <T>(fetchFn: LoaderFetch, path: string): Promise<T | null> => {
+  try {
+    const response = await fetchFn(path);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+};

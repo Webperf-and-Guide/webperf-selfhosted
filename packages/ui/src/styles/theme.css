@@ -1,0 +1,71 @@
+:root {
+  --wp-font-sans: "Geist", "Avenir Next", "Segoe UI", sans-serif;
+  --wp-font-mono: "Geist Mono", "SFMono-Regular", "IBM Plex Mono", monospace;
+  --wp-radius-xs: 0.75rem;
+  --wp-radius-sm: 1rem;
+  --wp-radius-md: 1.35rem;
+  --wp-radius-lg: 1.75rem;
+  --wp-radius-xl: 2rem;
+  --wp-radius-pill: 999px;
+  --wp-shadow-panel: 0 24px 64px rgba(8, 16, 28, 0.22);
+  --wp-shadow-soft: 0 18px 44px rgba(15, 23, 42, 0.12);
+  --wp-shell-width: 1180px;
+  --wp-page-gutter: clamp(1rem, 2vw, 1.5rem);
+}
+
+:root,
+[data-theme='operator'] {
+  color-scheme: dark;
+  --wp-canvas: oklch(0.19 0.025 250);
+  --wp-surface: color-mix(in srgb, #0f1c2a 78%, transparent);
+  --wp-surface-strong: color-mix(in srgb, #0a1420 92%, transparent);
+  --wp-text: oklch(0.97 0.01 95);
+  --wp-muted: oklch(0.8 0.025 240);
+  --wp-line: color-mix(in srgb, #c6d1db 16%, transparent);
+  --wp-accent: oklch(0.72 0.16 55);
+  --wp-accent-soft: oklch(0.88 0.06 60);
+  --wp-success: oklch(0.78 0.12 158);
+  --wp-warning: oklch(0.83 0.16 82);
+  --wp-danger: oklch(0.71 0.17 28);
+}
+
+[data-theme='brand'] {
+  color-scheme: light;
+  --wp-canvas: oklch(0.98 0.01 85);
+  --wp-surface: color-mix(in srgb, white 84%, #f4efe6 16%);
+  --wp-surface-strong: color-mix(in srgb, white 94%, #efe9de 6%);
+  --wp-text: oklch(0.24 0.03 250);
+  --wp-muted: oklch(0.53 0.02 250);
+  --wp-line: color-mix(in srgb, #1f2937 12%, transparent);
+  --wp-accent: oklch(0.72 0.16 55);
+  --wp-accent-soft: oklch(0.46 0.11 45);
+  --wp-success: oklch(0.7 0.12 158);
+  --wp-warning: oklch(0.77 0.13 82);
+  --wp-danger: oklch(0.62 0.18 28);
+}
+
+[data-theme='brand-dark'] {
+  color-scheme: dark;
+  --wp-canvas: oklch(0.2 0.03 258);
+  --wp-surface: color-mix(in srgb, #111a26 78%, transparent);
+  --wp-surface-strong: color-mix(in srgb, #0c131d 90%, transparent);
+  --wp-text: oklch(0.98 0.005 80);
+  --wp-muted: oklch(0.8 0.025 250);
+  --wp-line: color-mix(in srgb, #d1d5db 15%, transparent);
+  --wp-accent: oklch(0.74 0.16 55);
+  --wp-accent-soft: oklch(0.9 0.05 70);
+  --wp-success: oklch(0.78 0.12 158);
+  --wp-warning: oklch(0.83 0.16 82);
+  --wp-danger: oklch(0.71 0.17 28);
+}
+
+html.theme-animating,
+html.theme-animating * {
+  transition:
+    background-color 250ms ease,
+    color 250ms ease,
+    border-color 250ms ease,
+    fill 250ms ease,
+    stroke 250ms ease,
+    outline-color 250ms ease;
+}

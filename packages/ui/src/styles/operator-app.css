@@ -1,0 +1,543 @@
+@import "./theme.css";
+
+@theme inline {
+  --font-sans: var(--wp-font-sans);
+  --font-mono: var(--wp-font-mono);
+  --radius-sm: var(--wp-radius-sm);
+  --radius-md: var(--wp-radius-md);
+  --radius-lg: var(--wp-radius-lg);
+  --radius-xl: var(--wp-radius-xl);
+  --color-canvas: var(--wp-canvas);
+  --color-surface: var(--wp-surface);
+  --color-surface-strong: var(--wp-surface-strong);
+  --color-text: var(--wp-text);
+  --color-muted: var(--wp-muted);
+  --color-line: var(--wp-line);
+  --color-accent: var(--wp-accent);
+  --color-accent-soft: var(--wp-accent-soft);
+  --color-success: var(--wp-success);
+  --color-warning: var(--wp-warning);
+  --color-danger: var(--wp-danger);
+  --color-background: var(--wp-canvas);
+  --color-foreground: var(--wp-text);
+  --color-card: var(--wp-surface);
+  --color-card-foreground: var(--wp-text);
+  --color-popover: var(--wp-surface-strong);
+  --color-popover-foreground: var(--wp-text);
+  --color-border: var(--wp-line);
+  --color-input: var(--wp-line);
+  --color-ring: color-mix(in srgb, var(--wp-accent) 45%, transparent);
+  --color-primary: var(--wp-accent);
+  --color-primary-foreground: oklch(0.18 0.02 250);
+  --color-secondary: color-mix(in srgb, var(--wp-surface-strong) 88%, white 12%);
+  --color-secondary-foreground: var(--wp-text);
+  --color-muted-foreground: var(--wp-muted);
+  --color-destructive: var(--wp-danger);
+  --color-destructive-foreground: var(--wp-text);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-h-screen bg-canvas text-text antialiased;
+    font-family: var(--wp-font-sans);
+    background:
+      radial-gradient(circle at top left, color-mix(in srgb, var(--wp-accent) 26%, transparent), transparent 32%),
+      radial-gradient(circle at top right, color-mix(in srgb, #3f94d9 16%, transparent), transparent 24%),
+      linear-gradient(180deg, color-mix(in srgb, var(--wp-canvas) 92%, #060c14 8%) 0%, var(--wp-canvas) 100%);
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  strong,
+  small,
+  dt,
+  dd {
+    margin: 0;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .shell {
+    @apply min-h-screen px-[var(--wp-page-gutter)] pt-5 pb-12;
+  }
+
+  .topbar {
+    @apply mx-auto grid w-full max-w-[var(--wp-shell-width)] grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[var(--wp-radius-lg)] border border-line bg-surface px-5 py-4 shadow-[var(--wp-shadow-soft)] backdrop-blur-xl;
+  }
+
+  .brand {
+    @apply flex items-center gap-3;
+  }
+
+  .mark {
+    @apply grid h-11 w-11 place-items-center rounded-[var(--wp-radius-sm)] bg-gradient-to-br from-accent to-[#ffb05f] font-black tracking-[0.08em] text-[#101820];
+  }
+
+  .brand strong {
+    @apply block text-[0.98rem];
+  }
+
+  .brand small {
+    @apply text-sm text-muted;
+  }
+
+  .nav {
+    @apply flex flex-wrap justify-end gap-2;
+  }
+
+  .nav a {
+    @apply rounded-full px-3 py-2 text-[0.92rem] text-accent-soft transition-colors duration-200;
+  }
+
+  .nav a:hover {
+    @apply bg-white/5;
+  }
+
+  .content {
+    @apply mx-auto mt-6 grid w-full max-w-[var(--wp-shell-width)] gap-6;
+  }
+
+  .workspace-map,
+  .hero-metrics,
+  .job-summary,
+  .saved-summary,
+  .saved-stats,
+  .comparison-summary,
+  .recent-runs,
+  .continents,
+  .result-grid,
+  .builder-grid,
+  .saved-grid,
+  .comparison-region-grid,
+  .run-route-grid,
+  .run-target-grid {
+    @apply grid gap-4;
+  }
+
+  .workspace-map {
+    @apply grid-cols-5;
+  }
+
+  .map-card,
+  .hero-copy,
+  .control-card,
+  .continent-card,
+  .job-summary,
+  .result-card,
+  .builder-card,
+  .saved-card,
+  .saved-summary,
+  .empty-state {
+    @apply rounded-[var(--wp-radius-xl)] border border-line bg-surface shadow-[var(--wp-shadow-panel)];
+  }
+
+  .map-card,
+  .hero-copy,
+  .control-card,
+  .continent-card,
+  .job-summary,
+  .result-card,
+  .builder-card,
+  .saved-card,
+  .saved-summary,
+  .empty-state {
+    @apply p-7;
+  }
+
+  .map-card {
+    @apply gap-2 bg-surface/80;
+  }
+
+  .map-card span,
+  .guide-grid span,
+  .eyebrow,
+  .section-heading p,
+  .job-summary span,
+  .result-head span,
+  dt,
+  .field span,
+  .measurement-details span,
+  .comparison-mode,
+  .comparison-region-stats span,
+  .run-target-grid span {
+    @apply text-[0.72rem] uppercase tracking-[0.12em] text-muted;
+  }
+
+  .map-card small,
+  .hero-metrics small,
+  .card-copy,
+  .setup-flow small,
+  .saved-meta,
+  .saved-note,
+  .comparison-route small,
+  .hint,
+  .empty-state small,
+  .result-card dd {
+    @apply text-muted leading-7;
+  }
+
+  section[id] {
+    scroll-margin-top: 7rem;
+  }
+
+  section {
+    @apply grid gap-5;
+  }
+
+  .hero {
+    @apply grid grid-cols-[minmax(0,1fr)_minmax(340px,0.72fr)] items-start gap-5;
+  }
+
+  .hero-copy {
+    @apply grid min-h-full content-start gap-5;
+  }
+
+  .hero-copy h1 {
+    @apply mt-1 max-w-[10ch] text-[clamp(2.4rem,4.2vw,4.8rem)] leading-[0.94];
+  }
+
+  .hero-copy h2,
+  .section-heading h2,
+  .card-intro h2 {
+    @apply text-[1.45rem] leading-[1.1];
+  }
+
+  .lede {
+    @apply max-w-[56ch] text-[1rem] leading-7 text-text/88;
+  }
+
+  .hero-metrics {
+    @apply grid-cols-3 gap-3;
+  }
+
+  .hero-metrics div,
+  .job-summary div,
+  .saved-stats div,
+  .comparison-summary div,
+  .recent-runs div,
+  .measurement-details div,
+  .guide-grid div {
+    @apply grid gap-1.5;
+  }
+
+  .hero-metrics div,
+  .guide-grid div {
+    @apply border-t border-line pt-3;
+  }
+
+  .control-card {
+    @apply grid gap-4 bg-[linear-gradient(180deg,rgba(12,24,38,0.98)_0%,rgba(22,43,59,0.96)_100%)];
+  }
+
+  .card-intro {
+    @apply grid gap-2 border-b border-line pb-3;
+  }
+
+  .field {
+    @apply grid gap-2;
+  }
+
+  .grow {
+    @apply flex-1 basis-60;
+  }
+
+  .inline-field {
+    @apply min-w-32;
+  }
+
+  .field input,
+  .field select,
+  .field textarea,
+  select,
+  textarea {
+    @apply rounded-[var(--wp-radius-sm)] border border-line bg-surface-strong/70 px-4 py-3 text-text outline-none ring-0 transition-colors duration-200 placeholder:text-muted/70 focus:border-accent/50;
+  }
+
+  .field textarea,
+  textarea {
+    @apply min-h-24 resize-y;
+  }
+
+  .checkbox-field {
+    @apply flex items-center gap-2.5 text-text;
+  }
+
+  .checkbox-list {
+    @apply grid gap-2;
+  }
+
+  .submit,
+  .secondary-button,
+  .ghost-button,
+  .danger-button {
+    @apply rounded-full px-4 py-2.5 transition-colors duration-200;
+  }
+
+  .submit {
+    @apply border-0 bg-gradient-to-br from-accent to-[#ffb05f] font-bold text-[#101820];
+  }
+
+  .secondary-button {
+    @apply border border-line bg-white/5 text-text;
+  }
+
+  .ghost-button {
+    @apply border border-line bg-transparent text-muted;
+  }
+
+  .danger-button {
+    @apply border border-danger/25 bg-danger/10 text-accent-soft;
+  }
+
+  .submit:disabled,
+  .secondary-button:disabled,
+  .ghost-button:disabled,
+  .danger-button:disabled {
+    @apply cursor-wait opacity-65;
+  }
+
+  .advanced-panel {
+    @apply grid gap-3 rounded-[var(--wp-radius-md)] border border-line bg-white/5 p-4;
+  }
+
+  .advanced-panel summary {
+    @apply cursor-pointer font-semibold text-text;
+  }
+
+  .advanced-grid {
+    @apply grid gap-4 pt-2;
+  }
+
+  .cn-tabs-list-variant-default {
+    @apply bg-white/5;
+  }
+
+  [data-slot='dialog-content'],
+  [data-slot='popover-content'] {
+    @apply border border-line bg-surface-strong shadow-[var(--wp-shadow-soft)];
+  }
+
+  [data-slot='dialog-footer'] {
+    @apply bg-white/5;
+  }
+
+  .results-section,
+  .resources-section,
+  .checks-section,
+  .reports-section,
+  .regions-section,
+  .saved-section {
+    @apply gap-4;
+  }
+
+  .section-heading {
+    @apply grid gap-2;
+  }
+
+  .resources-grid {
+    @apply grid-cols-3;
+  }
+
+  .check-builder-grid {
+    @apply grid-cols-[minmax(0,1.05fr)_minmax(280px,0.75fr)];
+  }
+
+  .builder-guide {
+    @apply content-start bg-[linear-gradient(180deg,rgba(10,20,32,0.92)_0%,rgba(20,32,46,0.82)_100%)];
+  }
+
+  .guide-grid {
+    @apply grid gap-3;
+  }
+
+  .job-summary {
+    @apply grid-cols-3;
+  }
+
+  .result-grid,
+  .saved-grid,
+  .builder-grid {
+    @apply grid-cols-2;
+  }
+
+  .saved-head,
+  .comparison-heading,
+  .run-detail-head,
+  .result-head,
+  .continent-card header {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .saved-stats,
+  .comparison-summary,
+  .recent-runs,
+  .check-stage {
+    @apply grid-cols-4;
+  }
+
+  .resource-flow,
+  .resource-summary,
+  .report-summary {
+    @apply grid-cols-3;
+  }
+
+  .setup-flow {
+    @apply grid-cols-2;
+  }
+
+  .comparison-block,
+  .run-detail-card,
+  .run-route-card,
+  .comparison-route {
+    @apply grid gap-3 border-t border-line pt-3;
+  }
+
+  .comparison-section-list,
+  .run-detail-list,
+  .comparison-routes {
+    @apply grid gap-4;
+  }
+
+  .comparison-region-grid {
+    @apply grid-cols-[repeat(auto-fit,minmax(220px,1fr))];
+  }
+
+  .comparison-region-card {
+    @apply grid gap-2.5 rounded-[var(--wp-radius-md)] border border-line bg-white/5 p-4;
+  }
+
+  .comparison-region-card.improved {
+    @apply border-success/35;
+  }
+
+  .comparison-region-card.regressed {
+    @apply border-danger/35;
+  }
+
+  .comparison-region-stats,
+  .run-target-grid {
+    @apply grid-cols-[repeat(auto-fit,minmax(140px,1fr))];
+  }
+
+  .measurement-details {
+    @apply mt-4 grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 border-t border-line pt-4;
+  }
+
+  .measurement-details strong {
+    word-break: break-word;
+  }
+
+  .continents {
+    @apply grid-cols-2;
+  }
+
+  .continent-card {
+    @apply grid gap-4;
+  }
+
+  .region-list {
+    @apply grid grid-cols-2 gap-2.5;
+  }
+
+  .region-list button,
+  .pill-button {
+    @apply rounded-[var(--wp-radius-md)] border border-line bg-white/5 text-left text-text transition-colors duration-200;
+  }
+
+  .region-list button {
+    @apply grid gap-1 p-4;
+  }
+
+  .region-list button.selected,
+  .pill-button.selected {
+    @apply border-accent/60 bg-accent/10;
+  }
+
+  .region-list button.disabled {
+    @apply opacity-60;
+  }
+
+  .pill-grid,
+  .builder-actions,
+  .saved-actions,
+  .list-toolbar,
+  .pagination-bar {
+    @apply flex flex-wrap gap-3;
+  }
+
+  .comparison-region-head {
+    @apply flex items-baseline justify-between gap-2.5;
+  }
+
+  .list-toolbar,
+  .pagination-bar {
+    @apply items-end justify-between;
+  }
+
+  .pill-button {
+    @apply rounded-full px-3 py-2;
+  }
+
+  .empty-state {
+    @apply min-h-[220px] place-items-center text-center;
+  }
+
+  .turnstile-shell {
+    @apply overflow-auto;
+  }
+
+  @media (max-width: 940px) {
+    .workspace-map,
+    .hero,
+    .continents,
+    .result-grid,
+    .builder-grid,
+    .saved-grid,
+    .job-summary,
+    .saved-stats,
+    .comparison-summary,
+    .recent-runs,
+    .saved-summary,
+    .hero-metrics,
+    .region-list {
+      @apply grid-cols-1;
+    }
+  }
+
+  @media (max-width: 860px) {
+    .topbar {
+      @apply grid-cols-1;
+    }
+
+    .nav {
+      @apply grid grid-cols-2 justify-stretch;
+    }
+
+    .nav a {
+      @apply border border-line text-center;
+    }
+  }
+}

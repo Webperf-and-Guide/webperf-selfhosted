@@ -12,15 +12,41 @@ const page = await browser.newPage();
 
 try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  const selectedRegionsSummary = page.locator('.control-card .field strong').nth(0);
+  await page.locator('input[name="url"]').waitFor();
 
-  if ((await selectedRegionsSummary.textContent())?.trim().startsWith('0 /')) {
-    await page.getByRole('button', { name: /Tokyo/i }).click();
+  const selectedRegionsSummary = page
+    .locator('.control-card .field')
+    .filter({ hasText: /Selected regions/i })
+    .locator('strong');
+
+  if ((await selectedRegionsSummary.count()) > 0) {
+    const selectedText = (await selectedRegionsSummary.first().textContent())?.trim() ?? '';
+
+    if (selectedText.startsWith('0 /')) {
+      const tokyoButton = page.getByRole('button', { name: /Tokyo/i });
+
+      if ((await tokyoButton.count()) > 0) {
+        await tokyoButton.first().click();
+      }
+    }
   }
 
   await page.locator('input[name="url"]').fill(targetUrl);
-  await page.locator('button.submit').click();
-  await page.waitForSelector('.result-card', { timeout: 20000 });
+  await page.getByRole('button', { name: /Start measurement/i }).click();
+  await Promise.race([
+    page.waitForSelector('.job-summary, .result-card', { timeout: 20000 }),
+    page.waitForSelector('.error', { timeout: 20000 })
+  ]);
+
+  const errorMessages = await page.locator('.error').allTextContents();
+  const blockingError = errorMessages.find(
+    (message) => !/inflight measurement job/i.test(message)
+  );
+
+  if (blockingError) {
+    throw new Error(blockingError);
+  }
+
   await page.screenshot({ path: screenshotPath, fullPage: true });
   console.log(JSON.stringify({ ok: true, screenshotPath }, null, 2));
 } finally {

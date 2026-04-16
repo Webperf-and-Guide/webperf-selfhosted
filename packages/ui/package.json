@@ -10,9 +10,44 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
-    }
+    },
+    "./cn": {
+      "types": "./src/cn.ts",
+      "import": "./src/cn.ts"
+    },
+    "./utils": {
+      "types": "./src/lib/utils.ts",
+      "import": "./src/lib/utils.ts"
+    },
+    "./hooks/*": "./src/hooks/*",
+    "./actions/*": "./src/actions/*",
+    "./components/ui/*": "./src/lib/components/ui/*/index.ts",
+    "./styles/theme.css": "./src/styles/theme.css",
+    "./styles/operator-app.css": "./src/styles/operator-app.css",
+    "./styles/marketing-app.css": "./src/styles/marketing-app.css",
+    "./primitives/button.svelte": "./src/primitives/button.svelte",
+    "./primitives/input.svelte": "./src/primitives/input.svelte",
+    "./primitives/textarea.svelte": "./src/primitives/textarea.svelte",
+    "./primitives/select.svelte": "./src/primitives/select.svelte",
+    "./primitives/badge.svelte": "./src/primitives/badge.svelte",
+    "./primitives/card.svelte": "./src/primitives/card.svelte",
+    "./primitives/separator.svelte": "./src/primitives/separator.svelte",
+    "./primitives/segmented-nav.svelte": "./src/primitives/segmented-nav.svelte"
+  },
+  "dependencies": {
+    "@lucide/svelte": "^1.8.0",
+    "bits-ui": "^2.17.3",
+    "clsx": "^2.1.1",
+    "runed": "^0.37.1",
+    "svelte-toolbelt": "^0.10.6",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@internationalized/date": "^3.12.0",
+    "tailwind-variants": "^3.2.2"
   },
   "peerDependencies": {
+    "svelte": "^5.55.1",
     "typescript": "^5.9.3"
   },
   "publishConfig": {

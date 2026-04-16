@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-15
+Last updated: 2026-04-16
 
 ## Mission
 
@@ -87,6 +87,7 @@ Current repo state as of 2026-04-15:
 - `infra/docker/metadata/probe.json` and `infra/docker/metadata/browser-audit-worker.json` are now the canonical checked-in image refs that the managed cloud repo consumes when it renders Cloudflare/Bunny runtime config
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 - root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
+- the browser-audit image publish workflow now also watches workspace dependency inputs like `packages/contracts`, the root `package.json`, and `bun.lock` so GHCR refreshes do not miss compatible runtime changes
 
 Current local dev entrypoints:
 - `bun run dev`

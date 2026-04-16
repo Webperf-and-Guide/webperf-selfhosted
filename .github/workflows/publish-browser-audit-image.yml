@@ -6,7 +6,11 @@ on:
     branches: ['main']
     paths:
       - 'apps/browser-audit-worker/**'
+      - 'packages/contracts/**'
+      - 'package.json'
+      - 'bun.lock'
       - 'infra/docker/**'
+      - '.github/workflows/publish-browser-audit-image.yml'
 
 jobs:
   publish:

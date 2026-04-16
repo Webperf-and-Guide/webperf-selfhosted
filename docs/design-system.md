@@ -146,6 +146,13 @@ Current first-wave shared operator components:
 - `saved-check-summary-card`
 - `derived-resource-panel`
 
+Current setup and list-management operator components:
+
+- `resource-workflow-strip`
+- `resource-inventory-strip`
+- `resource-editor-panel`
+- `paged-list-toolbar`
+
 These components are presentational-first and should accept normalized props from the app layer.
 They should not fetch data, submit forms, or absorb control-plane/runtime assumptions.
 

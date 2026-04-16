@@ -15,7 +15,9 @@
   import WorkspaceMap from '$lib/components/workspace/WorkspaceMap.svelte';
   import { fetchControlJson } from '$lib/client/control-query';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
+  import { PagedListToolbar } from '@webperf/ui/components/operator/paged-list-toolbar';
   import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
+  import { ResourceEditorPanel } from '@webperf/ui/components/operator/resource-editor-panel';
   import Button from '@webperf/ui/components/ui/button';
   import { Card } from '@webperf/ui/components/ui/card';
   import { Checkbox } from '@webperf/ui/components/ui/checkbox';
@@ -1314,34 +1316,32 @@
 
         <UnderlineTabsContent value="site">
           <form onsubmit={submitProperty}>
-            <FieldSet>
-              <FieldSetTitle class="text-lg">
-                {editingPropertyId ? 'Edit site' : 'Create site'}
-              </FieldSetTitle>
-              <FieldSetContent class="grid gap-4">
-                <label class="field">
-                  <span>Existing site</span>
-                  <Select
-                    bind:value={editingPropertyId}
-                    onchange={(event: Event) =>
-                      loadPropertyEditor((event.currentTarget as HTMLSelectElement).value)}
-                  >
-                    <option value="">Create new site</option>
-                    {#each properties as property (property.id)}
-                      <option value={property.id}>{property.name}</option>
-                    {/each}
-                  </Select>
-                </label>
-                <label class="field">
-                  <span>Name</span>
-                  <Input bind:value={propertyName} placeholder="Main site" />
-                </label>
-                <label class="field">
-                  <span>Base URL</span>
-                  <Input bind:value={propertyBaseUrl} type="url" placeholder="https://example.com" />
-                </label>
-              </FieldSetContent>
-              <FieldSetFooter class="builder-actions">
+            <ResourceEditorPanel
+              description="Store the deployment root once so route groups and saved checks can share it."
+              title={editingPropertyId ? 'Edit site' : 'Create site'}
+            >
+              <label class="field">
+                <span>Existing site</span>
+                <Select
+                  bind:value={editingPropertyId}
+                  onchange={(event: Event) =>
+                    loadPropertyEditor((event.currentTarget as HTMLSelectElement).value)}
+                >
+                  <option value="">Create new site</option>
+                  {#each properties as property (property.id)}
+                    <option value={property.id}>{property.name}</option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="field">
+                <span>Name</span>
+                <Input bind:value={propertyName} placeholder="Main site" />
+              </label>
+              <label class="field">
+                <span>Base URL</span>
+                <Input bind:value={propertyBaseUrl} type="url" placeholder="https://example.com" />
+              </label>
+              {#snippet footer()}
                 <Button type="submit" variant="secondary" disabled={isConfigBusy('property')}>
                   {#if isConfigBusy('property')}{editingPropertyId ? 'Updating...' : 'Saving...'}{:else}{editingPropertyId ? 'Update site' : 'Save site'}{/if}
                 </Button>
@@ -1349,56 +1349,54 @@
                   <Button variant="ghost" type="button" onclick={resetPropertyForm} disabled={isConfigBusy('property')}>Cancel</Button>
                   <Button variant="destructive" type="button" onclick={() => deleteProperty(editingPropertyId)} disabled={isConfigBusy('property')}>Delete</Button>
                 {/if}
-              </FieldSetFooter>
-            </FieldSet>
+              {/snippet}
+            </ResourceEditorPanel>
           </form>
         </UnderlineTabsContent>
 
         <UnderlineTabsContent value="route-group">
           <form onsubmit={submitRouteSet}>
-            <FieldSet>
-              <FieldSetTitle class="text-lg">
-                {editingRouteSetId ? 'Edit route group' : 'Create route group'}
-              </FieldSetTitle>
-              <FieldSetContent class="grid gap-4">
-                <label class="field">
-                  <span>Existing route group</span>
-                  <Select
-                    bind:value={editingRouteSetId}
-                    onchange={(event: Event) =>
-                      loadRouteSetEditor((event.currentTarget as HTMLSelectElement).value)}
-                  >
-                    <option value="">Create new route group</option>
-                    {#each routeSets as routeSet (routeSet.id)}
-                      <option value={routeSet.id}>
-                        {routeSet.name} · {propertyById.get(routeSet.propertyId)?.name ?? 'Unknown site'}
-                      </option>
-                    {/each}
-                  </Select>
-                </label>
-                <label class="field">
-                  <span>Site</span>
-                  <Select bind:value={routeSetPropertyId}>
-                    <option value="">Select site</option>
-                    {#each properties as property (property.id)}
-                      <option value={property.id}>{property.name}</option>
-                    {/each}
-                  </Select>
-                </label>
-                <label class="field">
-                  <span>Name</span>
-                  <Input bind:value={routeSetName} placeholder="Core routes" />
-                </label>
-                <label class="field">
-                  <span>Routes</span>
-                  <Textarea
-                    bind:value={routeSetRoutesText}
-                    rows={4}
-                    placeholder="Homepage | http://example.com&#10;Pricing | http://example.com/pricing"
-                  />
-                </label>
-              </FieldSetContent>
-              <FieldSetFooter class="builder-actions">
+            <ResourceEditorPanel
+              description="Bundle release-critical URLs so a saved check keeps the same route vocabulary every time."
+              title={editingRouteSetId ? 'Edit route group' : 'Create route group'}
+            >
+              <label class="field">
+                <span>Existing route group</span>
+                <Select
+                  bind:value={editingRouteSetId}
+                  onchange={(event: Event) =>
+                    loadRouteSetEditor((event.currentTarget as HTMLSelectElement).value)}
+                >
+                  <option value="">Create new route group</option>
+                  {#each routeSets as routeSet (routeSet.id)}
+                    <option value={routeSet.id}>
+                      {routeSet.name} · {propertyById.get(routeSet.propertyId)?.name ?? 'Unknown site'}
+                    </option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="field">
+                <span>Site</span>
+                <Select bind:value={routeSetPropertyId}>
+                  <option value="">Select site</option>
+                  {#each properties as property (property.id)}
+                    <option value={property.id}>{property.name}</option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="field">
+                <span>Name</span>
+                <Input bind:value={routeSetName} placeholder="Core routes" />
+              </label>
+              <label class="field">
+                <span>Routes</span>
+                <Textarea
+                  bind:value={routeSetRoutesText}
+                  rows={4}
+                  placeholder="Homepage | http://example.com&#10;Pricing | http://example.com/pricing"
+                />
+              </label>
+              {#snippet footer()}
                 <Button type="submit" variant="secondary" disabled={isConfigBusy('route-set')}>
                   {#if isConfigBusy('route-set')}{editingRouteSetId ? 'Updating...' : 'Saving...'}{:else}{editingRouteSetId ? 'Update route group' : 'Save route group'}{/if}
                 </Button>
@@ -1406,61 +1404,59 @@
                   <Button variant="ghost" type="button" onclick={resetRouteSetForm} disabled={isConfigBusy('route-set')}>Cancel</Button>
                   <Button variant="destructive" type="button" onclick={() => deleteRouteSet(editingRouteSetId)} disabled={isConfigBusy('route-set')}>Delete</Button>
                 {/if}
-              </FieldSetFooter>
-            </FieldSet>
+              {/snippet}
+            </ResourceEditorPanel>
           </form>
         </UnderlineTabsContent>
 
         <UnderlineTabsContent value="region-set">
           <form onsubmit={submitRegionPack}>
-            <FieldSet>
-              <FieldSetTitle class="text-lg">
-                {editingRegionPackId ? 'Edit region set' : 'Create region set'}
-              </FieldSetTitle>
-              <FieldSetContent class="grid gap-4">
-                <label class="field">
-                  <span>Existing region set</span>
-                  <Select
-                    bind:value={editingRegionPackId}
-                    onchange={(event: Event) =>
-                      loadRegionPackEditor((event.currentTarget as HTMLSelectElement).value)}
-                  >
-                    <option value="">Create new region set</option>
-                    {#each regionPacks as regionPack (regionPack.id)}
-                      <option value={regionPack.id}>{regionPack.name}</option>
-                    {/each}
-                  </Select>
-                </label>
-                <label class="field">
-                  <span>Name</span>
-                  <Input bind:value={regionPackName} placeholder="APAC core" />
-                </label>
-                <label class="field">
-                  <span>Selected region codes</span>
-                  <TagsInput
-                    bind:value={regionPackCodes}
-                    placeholder="Add active region codes"
-                    restrictToSuggestions
-                    suggestions={activeRegionCodeSuggestions}
-                  />
-                </label>
-                <div class="field">
-                  <span>Regions</span>
-                  <div class="pill-grid">
-                    {#each activeRegionOptions as region (region.code)}
-                      <Button
-                        class={`pill-button ${regionPackCodes.includes(region.code) ? 'selected' : ''}`}
-                        variant="ghost"
-                        type="button"
-                        onclick={() => toggleRegionPackCode(region.code)}
-                      >
-                        {region.label}
-                      </Button>
-                    {/each}
-                  </div>
+            <ResourceEditorPanel
+              description="Pin the active corridor that each saved check should cover."
+              title={editingRegionPackId ? 'Edit region set' : 'Create region set'}
+            >
+              <label class="field">
+                <span>Existing region set</span>
+                <Select
+                  bind:value={editingRegionPackId}
+                  onchange={(event: Event) =>
+                    loadRegionPackEditor((event.currentTarget as HTMLSelectElement).value)}
+                >
+                  <option value="">Create new region set</option>
+                  {#each regionPacks as regionPack (regionPack.id)}
+                    <option value={regionPack.id}>{regionPack.name}</option>
+                  {/each}
+                </Select>
+              </label>
+              <label class="field">
+                <span>Name</span>
+                <Input bind:value={regionPackName} placeholder="APAC core" />
+              </label>
+              <label class="field">
+                <span>Selected region codes</span>
+                <TagsInput
+                  bind:value={regionPackCodes}
+                  placeholder="Add active region codes"
+                  restrictToSuggestions
+                  suggestions={activeRegionCodeSuggestions}
+                />
+              </label>
+              <div class="field">
+                <span>Regions</span>
+                <div class="pill-grid">
+                  {#each activeRegionOptions as region (region.code)}
+                    <Button
+                      class={`pill-button ${regionPackCodes.includes(region.code) ? 'selected' : ''}`}
+                      variant="ghost"
+                      type="button"
+                      onclick={() => toggleRegionPackCode(region.code)}
+                    >
+                      {region.label}
+                    </Button>
+                  {/each}
                 </div>
-              </FieldSetContent>
-              <FieldSetFooter class="builder-actions">
+              </div>
+              {#snippet footer()}
                 <Button type="submit" variant="secondary" disabled={isConfigBusy('region-pack')}>
                   {#if isConfigBusy('region-pack')}{editingRegionPackId ? 'Updating...' : 'Saving...'}{:else}{editingRegionPackId ? 'Update region set' : 'Save region set'}{/if}
                 </Button>
@@ -1468,8 +1464,8 @@
                   <Button variant="ghost" type="button" onclick={resetRegionPackForm} disabled={isConfigBusy('region-pack')}>Cancel</Button>
                   <Button variant="destructive" type="button" onclick={() => deleteRegionPack(editingRegionPackId)} disabled={isConfigBusy('region-pack')}>Delete</Button>
                 {/if}
-              </FieldSetFooter>
-            </FieldSet>
+              {/snippet}
+            </ResourceEditorPanel>
           </form>
         </UnderlineTabsContent>
       </UnderlineTabs>
@@ -1686,44 +1682,27 @@
     {/if}
 
     {#if checkProfiles.length > 0}
-      <div class="list-toolbar">
-        <label class="field grow">
-          <span>Browse saved checks</span>
-          <Input bind:value={checkProfileFilterDraft} placeholder="check name, note, site, route group" />
-        </label>
-        <label class="field inline-field">
-          <span>Page size</span>
-          <NumberField bind:value={checkProfilePageSize} max={10} min={4} step={2}>
-            <NumberFieldGroup>
-              <NumberFieldDecrement />
-              <NumberFieldInput aria-label="Saved check page size" oninput={() => resetCheckProfilePaging()} />
-              <NumberFieldIncrement />
-            </NumberFieldGroup>
-          </NumberField>
-        </label>
-        <div class="saved-actions">
-          <Button variant="secondary" type="button" onclick={applyCheckProfileFilter}>Apply</Button>
-          <Button variant="ghost" type="button" onclick={clearCheckProfileFilter}>Clear</Button>
-        </div>
-      </div>
-
-      <div class="pagination-bar">
-        <small>
-          Showing {visibleCheckProfiles.length} of {checkProfilePageInfo.totalCount}
-          {#if checkProfilePageInfo.filter}
-            for "{checkProfilePageInfo.filter}"
-          {/if}
-        </small>
-
-        <div class="saved-actions">
-          <Button variant="ghost" type="button" onclick={goToPreviousCheckProfilePage} disabled={checkProfilePreviousTokens.length === 0}>
-            Previous
-          </Button>
-          <Button variant="ghost" type="button" onclick={goToNextCheckProfilePage} disabled={!checkProfilePageInfo.nextPageToken}>
-            Next
-          </Button>
-        </div>
-      </div>
+      <PagedListToolbar
+        appliedFilter={checkProfilePageInfo.filter}
+        bind:filterValue={checkProfileFilterDraft}
+        bind:pageSize={checkProfilePageSize}
+        canGoNext={Boolean(checkProfilePageInfo.nextPageToken)}
+        canGoPrevious={checkProfilePreviousTokens.length > 0}
+        copy={{
+          label: 'Browse saved checks',
+          filterPlaceholder: 'check name, note, site, route group',
+          applyLabel: 'Apply',
+          clearLabel: 'Clear',
+          pageSizeLabel: 'Page size'
+        }}
+        onApply={applyCheckProfileFilter}
+        onClear={clearCheckProfileFilter}
+        onNext={goToNextCheckProfilePage}
+        onPageSizeChange={() => resetCheckProfilePaging()}
+        onPrevious={goToPreviousCheckProfilePage}
+        totalCount={checkProfilePageInfo.totalCount}
+        visibleCount={visibleCheckProfiles.length}
+      />
 
       <div class="saved-grid">
         {#each visibleCheckProfiles as profile (profile.id)}

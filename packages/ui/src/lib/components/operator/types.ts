@@ -96,3 +96,25 @@ export type DerivedResourceItem = {
   summary: string[];
   tone?: OperatorTone;
 };
+
+export type ResourceWorkflowItem = {
+  id?: string;
+  label: string;
+  title: string;
+  detail: string;
+};
+
+export type ResourceEditorPanelItem = {
+  id?: string;
+  label: string;
+  title: string;
+  detail?: string;
+};
+
+export type PagedListToolbarCopy = {
+  label: string;
+  filterPlaceholder?: string;
+  applyLabel?: string;
+  clearLabel?: string;
+  pageSizeLabel?: string;
+};

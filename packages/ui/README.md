@@ -74,6 +74,10 @@ Currently adopted extras:
 Current shared operator composites:
 
 - `metric-grid`
+- `resource-workflow-strip`
+- `resource-inventory-strip`
+- `resource-editor-panel`
+- `paged-list-toolbar`
 - `resource-count-strip`
 - `region-quick-pick`
 - `run-status-panel`

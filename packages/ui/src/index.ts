@@ -16,10 +16,11 @@ export const consoleShellLinks = [
 ] as const;
 
 export const cloudConsoleShellLinks = [
-  { href: '#measure', label: 'Run' },
-  { href: '#saved-checks', label: 'Checks' },
-  { href: '#results', label: 'Reports' },
-  { href: '#regions', label: 'Regions' }
+  { href: '/', label: 'Run' },
+  { href: '/resources', label: 'Resources' },
+  { href: '/checks', label: 'Checks' },
+  { href: '/reports', label: 'Reports' },
+  { href: '/regions', label: 'Regions' }
 ] as const;
 
 export const marketingShellLinks = [
@@ -43,6 +44,7 @@ export { Checkbox } from './lib/components/ui/checkbox';
 export { CopyButton } from './lib/components/ui/copy-button';
 export { ComparisonSummaryPanel } from './lib/components/operator/comparison-summary-panel';
 export { DerivedResourcePanel } from './lib/components/operator/derived-resource-panel';
+export { PagedListToolbar } from './lib/components/operator/paged-list-toolbar';
 export {
   Dialog,
   DialogClose,
@@ -87,7 +89,10 @@ export {
   PopoverTrigger
 } from './lib/components/ui/popover';
 export { RegionQuickPick } from './lib/components/operator/region-quick-pick';
+export { ResourceEditorPanel } from './lib/components/operator/resource-editor-panel';
+export { ResourceInventoryStrip } from './lib/components/operator/resource-inventory-strip';
 export { ResourceCountStrip } from './lib/components/operator/resource-count-strip';
+export { ResourceWorkflowStrip } from './lib/components/operator/resource-workflow-strip';
 export { RunStatusPanel } from './lib/components/operator/run-status-panel';
 export { SavedCheckSummaryCard } from './lib/components/operator/saved-check-summary-card';
 export { ScrollArea, ScrollAreaScrollbar } from './lib/components/ui/scroll-area';
@@ -125,6 +130,9 @@ export type {
   MetricGridItem,
   OperatorActionItem,
   OperatorTone,
+  PagedListToolbarCopy,
+  ResourceEditorPanelItem,
+  ResourceWorkflowItem,
   RegionQuickPickItem,
   RunHistoryEntry,
   RunHistoryJobItem,

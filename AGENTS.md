@@ -96,12 +96,15 @@ Current repo state as of 2026-04-15:
 - `packages/ui` now also acts as the canonical shared shadcn surface for both repos, with `tabs`, `scroll-area`, `dialog`, `popover`, `tooltip`, `checkbox`, `switch`, and `table` joined by jsrepo-managed `underline-tabs`, `field-set`, `number-field`, `tags-input`, and `copy-button`
 - the self-host console now uses those shared components directly through `@webperf/ui/components/ui/*`, with route-level operators also adopting shared number fields, tags input, tables, copy buttons, and action buttons instead of ad hoc controls
 - `packages/ui` now also exposes shared operator composites under `@webperf/ui/components/operator/*`, and the self-host console uses those for metric strips, quick region picks, run status cards, saved-check summaries, comparison panels, and derived-resource browsing
+- `packages/ui` now also carries second-wave setup/operator composites for resource workflow strips, inventory strips, editor panels, and paged list toolbars
+- the self-host resources surface now uses those shared setup composites, and the parallel local-dev path is now an explicit supported workflow with console/probe override scripts instead of manual port surgery
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 
 Current local dev entrypoints:
 - `bun run dev`
 - `bun run dev:browser-audit-worker`
+- `bun run dev:parallel:cloud`
 - `bun run dev:console`
 - `bun run dev:api`
 - `bun run dev:scheduler`
@@ -112,6 +115,8 @@ Current local URLs:
 - api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
 - browser-audit worker when run separately: `http://127.0.0.1:8081`
+- parallel-with-cloud console: `http://localhost:4174`
+- parallel-with-cloud probe: `http://127.0.0.1:8082`
 
 ## Working Rules
 
@@ -134,7 +139,7 @@ Current local URLs:
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 9. finalize the license choice before the public GitHub launch
-10. keep the shared token layer, shadcn component exports, operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
+10. keep the shared token layer, shadcn component exports, setup/operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
 
 ## Update Protocol
 

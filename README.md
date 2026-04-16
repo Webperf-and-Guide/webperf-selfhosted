@@ -63,10 +63,34 @@ Default local URLs:
 ```bash
 bun run check
 bun run dev:browser-audit-worker
+bun run dev:parallel:cloud
 bun test apps/api/test
 bun run test:report-core
 bun run compose:config
 ```
+
+## Parallel Local Dev
+
+If you want to run `webperf-selfhosted` alongside the managed cloud repo on the same machine, use:
+
+```bash
+bun run dev:parallel:cloud
+```
+
+That keeps the default standalone ports unchanged while moving the selfhosted parallel workflow to:
+
+- console: `http://localhost:4174`
+- probe: `http://127.0.0.1:8082`
+
+The helper scripts also support explicit overrides through:
+
+- `SELFHOST_CONSOLE_PORT`
+- `SELFHOST_CONTROL_BASE_URL`
+- `SELFHOST_PROBE_PORT`
+- `SELFHOST_PARALLEL_CONSOLE_PORT`
+- `SELFHOST_PARALLEL_PROBE_PORT`
+- `SELFHOST_PARALLEL_PROBE_BASE_URL`
+- `SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON`
 
 ## Compose Bundle
 

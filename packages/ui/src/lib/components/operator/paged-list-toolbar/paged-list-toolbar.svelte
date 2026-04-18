@@ -63,7 +63,7 @@
   }: PagedListToolbarProps = $props();
 </script>
 
-<Card {...rest} class={cn('grid gap-4 border-line/70 bg-white/[0.04] p-5', className)} tone="quiet">
+<Card {...rest} class={cn('grid gap-4 border-line/55 bg-white/[0.03] p-5', className)} tone="quiet">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="grid gap-1">
       <p class="text-[0.72rem] uppercase tracking-[0.14em] text-muted">Browse state</p>

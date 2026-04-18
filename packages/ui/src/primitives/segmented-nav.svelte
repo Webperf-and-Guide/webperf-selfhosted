@@ -18,7 +18,7 @@
 <nav class={cn('flex flex-wrap gap-2', className)}>
   {#each items as item (item.href)}
     <a
-      class="inline-flex items-center rounded-full border border-line bg-white/5 px-3 py-2 text-[0.92rem] text-accent-soft transition-colors duration-200 hover:bg-white/10"
+      class="inline-flex items-center rounded-full border border-line/55 bg-white/[0.035] px-3.5 py-2 text-[0.92rem] text-accent-soft shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors duration-200 hover:border-accent/28 hover:bg-white/[0.06] hover:text-text"
       href={item.href}
     >
       {item.label}

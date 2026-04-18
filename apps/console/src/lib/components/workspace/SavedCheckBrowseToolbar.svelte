@@ -35,7 +35,7 @@
 </script>
 
 <div class="grid gap-4">
-  <MetricGrid class="rounded-[var(--wp-radius-lg)] border border-line/70 p-4" compact items={browseSummaryItems} />
+  <MetricGrid class="rounded-[var(--wp-radius-lg)] border border-line/55 bg-white/[0.025] p-4" compact items={browseSummaryItems} />
 
   <PagedListToolbar
     {appliedFilter}

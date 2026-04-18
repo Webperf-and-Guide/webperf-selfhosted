@@ -43,8 +43,8 @@
   {#each items as item, index (item.id ?? `${item.label}:${index}`)}
     <div
       class={cn(
-        'grid gap-1 rounded-[var(--wp-radius-md)] border px-4 py-3 shadow-[var(--wp-shadow-soft)]',
-        compact ? 'min-h-[5.5rem]' : 'min-h-[6.5rem]',
+        'grid content-start gap-1.5 rounded-[var(--wp-radius-md)] border px-4 py-3.5 shadow-[var(--wp-shadow-soft)]',
+        compact ? 'min-h-[5rem]' : 'min-h-[6rem]',
         metricToneClass(item.tone),
         itemClass
       )}

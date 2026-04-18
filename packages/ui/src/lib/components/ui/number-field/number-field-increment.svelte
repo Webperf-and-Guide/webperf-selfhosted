@@ -9,7 +9,7 @@
 
 	let {
 		ref = $bindable(null),
-		variant = 'outline',
+		variant = 'ghost',
 		size = 'icon-sm',
 		class: className,
 		children,
@@ -43,7 +43,7 @@
 	bind:ref
 	data-slot="number-field-increment"
 	aria-label="Increase"
-	class={cn('touch-manipulation', className)}
+	class={cn('touch-manipulation text-muted hover:bg-white/[0.04] hover:text-text', className)}
 	{...buttonState.props}
 	{...rest /* eslint-disable-line @typescript-eslint/no-explicit-any */ as any}
 >

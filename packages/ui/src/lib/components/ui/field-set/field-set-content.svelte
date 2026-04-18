@@ -10,6 +10,6 @@
 	}: FieldSetTitleProps = $props();
 </script>
 
-<div bind:this={ref} class={cn('p-6', className)} {...restProps}>
+<div bind:this={ref} class={cn('px-6 pb-6 pt-4', className)} {...restProps}>
 	{@render children?.()}
 </div>

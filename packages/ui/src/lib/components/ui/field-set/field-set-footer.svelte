@@ -10,6 +10,6 @@
 	}: FieldSetFooterProps = $props();
 </script>
 
-<div bind:this={ref} class={cn('border-t border-inherit px-6 py-3', className)} {...rest}>
+<div bind:this={ref} class={cn('border-t border-inherit px-6 py-4', className)} {...rest}>
 	{@render children?.()}
 </div>

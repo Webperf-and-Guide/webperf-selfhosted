@@ -175,7 +175,7 @@
       <FieldSet>
         <FieldSetTitle class="text-base">Alerts</FieldSetTitle>
         <FieldSetContent class="grid gap-4 md:grid-cols-2">
-          <label class="checkbox-field justify-between rounded-[var(--wp-radius-md)] border border-line px-4 py-3 md:col-span-2">
+          <label class="checkbox-field justify-between rounded-[var(--wp-radius-md)] border border-line/60 bg-white/[0.02] px-4 py-3 md:col-span-2">
             <span>Enable webhook alerts</span>
             <Switch bind:checked={state.profileAlertEnabled} />
           </label>

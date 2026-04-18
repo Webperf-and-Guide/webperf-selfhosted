@@ -566,7 +566,7 @@
           <TabsTrigger value="endpoints">API endpoints</TabsTrigger>
         </TabsList>
         <TabsContent value="browser">
-          <ScrollArea class="max-h-[72vh] rounded-[var(--wp-radius-lg)] border border-line p-1">
+          <ScrollArea class="max-h-[72vh] rounded-[var(--wp-radius-lg)] border border-line/55 bg-white/[0.02] p-1">
             <DerivedResourceBrowser />
           </ScrollArea>
         </TabsContent>
@@ -664,7 +664,7 @@
 
 {#if showRegions}
   <RegionCatalog regionCount={regions.length} selectableCount={selectableCount}>
-    <ScrollArea class="max-h-[72vh] rounded-[var(--wp-radius-lg)] border border-line p-1">
+    <ScrollArea class="max-h-[72vh] rounded-[var(--wp-radius-lg)] border border-line/55 bg-white/[0.02] p-1">
       <div class="continents pr-3">
         {#each groupedRegions as group (group.continent)}
           <RegionContinentCard

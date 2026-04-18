@@ -31,7 +31,7 @@
 <div
   {...rest}
   class={cn(
-    'rounded-[var(--wp-radius-lg)] border border-line p-5 shadow-[var(--wp-shadow-soft)]',
+    'rounded-[var(--wp-radius-lg)] border border-line/55 p-5 shadow-[var(--wp-shadow-soft)]',
     toneClass,
     className
   )}

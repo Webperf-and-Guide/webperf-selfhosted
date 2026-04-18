@@ -89,6 +89,10 @@
 
   .topbar {
     @apply mx-auto grid w-full max-w-[var(--wp-shell-width)] grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[var(--wp-radius-lg)] border border-line bg-surface px-5 py-4 shadow-[var(--wp-shadow-soft)] backdrop-blur-xl;
+    border-color: color-mix(in srgb, var(--wp-line) 60%, transparent);
+    box-shadow:
+      var(--wp-shadow-soft),
+      inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
   }
 
   .brand {
@@ -112,11 +116,11 @@
   }
 
   .nav a {
-    @apply rounded-full px-3 py-2 text-[0.92rem] text-accent-soft transition-colors duration-200;
+    @apply rounded-full px-3.5 py-2 text-[0.92rem] text-accent-soft transition-colors duration-200;
   }
 
   .nav a:hover {
-    @apply bg-white/5;
+    @apply bg-white/[0.06];
   }
 
   .content {
@@ -155,6 +159,10 @@
   .saved-summary,
   .empty-state {
     @apply rounded-[var(--wp-radius-xl)] border border-line bg-surface shadow-[var(--wp-shadow-panel)];
+    border-color: color-mix(in srgb, var(--wp-line) 56%, transparent);
+    box-shadow:
+      var(--wp-shadow-panel),
+      inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
   }
 
   .map-card,
@@ -205,6 +213,7 @@
 
   .status-notice {
     @apply rounded-[var(--wp-radius-md)] border border-line bg-white/4 px-4 py-3 text-sm;
+    border-color: color-mix(in srgb, var(--wp-line) 52%, transparent);
   }
 
   .status-notice[data-tone="success"] {
@@ -266,6 +275,11 @@
   .hero-metrics div,
   .guide-grid div {
     @apply border-t border-line pt-3;
+    border-color: color-mix(in srgb, var(--wp-line) 42%, transparent);
+  }
+
+  .guide-grid strong {
+    @apply text-sm leading-6 text-text/92;
   }
 
   .control-card {
@@ -294,6 +308,7 @@
   select,
   textarea {
     @apply rounded-[var(--wp-radius-sm)] border border-line bg-surface-strong/70 px-4 py-3 text-text outline-none ring-0 transition-colors duration-200 placeholder:text-muted/70 focus:border-accent/50;
+    border-color: color-mix(in srgb, var(--wp-line) 58%, transparent);
   }
 
   .field textarea,
@@ -358,6 +373,7 @@
   [data-slot='dialog-content'],
   [data-slot='popover-content'] {
     @apply border border-line bg-surface-strong shadow-[var(--wp-shadow-soft)];
+    border-color: color-mix(in srgb, var(--wp-line) 56%, transparent);
   }
 
   [data-slot='dialog-footer'] {
@@ -387,6 +403,7 @@
 
   .builder-guide {
     @apply sticky top-24 content-start border border-line/80 bg-[linear-gradient(180deg,rgba(10,20,32,0.92)_0%,rgba(20,32,46,0.82)_100%)] shadow-[var(--wp-shadow-soft)];
+    border-color: color-mix(in srgb, var(--wp-line) 58%, transparent);
   }
 
   .guide-grid {
@@ -458,6 +475,7 @@
 
   .comparison-region-card {
     @apply grid gap-2.5 rounded-[var(--wp-radius-md)] border border-line bg-white/5 p-4;
+    border-color: color-mix(in srgb, var(--wp-line) 54%, transparent);
   }
 
   .comparison-region-card.improved {
@@ -495,16 +513,25 @@
 
   .region-list button,
   .pill-button {
-    @apply rounded-[var(--wp-radius-md)] border border-line bg-white/5 text-left text-text transition-colors duration-200;
+    @apply rounded-[var(--wp-radius-md)] border border-line bg-white/[0.035] text-left text-text transition-colors duration-200;
+    border-color: color-mix(in srgb, var(--wp-line) 48%, transparent);
   }
 
   .region-list button {
     @apply grid min-h-20 gap-1 p-4;
   }
 
+  .region-list button strong {
+    @apply text-sm leading-5 font-medium text-text;
+  }
+
+  .region-list button span {
+    @apply text-xs leading-5 text-muted;
+  }
+
   .region-list button.selected,
   .pill-button.selected {
-    @apply border-accent/60 bg-accent/12 shadow-[var(--wp-shadow-soft)];
+    @apply border-accent/55 bg-accent/11 shadow-[var(--wp-shadow-soft)];
   }
 
   .region-list button.disabled {

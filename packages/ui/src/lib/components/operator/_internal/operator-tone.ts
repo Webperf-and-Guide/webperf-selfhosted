@@ -11,9 +11,9 @@ export function metricToneClass(tone: OperatorTone | undefined) {
     case 'accent':
       return 'border-accent/25 bg-accent/6';
     case 'muted':
-      return 'border-line/60 bg-white/[0.03]';
+      return 'border-line/50 bg-white/[0.028]';
     default:
-      return 'border-line/70 bg-white/[0.02]';
+      return 'border-line/55 bg-white/[0.018]';
   }
 }
 

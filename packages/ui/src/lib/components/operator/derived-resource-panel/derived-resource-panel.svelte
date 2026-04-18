@@ -94,7 +94,7 @@
 <section
   {...rest}
   class={cn(
-    'grid gap-5 rounded-[var(--wp-radius-xl)] border border-line bg-white/[0.03] p-6 shadow-[var(--wp-shadow-soft)]',
+    'grid gap-5 rounded-[var(--wp-radius-xl)] border border-line/55 bg-white/[0.028] p-6 shadow-[var(--wp-shadow-soft)]',
     className
   )}
 >
@@ -156,13 +156,13 @@
   />
 
   {#if isPending}
-    <div class="rounded-[var(--wp-radius-md)] border border-line/70 bg-white/[0.02] px-4 py-6 text-sm text-muted">
+    <div class="rounded-[var(--wp-radius-md)] border border-line/55 bg-white/[0.018] px-4 py-6 text-sm text-muted">
       Loading {kind}...
     </div>
   {:else if errorMessage}
     <p class="text-sm leading-6 text-danger">{errorMessage}</p>
   {:else if items.length === 0}
-    <div class="rounded-[var(--wp-radius-md)] border border-line/70 bg-white/[0.02] px-4 py-6">
+    <div class="rounded-[var(--wp-radius-md)] border border-line/55 bg-white/[0.018] px-4 py-6">
       <p class="text-sm font-medium text-text">{emptyTitle}</p>
       <small class="mt-1 block text-sm leading-5 text-muted">{emptyDetail}</small>
     </div>

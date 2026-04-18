@@ -103,7 +103,7 @@
   </div>
 
   {#if detailsExpanded && secondaryActions.length > 0}
-    <div class="flex flex-wrap items-center justify-between gap-3 rounded-[var(--wp-radius-md)] border border-line/70 bg-white/[0.03] px-4 py-3">
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-[var(--wp-radius-md)] border border-line/55 bg-white/[0.025] px-4 py-3">
       <div class="grid gap-1">
         <span class="text-[0.72rem] uppercase tracking-[0.16em] text-muted">Detail actions</span>
         <p class="text-sm text-muted">Editing and destructive actions stay tucked behind the expanded view.</p>
@@ -199,7 +199,7 @@
                 {#if isRunEntryExpanded(entry.id)}
                   <div class="grid gap-3 xl:grid-cols-2">
                     {#each entry.jobs as job (job.id)}
-                      <div class="grid gap-3 rounded-[var(--wp-radius-md)] border border-line/70 bg-white/[0.03] p-4">
+                      <div class="grid gap-3 rounded-[var(--wp-radius-md)] border border-line/55 bg-white/[0.025] p-4">
                         <div class="grid gap-1">
                           <strong class="text-sm text-text">{job.title}</strong>
                           {#if job.subtitle}
@@ -209,7 +209,7 @@
 
                         <div class="grid gap-2 sm:grid-cols-2">
                           {#each job.targets as target (target.id)}
-                            <div class="grid gap-1 rounded-[var(--wp-radius-md)] border border-line/60 bg-white/[0.02] px-3 py-2">
+                            <div class="grid gap-1 rounded-[var(--wp-radius-md)] border border-line/45 bg-white/[0.018] px-3 py-2">
                               <span class="text-[0.72rem] uppercase tracking-[0.14em] text-muted">
                                 {target.label}
                               </span>

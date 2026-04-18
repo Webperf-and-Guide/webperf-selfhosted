@@ -149,7 +149,7 @@
   />
 {:else}
   <div class="grid gap-4 xl:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-    <Card class="border-line/80 p-3">
+    <Card class="border-line/55 bg-white/[0.025] p-3">
       <div class="flex items-center justify-between gap-2">
         <div>
           <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Recent runs</p>
@@ -162,7 +162,7 @@
         <div class="space-y-2">
           {#each audits as audit (audit.id)}
             <Button
-              class="h-auto w-full items-start justify-between gap-3 rounded-[var(--wp-radius-md)] border border-line/80 px-3 py-3 text-left"
+              class="h-auto w-full items-start justify-between gap-3 rounded-[var(--wp-radius-md)] border border-line/55 bg-white/[0.02] px-3 py-3 text-left"
               onclick={() => onSelect(audit.id)}
               variant={audit.id === selectedAudit?.id ? 'secondary' : 'ghost'}
             >
@@ -184,7 +184,7 @@
 
     {#if selectedAudit}
       <div class="space-y-4">
-        <Card class="border-line/80 p-4">
+        <Card class="border-line/55 bg-white/[0.025] p-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="space-y-1">
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Audit detail</p>
@@ -246,7 +246,7 @@
           </div>
         </Card>
 
-        <Card class="border-line/80 p-4">
+        <Card class="border-line/55 bg-white/[0.025] p-4">
           <div class="flex items-center justify-between gap-2">
             <div>
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Metric summary</p>
@@ -279,7 +279,7 @@
           </Table>
         </Card>
 
-        <Card class="border-line/80 p-4">
+        <Card class="border-line/55 bg-white/[0.025] p-4">
           <div class="flex items-center justify-between gap-2">
             <div>
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Artifacts</p>
@@ -320,7 +320,7 @@
           </Table>
         </Card>
 
-        <Card class="border-line/80 p-4">
+        <Card class="border-line/55 bg-white/[0.025] p-4">
           <div class="flex items-center justify-between gap-2">
             <div>
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Toolchain</p>

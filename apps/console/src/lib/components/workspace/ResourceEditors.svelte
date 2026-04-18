@@ -33,8 +33,6 @@
   {#if savedChecksEnabled}
     <ResourceWorkflowStrip items={workflowItems} />
 
-    {@render children?.()}
-
     {#if statusError}
       <InlineStatusNotice message={statusError} tone="danger" />
     {/if}
@@ -42,6 +40,8 @@
     {#if statusMessage}
       <InlineStatusNotice message={statusMessage} tone="success" />
     {/if}
+
+    {@render children?.()}
 
     <ResourceInventoryStrip items={inventoryItems} />
   {:else}

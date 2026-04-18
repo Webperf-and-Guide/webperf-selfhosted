@@ -109,6 +109,7 @@ Current repo state as of 2026-04-18:
 - provider-specific deployment walkthroughs now belong on `webperf.and.guide` so the OSS install and runtime docs can stay vendor-neutral even when the cloud site publishes Bunny-specific guides
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
+- the latest operator design pass tightened `Resources / Checks / Reports` hierarchy, switched the self-host resources surface to the same three-panel layout as cloud, and added shared Tailwind `@source` coverage so package-level shadcn buttons, tabs, and pagers render correctly in both consoles
 
 Current local dev entrypoints:
 - `bun run dev`

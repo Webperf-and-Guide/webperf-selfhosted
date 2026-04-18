@@ -1,5 +1,8 @@
 @import "./theme.css";
 
+@source "../lib/components";
+@source "../primitives";
+
 @theme inline {
   --font-sans: var(--wp-font-sans);
   --font-mono: var(--wp-font-mono);

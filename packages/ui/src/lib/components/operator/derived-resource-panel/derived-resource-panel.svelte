@@ -31,19 +31,9 @@
   import { cn } from '@webperf/ui/utils';
   import { Button } from '@webperf/ui/components/ui/button';
   import { Card } from '@webperf/ui/components/ui/card';
-  import { Input } from '@webperf/ui/components/ui/input';
-  import {
-    NumberField,
-    NumberFieldDecrement,
-    NumberFieldGroup,
-    NumberFieldIncrement,
-    NumberFieldInput
-  } from '@webperf/ui/components/ui/number-field';
-  import {
-    UnderlineTabs,
-    UnderlineTabsList,
-    UnderlineTabsTrigger
-  } from '@webperf/ui/components/ui/underline-tabs';
+  import { MetricGrid } from '../metric-grid';
+  import { PagedListToolbar } from '../paged-list-toolbar';
+  import { Tabs, TabsList, TabsTrigger } from '@webperf/ui/components/ui/tabs';
   import { metricToneClass } from '../_internal/operator-tone';
 
   let {
@@ -73,6 +63,32 @@
   }: DerivedResourcePanelProps = $props();
 
   const visibleCount = $derived.by(() => items.length);
+  const browseSummaryItems = $derived.by(() => [
+    {
+      id: 'visible',
+      label: 'Visible now',
+      value: `${visibleCount} of ${totalCount}`,
+      detail: 'Current derived view after client-side paging.'
+    },
+    {
+      id: 'kind',
+      label: 'Resource type',
+      value: kind,
+      detail: 'Comparisons, exports, or analyses.'
+    },
+    {
+      id: 'filter',
+      label: 'Active filter',
+      value: appliedFilter ?? 'none',
+      detail: appliedFilter ? 'Scoped list.' : 'No filter applied.'
+    },
+    {
+      id: 'page-size',
+      label: 'Page size',
+      value: pageSize,
+      detail: 'Derived items shown per page.'
+    }
+  ]);
 </script>
 
 <section
@@ -93,11 +109,11 @@
       {/if}
     </div>
 
-    <div class="grid gap-3">
-      <UnderlineTabs value={kind} class="w-full min-w-[18rem]">
-        <UnderlineTabsList>
+    <div class="grid gap-3 xl:min-w-[22rem]">
+      <Tabs value={kind}>
+        <TabsList variant="default" class="w-full justify-start">
           {#each tabs as tab (tab.value)}
-            <UnderlineTabsTrigger
+            <TabsTrigger
               onclick={() => {
                 kind = tab.value;
                 onKindChange?.(tab.value);
@@ -105,36 +121,39 @@
               value={tab.value}
             >
               {tab.label}
-            </UnderlineTabsTrigger>
+            </TabsTrigger>
           {/each}
-        </UnderlineTabsList>
-      </UnderlineTabs>
-
-      <label class="grid gap-2 text-sm text-muted">
-        <span>Page size</span>
-        <NumberField bind:value={pageSize} max={10} min={4} step={2}>
-          <NumberFieldGroup>
-            <NumberFieldDecrement />
-            <NumberFieldInput
-              aria-label="Derived resource page size"
-              oninput={() => onPageSizeChange?.(pageSize)}
-            />
-            <NumberFieldIncrement />
-          </NumberFieldGroup>
-        </NumberField>
-      </label>
+        </TabsList>
+      </Tabs>
     </div>
   </div>
 
-  <div class="flex flex-col gap-3 lg:flex-row">
-    <label class="grid grow gap-2 text-sm text-muted">
-      <span>Filter</span>
-      <Input bind:value={filterValue} placeholder="name, id, status, source" />
-    </label>
-    <div class="flex items-end">
-      <Button onclick={onApplyFilter} type="button" variant="secondary">Apply</Button>
-    </div>
-  </div>
+  <MetricGrid compact items={browseSummaryItems} />
+
+  <PagedListToolbar
+    appliedFilter={appliedFilter}
+    canGoNext={canGoNext}
+    canGoPrevious={canGoPrevious}
+    bind:filterValue
+    bind:pageSize
+    copy={{
+      label: 'Filter derived resources',
+      filterPlaceholder: 'name, id, status, source',
+      applyLabel: 'Apply',
+      clearLabel: 'Clear',
+      pageSizeLabel: 'Page size'
+    }}
+    onApply={onApplyFilter}
+    onClear={() => {
+      filterValue = '';
+      onApplyFilter?.();
+    }}
+    onNext={onNext}
+    onPageSizeChange={onPageSizeChange}
+    onPrevious={onPrevious}
+    totalCount={totalCount}
+    visibleCount={visibleCount}
+  />
 
   {#if isPending}
     <div class="rounded-[var(--wp-radius-md)] border border-line/70 bg-white/[0.02] px-4 py-6 text-sm text-muted">
@@ -166,21 +185,12 @@
     </div>
   {/if}
 
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <small class="text-sm text-muted">
-      Showing {visibleCount} of {totalCount}
-      {#if appliedFilter}
-        for "{appliedFilter}"
-      {/if}
-    </small>
-
-    <div class="flex flex-wrap items-center gap-2">
-      <Button disabled={!canGoPrevious} onclick={onPrevious} type="button" variant="ghost">
-        Previous
-      </Button>
-      <Button disabled={!canGoNext} onclick={onNext} type="button" variant="ghost">
-        Next
-      </Button>
+  {#if items.length > 0}
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <small class="text-sm text-muted">
+        Recent derived payloads stay on the client so the operator can scan them without leaving the workspace.
+      </small>
+      <Button onclick={onApplyFilter} size="sm" type="button" variant="ghost">Refresh view</Button>
     </div>
-  </div>
+  {/if}
 </section>

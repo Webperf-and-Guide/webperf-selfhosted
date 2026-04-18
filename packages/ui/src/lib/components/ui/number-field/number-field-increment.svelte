@@ -9,8 +9,8 @@
 
 	let {
 		ref = $bindable(null),
-		variant = 'ghost',
-		size = 'icon',
+		variant = 'outline',
+		size = 'icon-sm',
 		class: className,
 		children,
 		disabled = false,

@@ -24,8 +24,8 @@
   }: ResourceEditorPanelProps = $props();
 </script>
 
-<Card {...rest} class={cn('grid gap-4 p-6', className)}>
-  <div class="grid gap-1">
+<Card {...rest} class={cn('grid gap-5 overflow-hidden p-6', className)}>
+  <div class="grid gap-1 border-b border-line/70 pb-4">
     <strong class="text-lg text-text">{title}</strong>
     {#if description}
       <small class="text-sm leading-6 text-muted">{description}</small>
@@ -37,7 +37,7 @@
   </div>
 
   {#if footer}
-    <div class="flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2 border-t border-line/60 pt-4">
       {@render footer()}
     </div>
   {/if}

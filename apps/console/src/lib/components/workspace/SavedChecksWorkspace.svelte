@@ -23,6 +23,7 @@
 
 <section class="checks-section" id="checks">
   <OperatorSectionHeader
+    description="Keep the editor focused on one release decision, then browse compact cards and open deeper evidence only when you need it."
     eyebrow="Reusable checks"
     title="Promote stable manual runs into baseline-aware release gates with schedules and alerts."
   />

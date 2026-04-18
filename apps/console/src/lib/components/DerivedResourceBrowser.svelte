@@ -18,7 +18,7 @@
   type ResourceItem = ComparisonResource | ExportResource | AnalysisResource;
 
   const emptyPageInfo: PageInfo = {
-    pageSize: 6,
+    pageSize: 8,
     totalCount: 0,
     nextPageToken: null,
     filter: null
@@ -27,7 +27,7 @@
   let kind = $state<ResourceKind>('comparisons');
   let filterDraft = $state('');
   let filter = $state('');
-  let pageSize = $state(6);
+  let pageSize = $state(8);
   let pageToken = $state<string | null>(null);
   let previousTokens = $state<string[]>([]);
 
@@ -163,7 +163,7 @@
   bind:pageSize={pageSize}
   canGoNext={Boolean(pageInfo.nextPageToken)}
   canGoPrevious={previousTokens.length > 0}
-  description="Comparisons, exports, and analyses now page on the client."
+  description="Scan recent comparisons, exports, and analyses from one dense operator feed."
   errorMessage={resourceQuery.isError ? resourceQuery.error?.message ?? `Failed to load ${kind}.` : null}
   isPending={resourceQuery.isPending}
   items={panelItems}
@@ -173,6 +173,6 @@
   onPageSizeChange={() => resetPaging()}
   onPrevious={goToPreviousPage}
   tabs={resourceTabs}
-  title="Comparisons, exports, and analyses now page on the client."
+  title="Derived reports"
   totalCount={pageInfo.totalCount}
 />

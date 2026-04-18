@@ -38,19 +38,8 @@
   import { Select } from '@webperf/ui/components/ui/select';
   import { Switch } from '@webperf/ui/components/ui/switch';
   import { TagsInput } from '@webperf/ui/components/ui/tags-input';
-  import {
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger
-  } from '@webperf/ui/components/ui/tabs';
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from '@webperf/ui/components/ui/tabs';
   import { Textarea } from '@webperf/ui/components/ui/textarea';
-  import {
-    UnderlineTabs,
-    UnderlineTabsContent,
-    UnderlineTabsList,
-    UnderlineTabsTrigger
-  } from '@webperf/ui/components/ui/underline-tabs';
   import type { CheckProfile, RegionAvailability } from '@webperf/contracts';
   import { onDestroy } from 'svelte';
   import type { ConsolePageData, ConsoleWorkspaceMode } from '$lib/console-data';
@@ -305,168 +294,156 @@
     workflowItems={resources.workflowItems}
   >
     {#if savedChecks}
-      <UnderlineTabs bind:value={resourcesState.resourceEditorTab} class="builder-card p-6">
-        <UnderlineTabsList class="mb-4">
-          <UnderlineTabsTrigger value="site">Sites</UnderlineTabsTrigger>
-          <UnderlineTabsTrigger value="route-group">Route groups</UnderlineTabsTrigger>
-          <UnderlineTabsTrigger value="region-set">Region sets</UnderlineTabsTrigger>
-        </UnderlineTabsList>
+      <div class="builder-grid resources-grid">
+        <form onsubmit={resources.submitProperty}>
+          <ResourceEditorPanel
+            description="Store the deployment root once so route groups and saved checks can share it."
+            title={resourcesState.editingPropertyId ? 'Edit site' : 'Create site'}
+          >
+            <label class="field">
+              <span>Existing site</span>
+              <Select
+                bind:value={resourcesState.editingPropertyId}
+                onchange={(event: Event) =>
+                  resources.loadPropertyEditor((event.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="">Create new site</option>
+                {#each properties as property (property.id)}
+                  <option value={property.id}>{property.name}</option>
+                {/each}
+              </Select>
+            </label>
+            <label class="field">
+              <span>Name</span>
+              <Input bind:value={resourcesState.propertyName} placeholder="Main site" />
+            </label>
+            <label class="field">
+              <span>Base URL</span>
+              <Input bind:value={resourcesState.propertyBaseUrl} type="url" placeholder="https://example.com" />
+            </label>
+            {#snippet footer()}
+              <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('property')}>
+                {#if resources.isConfigBusy('property')}{resourcesState.editingPropertyId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingPropertyId ? 'Update site' : 'Save site'}{/if}
+              </Button>
+              {#if resourcesState.editingPropertyId}
+                <Button variant="ghost" type="button" onclick={resources.resetPropertyForm} disabled={resources.isConfigBusy('property')}>Cancel</Button>
+                <Button variant="destructive" type="button" onclick={() => resources.deleteProperty(resourcesState.editingPropertyId)} disabled={resources.isConfigBusy('property')}>Delete</Button>
+              {/if}
+            {/snippet}
+          </ResourceEditorPanel>
+        </form>
 
-        <UnderlineTabsContent value="site">
-          <form onsubmit={resources.submitProperty}>
-            <ResourceEditorPanel
-              description="Store the deployment root once so route groups and saved checks can share it."
-              title={resourcesState.editingPropertyId ? 'Edit site' : 'Create site'}
-            >
-              <label class="field">
-                <span>Existing site</span>
-                <Select
-                  bind:value={resourcesState.editingPropertyId}
-                  onchange={(event: Event) =>
-                    resources.loadPropertyEditor((event.currentTarget as HTMLSelectElement).value)}
-                >
-                  <option value="">Create new site</option>
-                  {#each properties as property (property.id)}
-                    <option value={property.id}>{property.name}</option>
-                  {/each}
-                </Select>
-              </label>
-              <label class="field">
-                <span>Name</span>
-                <Input bind:value={resourcesState.propertyName} placeholder="Main site" />
-              </label>
-              <label class="field">
-                <span>Base URL</span>
-                <Input bind:value={resourcesState.propertyBaseUrl} type="url" placeholder="https://example.com" />
-              </label>
-              {#snippet footer()}
-                <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('property')}>
-                  {#if resources.isConfigBusy('property')}{resourcesState.editingPropertyId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingPropertyId ? 'Update site' : 'Save site'}{/if}
-                </Button>
-                {#if resourcesState.editingPropertyId}
-                  <Button variant="ghost" type="button" onclick={resources.resetPropertyForm} disabled={resources.isConfigBusy('property')}>Cancel</Button>
-                  <Button variant="destructive" type="button" onclick={() => resources.deleteProperty(resourcesState.editingPropertyId)} disabled={resources.isConfigBusy('property')}>Delete</Button>
-                {/if}
-              {/snippet}
-            </ResourceEditorPanel>
-          </form>
-        </UnderlineTabsContent>
+        <form onsubmit={resources.submitRouteSet}>
+          <ResourceEditorPanel
+            description="Bundle release-critical URLs so a saved check keeps the same route vocabulary every time."
+            title={resourcesState.editingRouteSetId ? 'Edit route group' : 'Create route group'}
+          >
+            <label class="field">
+              <span>Existing route group</span>
+              <Select
+                bind:value={resourcesState.editingRouteSetId}
+                onchange={(event: Event) =>
+                  resources.loadRouteSetEditor((event.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="">Create new route group</option>
+                {#each routeSets as routeSet (routeSet.id)}
+                  <option value={routeSet.id}>
+                    {routeSet.name} · {propertyById.get(routeSet.propertyId)?.name ?? 'Unknown site'}
+                  </option>
+                {/each}
+              </Select>
+            </label>
+            <label class="field">
+              <span>Site</span>
+              <Select bind:value={resourcesState.routeSetPropertyId}>
+                <option value="">Select site</option>
+                {#each properties as property (property.id)}
+                  <option value={property.id}>{property.name}</option>
+                {/each}
+              </Select>
+            </label>
+            <label class="field">
+              <span>Name</span>
+              <Input bind:value={resourcesState.routeSetName} placeholder="Core routes" />
+            </label>
+            <label class="field">
+              <span>Routes</span>
+              <Textarea
+                bind:value={resourcesState.routeSetRoutesText}
+                rows={4}
+                placeholder="Homepage | http://example.com&#10;Pricing | http://example.com/pricing"
+              />
+            </label>
+            {#snippet footer()}
+              <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('route-set')}>
+                {#if resources.isConfigBusy('route-set')}{resourcesState.editingRouteSetId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingRouteSetId ? 'Update route group' : 'Save route group'}{/if}
+              </Button>
+              {#if resourcesState.editingRouteSetId}
+                <Button variant="ghost" type="button" onclick={resources.resetRouteSetForm} disabled={resources.isConfigBusy('route-set')}>Cancel</Button>
+                <Button variant="destructive" type="button" onclick={() => resources.deleteRouteSet(resourcesState.editingRouteSetId)} disabled={resources.isConfigBusy('route-set')}>Delete</Button>
+              {/if}
+            {/snippet}
+          </ResourceEditorPanel>
+        </form>
 
-        <UnderlineTabsContent value="route-group">
-          <form onsubmit={resources.submitRouteSet}>
-            <ResourceEditorPanel
-              description="Bundle release-critical URLs so a saved check keeps the same route vocabulary every time."
-              title={resourcesState.editingRouteSetId ? 'Edit route group' : 'Create route group'}
-            >
-              <label class="field">
-                <span>Existing route group</span>
-                <Select
-                  bind:value={resourcesState.editingRouteSetId}
-                  onchange={(event: Event) =>
-                    resources.loadRouteSetEditor((event.currentTarget as HTMLSelectElement).value)}
-                >
-                  <option value="">Create new route group</option>
-                  {#each routeSets as routeSet (routeSet.id)}
-                    <option value={routeSet.id}>
-                      {routeSet.name} · {propertyById.get(routeSet.propertyId)?.name ?? 'Unknown site'}
-                    </option>
-                  {/each}
-                </Select>
-              </label>
-              <label class="field">
-                <span>Site</span>
-                <Select bind:value={resourcesState.routeSetPropertyId}>
-                  <option value="">Select site</option>
-                  {#each properties as property (property.id)}
-                    <option value={property.id}>{property.name}</option>
-                  {/each}
-                </Select>
-              </label>
-              <label class="field">
-                <span>Name</span>
-                <Input bind:value={resourcesState.routeSetName} placeholder="Core routes" />
-              </label>
-              <label class="field">
-                <span>Routes</span>
-                <Textarea
-                  bind:value={resourcesState.routeSetRoutesText}
-                  rows={4}
-                  placeholder="Homepage | http://example.com&#10;Pricing | http://example.com/pricing"
-                />
-              </label>
-              {#snippet footer()}
-                <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('route-set')}>
-                  {#if resources.isConfigBusy('route-set')}{resourcesState.editingRouteSetId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingRouteSetId ? 'Update route group' : 'Save route group'}{/if}
-                </Button>
-                {#if resourcesState.editingRouteSetId}
-                  <Button variant="ghost" type="button" onclick={resources.resetRouteSetForm} disabled={resources.isConfigBusy('route-set')}>Cancel</Button>
-                  <Button variant="destructive" type="button" onclick={() => resources.deleteRouteSet(resourcesState.editingRouteSetId)} disabled={resources.isConfigBusy('route-set')}>Delete</Button>
-                {/if}
-              {/snippet}
-            </ResourceEditorPanel>
-          </form>
-        </UnderlineTabsContent>
-
-        <UnderlineTabsContent value="region-set">
-          <form onsubmit={resources.submitRegionPack}>
-            <ResourceEditorPanel
-              description="Pin the active corridor that each saved check should cover."
-              title={resourcesState.editingRegionPackId ? 'Edit region set' : 'Create region set'}
-            >
-              <label class="field">
-                <span>Existing region set</span>
-                <Select
-                  bind:value={resourcesState.editingRegionPackId}
-                  onchange={(event: Event) =>
-                    resources.loadRegionPackEditor((event.currentTarget as HTMLSelectElement).value)}
-                >
-                  <option value="">Create new region set</option>
-                  {#each regionPacks as regionPack (regionPack.id)}
-                    <option value={regionPack.id}>{regionPack.name}</option>
-                  {/each}
-                </Select>
-              </label>
-              <label class="field">
-                <span>Name</span>
-                <Input bind:value={resourcesState.regionPackName} placeholder="APAC core" />
-              </label>
-              <label class="field">
-                <span>Selected region codes</span>
-                <TagsInput
-                  bind:value={resourcesState.regionPackCodes}
-                  placeholder="Add active region codes"
-                  restrictToSuggestions
-                  suggestions={activeRegionCodeSuggestions}
-                />
-              </label>
-              <div class="field">
-                <span>Regions</span>
-                <div class="pill-grid">
-                  {#each activeRegionOptions as region (region.code)}
-                    <Button
-                      class={`pill-button ${resourcesState.regionPackCodes.includes(region.code) ? 'selected' : ''}`}
-                      variant="ghost"
-                      type="button"
-                      onclick={() => resources.toggleRegionPackCode(region.code)}
-                    >
-                      {region.label}
-                    </Button>
-                  {/each}
-                </div>
+        <form onsubmit={resources.submitRegionPack}>
+          <ResourceEditorPanel
+            description="Pin the active corridor that each saved check should cover."
+            title={resourcesState.editingRegionPackId ? 'Edit region set' : 'Create region set'}
+          >
+            <label class="field">
+              <span>Existing region set</span>
+              <Select
+                bind:value={resourcesState.editingRegionPackId}
+                onchange={(event: Event) =>
+                  resources.loadRegionPackEditor((event.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="">Create new region set</option>
+                {#each regionPacks as regionPack (regionPack.id)}
+                  <option value={regionPack.id}>{regionPack.name}</option>
+                {/each}
+              </Select>
+            </label>
+            <label class="field">
+              <span>Name</span>
+              <Input bind:value={resourcesState.regionPackName} placeholder="APAC core" />
+            </label>
+            <label class="field">
+              <span>Selected region codes</span>
+              <TagsInput
+                bind:value={resourcesState.regionPackCodes}
+                placeholder="Add active region codes"
+                restrictToSuggestions
+                suggestions={activeRegionCodeSuggestions}
+              />
+            </label>
+            <div class="field">
+              <span>Regions</span>
+              <div class="pill-grid">
+                {#each activeRegionOptions as region (region.code)}
+                  <Button
+                    class={`pill-button ${resourcesState.regionPackCodes.includes(region.code) ? 'selected' : ''}`}
+                    variant="ghost"
+                    type="button"
+                    onclick={() => resources.toggleRegionPackCode(region.code)}
+                  >
+                    {region.label}
+                  </Button>
+                {/each}
               </div>
-              {#snippet footer()}
-                <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('region-pack')}>
-                  {#if resources.isConfigBusy('region-pack')}{resourcesState.editingRegionPackId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingRegionPackId ? 'Update region set' : 'Save region set'}{/if}
-                </Button>
-                {#if resourcesState.editingRegionPackId}
-                  <Button variant="ghost" type="button" onclick={resources.resetRegionPackForm} disabled={resources.isConfigBusy('region-pack')}>Cancel</Button>
-                  <Button variant="destructive" type="button" onclick={() => resources.deleteRegionPack(resourcesState.editingRegionPackId)} disabled={resources.isConfigBusy('region-pack')}>Delete</Button>
-                {/if}
-              {/snippet}
-            </ResourceEditorPanel>
-          </form>
-        </UnderlineTabsContent>
-      </UnderlineTabs>
+            </div>
+            {#snippet footer()}
+              <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('region-pack')}>
+                {#if resources.isConfigBusy('region-pack')}{resourcesState.editingRegionPackId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingRegionPackId ? 'Update region set' : 'Save region set'}{/if}
+              </Button>
+              {#if resourcesState.editingRegionPackId}
+                <Button variant="ghost" type="button" onclick={resources.resetRegionPackForm} disabled={resources.isConfigBusy('region-pack')}>Cancel</Button>
+                <Button variant="destructive" type="button" onclick={() => resources.deleteRegionPack(resourcesState.editingRegionPackId)} disabled={resources.isConfigBusy('region-pack')}>Delete</Button>
+              {/if}
+            {/snippet}
+          </ResourceEditorPanel>
+        </form>
+      </div>
     {/if}
   </ResourceEditors>
 {/if}

@@ -68,8 +68,8 @@
     >
       <FieldSet class="mb-4">
         <FieldSetTitle class="text-base">Definition</FieldSetTitle>
-        <FieldSetContent class="grid gap-4">
-          <label class="field">
+        <FieldSetContent class="grid gap-4 md:grid-cols-2">
+          <label class="field md:col-span-2">
             <span>Existing saved check</span>
             <Select
               bind:value={state.editingProfileId}
@@ -121,7 +121,7 @@
 
       <FieldSet class="mb-4">
         <FieldSetTitle class="text-base">Request and policy</FieldSetTitle>
-        <FieldSetContent class="grid gap-4">
+        <FieldSetContent class="grid gap-4 md:grid-cols-2">
           <label class="field">
             <span>Request method</span>
             <Select bind:value={state.profileRequestMethod}>
@@ -134,7 +134,7 @@
               <option value="OPTIONS">OPTIONS</option>
             </Select>
           </label>
-          <label class="field">
+          <label class="field md:col-span-2">
             <span>Request headers</span>
             <Textarea
               bind:value={state.profileRequestHeadersText}
@@ -142,7 +142,7 @@
               placeholder="Authorization: Bearer sample-token&#10;X-Env: staging"
             />
           </label>
-          <label class="field">
+          <label class="field md:col-span-2">
             <span>Request body</span>
             <Textarea
               bind:value={state.profileRequestBody}
@@ -174,8 +174,8 @@
 
       <FieldSet>
         <FieldSetTitle class="text-base">Alerts</FieldSetTitle>
-        <FieldSetContent class="grid gap-4">
-          <label class="checkbox-field justify-between rounded-[var(--wp-radius-md)] border border-line px-4 py-3">
+        <FieldSetContent class="grid gap-4 md:grid-cols-2">
+          <label class="checkbox-field justify-between rounded-[var(--wp-radius-md)] border border-line px-4 py-3 md:col-span-2">
             <span>Enable webhook alerts</span>
             <Switch bind:checked={state.profileAlertEnabled} />
           </label>
@@ -196,7 +196,7 @@
               </label>
             </div>
           </div>
-          <label class="field">
+          <label class="field md:col-span-2">
             <span>Webhook targets</span>
             <Textarea
               bind:value={state.profileWebhookTargetsText}

@@ -23,6 +23,7 @@
 
 <section class="reports-section" id="reports">
   <OperatorSectionHeader
+    description="Scan comparisons, exports, analyses, and browser audits without leaving the operator workspace."
     eyebrow="Reports and comparisons"
     title="Browse derived views separately from the setup workflow."
   />

@@ -37,6 +37,9 @@ See:
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
+Provider-specific deployment walkthroughs can live on the managed product site when they are useful,
+but the install and runtime docs in this repo should stay vendor-neutral.
+
 ## What It Does
 
 - runs network-probe checks across representative cities instead of relying on a single URL or a single region

@@ -41,6 +41,7 @@ It should not include:
 - hosted artifact retention policy
 - private provider credentials or internal anti-abuse logic
 - AI analyst product features
+- provider-specific deployment walkthroughs, affiliate CTAs, or platform-marketing content
 
 ## Managed Cloud Repo
 
@@ -56,6 +57,7 @@ It should include:
 - managed integrations and deployment gates
 - customer notifications and retained hosted artifacts
 - future AI product layers
+- provider-specific deployment guides and affiliate-aware infrastructure content
 
 It should consume public-core artifacts from `webperf-selfhosted` instead of re-owning them.
 

@@ -24,10 +24,10 @@ export const cloudConsoleShellLinks = [
 ] as const;
 
 export const marketingShellLinks = [
-  { href: '#positioning', label: 'Positioning' },
-  { href: '#workflows', label: 'Workflows' },
-  { href: '#open-core', label: 'Open Core' },
-  { href: '#next', label: 'Next' }
+  { href: '/#positioning', label: 'Positioning' },
+  { href: '/#workflows', label: 'Workflows' },
+  { href: '/posts', label: 'Posts' },
+  { href: '/#open-core', label: 'Open Core' }
 ] as const;
 
 export { cn } from './cn';

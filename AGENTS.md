@@ -106,6 +106,7 @@ Current repo state as of 2026-04-18:
 - the self-host console `Reports` surface now includes a direct-run browser-audit tab for launching audits and reviewing recent saved summaries, failures, and artifact pointers
 - local dev scripts now preflight the console, API, and probe ports before boot so standalone and parallel workflows fail fast with clear override guidance
 - the repo now includes a checked-in `Apache-2.0` `LICENSE`, and the public launch docs no longer treat license selection as an unresolved blocker
+- provider-specific deployment walkthroughs now belong on `webperf.and.guide` so the OSS install and runtime docs can stay vendor-neutral even when the cloud site publishes Bunny-specific guides
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 

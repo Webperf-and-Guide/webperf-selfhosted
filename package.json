@@ -12,7 +12,7 @@
     "dev:browser-audit-worker": "PORT=8081 bun run --cwd apps/browser-audit-worker dev",
     "dev:console": "bash tooling/scripts/dev-console.sh",
     "dev:console:cf": "bun run --cwd apps/console dev:cf",
-    "dev:api": "bun run --cwd apps/api dev",
+    "dev:api": "bash tooling/scripts/dev-api.sh",
     "dev:scheduler": "bun run --cwd apps/scheduler dev",
     "dev:web": "bun run dev:console",
     "dev:web:cf": "bun run dev:console:cf",

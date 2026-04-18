@@ -1,4 +1,5 @@
 import type {
+  BrowserAuditListResponse,
   CheckProfileComparisonResponse,
   CheckProfileLatestComparisonResponse,
   CheckProfileReportResponse,
@@ -29,6 +30,10 @@ export type SavedChecksData = {
 export type ConsolePageData = {
   regions: RegionAvailability[];
   turnstileSiteKey: string | null;
+  capabilities: {
+    browserAuditDirectRun: boolean;
+  };
+  browserAudits: BrowserAuditListResponse['browserAudits'];
   savedChecks: SavedChecksData | null;
 };
 

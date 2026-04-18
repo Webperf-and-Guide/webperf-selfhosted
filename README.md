@@ -2,6 +2,8 @@
 
 Self-hosted open-core WebPerf for release verification, scheduled checks, and baseline diffing across representative regions.
 
+License: [Apache-2.0](LICENSE)
+
 WebPerf has two distinct product surfaces:
 
 - `webperf-selfhosted`: the self-hosted OSS/open-core product
@@ -44,7 +46,7 @@ See:
 
 ## Quick Start
 
-Local development:
+Single-machine local development:
 
 ```bash
 bun install
@@ -58,12 +60,37 @@ Default local URLs:
 - probe: `http://127.0.0.1:8080`
 - browser-audit worker when run separately: `http://127.0.0.1:8081`
 
+If you want the optional browser-audit direct-run surface too:
+
+```bash
+BROWSER_AUDIT_SHARED_SECRET=dev-browser-audit-shared-secret \
+SELFHOST_BROWSER_AUDIT_BASE_URL=http://127.0.0.1:8081 \
+bun run dev:api
+```
+
+Then run the worker in a second shell:
+
+```bash
+BROWSER_AUDIT_SHARED_SECRET=dev-browser-audit-shared-secret \
+bun run dev:browser-audit-worker
+```
+
+The API then exposes:
+
+- `GET /v1/browser-audits`
+- `POST /v1/browser-audits`
+- `GET /v1/browser-audits/:id`
+
+Compose-based setup lives in [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md).
+
 ## Useful Commands
 
 ```bash
 bun run check
 bun run dev:browser-audit-worker
 bun run dev:parallel:cloud
+bun run smoke:console
+bun run --cwd apps/api check
 bun test apps/api/test
 bun run test:report-core
 bun run compose:config
@@ -98,6 +125,16 @@ The standalone smoke path still uses the default ports:
 ```bash
 bun run smoke:console
 ```
+
+## Optional Browser Audit Direct-Run
+
+`apps/browser-audit-worker` remains an optional runtime, but the self-host API can now call it directly when you configure:
+
+- `SELFHOST_BROWSER_AUDIT_BASE_URL`
+- `BROWSER_AUDIT_SHARED_SECRET`
+- `BROWSER_AUDIT_SHARED_SECRET_NEXT` for secret rotation
+
+This direct-run surface is intentionally limited to persisted summaries and artifact metadata. It does not pull managed queue, fleet, provider, or tenancy logic into OSS.
 
 ## Compose Bundle
 
@@ -136,10 +173,11 @@ Checked-in image refs live under:
 - [infra/docker/metadata/browser-audit-worker.json](infra/docker/metadata/browser-audit-worker.json)
 
 Those metadata files are consumed by the managed cloud repo when it renders Cloudflare/Bunny runtime config.
+Cloud local development continues to consume OSS packages through sibling `file:` dependencies, while runtime images continue to publish through GHCR.
 
 ## Public Launch Notes
 
-Before connecting the public GitHub repo, review:
+Public launch notes live in:
 
 - [docs/github-launch.md](docs/github-launch.md) for repo description, topics, and first-release polish
-- `LICENSE` selection guidance in the same document
+- [LICENSE](LICENSE) for the selected Apache-2.0 terms

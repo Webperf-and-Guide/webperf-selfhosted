@@ -9,7 +9,6 @@ It is the OSS source of truth for the Bun-first browser-audit container used by 
 
 What it does not include:
 
-- self-host API orchestration
 - queueing or persistence
 - managed artifact retention
 - Bunny or Cloudflare fleet control
@@ -47,6 +46,32 @@ Useful environment variables:
 - `BROWSER_AUDIT_SHARED_SECRET`
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT`
 - `BROWSER_AUDIT_ALLOW_NO_SANDBOX`
+
+## Self-Hosted API Direct-Run
+
+The worker stays optional, but the self-host API can now use it directly when both of these are configured on the API side:
+
+- `SELFHOST_BROWSER_AUDIT_BASE_URL`
+- `BROWSER_AUDIT_SHARED_SECRET`
+
+That enables the public self-host resources:
+
+- `GET /v1/browser-audits`
+- `POST /v1/browser-audits`
+- `GET /v1/browser-audits/:id`
+
+The API persists:
+
+- execution status
+- summary metrics
+- failure reason
+- artifact metadata and pointers
+
+It intentionally does not add:
+
+- binary artifact download endpoints
+- managed queue/fleet/provider orchestration
+- SaaS tenancy or hosted retention rules
 
 ## Optional Compose Profile
 

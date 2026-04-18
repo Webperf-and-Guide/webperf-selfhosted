@@ -2,6 +2,8 @@ import { oc, populateContractRouterPaths, type as orpcType } from '@orpc/contrac
 import { z } from 'zod';
 import {
   analysisListResponseSchema,
+  browserAuditListResponseSchema,
+  browserAuditResourceSchema,
   createExportInputSchema,
   checkProfileBaselineResponseSchema,
   checkProfileComparisonResponseSchema,
@@ -13,6 +15,7 @@ import {
   checkProfileRunResponseSchema,
   checkProfileSchema,
   comparisonListResponseSchema,
+  createBrowserAuditInputSchema,
   exportListResponseSchema,
   exportResourceSchema,
   createCheckProfileSchema,
@@ -141,6 +144,11 @@ export const appContract = populateContractRouterPaths(
     },
     analyses: {
       list: oc.input(listInputSchema).output(analysisListResponseSchema).route({ method: 'GET', path: '/v1/analyses', inputStructure: 'detailed' })
+    },
+    browserAudits: {
+      list: oc.input(listInputSchema).output(browserAuditListResponseSchema).route({ method: 'GET', path: '/v1/browser-audits', inputStructure: 'detailed' }),
+      create: oc.input(createBrowserAuditInputSchema).output(browserAuditResourceSchema).route({ method: 'POST', path: '/v1/browser-audits' }),
+      get: oc.input(z.object({ params: z.object({ auditId: z.string().min(1) }) })).output(browserAuditResourceSchema).route({ method: 'GET', path: '/v1/browser-audits/{auditId}', inputStructure: 'detailed' })
     }
   })
 );

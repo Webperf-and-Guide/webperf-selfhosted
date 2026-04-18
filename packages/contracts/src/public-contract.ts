@@ -3,12 +3,15 @@ import { z } from 'zod';
 import {
   analysisListResponseSchema,
   analysisResourceSchema,
+  browserAuditListResponseSchema,
+  browserAuditResourceSchema,
   checkProfileBaselineResponseSchema,
   checkProfileListResponseSchema,
   checkProfileRunListResponseSchema,
   comparisonResourceSchema,
   comparisonListResponseSchema,
   createAnalysisInputSchema,
+  createBrowserAuditInputSchema,
   checkProfileRunDetailResponseSchema,
   checkProfileRunResponseSchema,
   checkProfileSchema,
@@ -68,6 +71,7 @@ const publicCapabilitiesSchema = z.object({
     baselineCompare: z.boolean(),
     reportExports: z.boolean(),
     webhookAlerts: z.boolean(),
+    browserAuditDirectRun: z.boolean(),
     aiAnalyses: z.boolean(),
     openApi: z.boolean(),
     appRpc: z.boolean(),
@@ -131,7 +135,8 @@ export const PUBLIC_OPENAPI_TAG_DEFINITIONS = [
   { name: 'runs', description: 'Resolved run details.' },
   { name: 'comparisons', description: 'Derived comparison resources.' },
   { name: 'exports', description: 'Derived export resources.' },
-  { name: 'analyses', description: 'Derived analysis resources.' }
+  { name: 'analyses', description: 'Derived analysis resources.' },
+  { name: 'browserAudits', description: 'Optional direct-run browser audit resources.' }
 ] as const;
 
 export const publicContract = populateContractRouterPaths(
@@ -550,6 +555,37 @@ export const publicContract = populateContractRouterPaths(
           inputStructure: 'detailed',
           summary: 'Get analysis',
           tags: ['analyses']
+        })
+    },
+    browserAudits: {
+      list: oc
+        .input(listInputSchema)
+        .output(browserAuditListResponseSchema)
+        .route({
+          method: 'GET',
+          path: '/v1/browser-audits',
+          inputStructure: 'detailed',
+          summary: 'List browser audits',
+          tags: ['browserAudits']
+        }),
+      create: oc
+        .input(createBrowserAuditInputSchema)
+        .output(browserAuditResourceSchema)
+        .route({
+          method: 'POST',
+          path: '/v1/browser-audits',
+          summary: 'Create browser audit',
+          tags: ['browserAudits']
+        }),
+      get: oc
+        .input(z.object({ params: z.object({ auditId: z.string().min(1) }) }))
+        .output(browserAuditResourceSchema)
+        .route({
+          method: 'GET',
+          path: '/v1/browser-audits/{auditId}',
+          inputStructure: 'detailed',
+          summary: 'Get browser audit',
+          tags: ['browserAudits']
         })
     }
   })

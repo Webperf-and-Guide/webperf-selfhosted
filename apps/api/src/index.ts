@@ -1,6 +1,11 @@
 import type {
   AnalysisResource,
   AnalysisListResponse,
+  BrowserAuditCapabilities,
+  BrowserAuditListResponse,
+  BrowserAuditResource,
+  BrowserAuditWorkerRequest,
+  BrowserAuditWorkerResponse,
   CheckProfileAlertDelivery,
   CheckProfileBaselineResponse,
   CheckProfileComparisonResponse,
@@ -17,6 +22,7 @@ import type {
   CreateComparisonInput,
   CreateExportInput,
   CreateAnalysisInput,
+  CreateBrowserAuditInput,
   CreateLatencyJobInput,
   CreatePropertyInput,
   CreateRegionPackInput,
@@ -51,10 +57,16 @@ import {
   analysisListResponseSchema,
   analysisResourceSchema,
   appContract,
+  browserAuditCapabilitiesSchema,
+  browserAuditListResponseSchema,
+  browserAuditResourceSchema,
+  browserAuditWorkerRequestSchema,
+  browserAuditWorkerResponseSchema,
   checkProfileListResponseSchema,
   checkProfileRunListResponseSchema,
   comparisonListResponseSchema,
   createAnalysisInputSchema,
+  createBrowserAuditInputSchema,
   createComparisonInputSchema,
   controlContract,
   createCheckProfileSchema,
@@ -89,6 +101,7 @@ import { RPCHandler } from '@orpc/server/fetch';
 import {
   applyListQuery,
   buildRegionAvailabilityList,
+  createBrowserAuditSignature,
   createProbeSignature,
   dedupeRegions,
   parseListQueryFromSearchParams,
@@ -113,6 +126,9 @@ type SelfhostRuntime = {
   retentionDays: number;
   probeSharedSecret?: string;
   probeSharedSecretNext?: string;
+  browserAuditSharedSecret?: string;
+  browserAuditSharedSecretNext?: string;
+  browserAuditBaseUrl?: string;
   activeRegionCodes: RegionCode[];
   regionIds: Partial<Record<RegionCode, string>>;
   probeBaseUrls: Partial<Record<RegionCode, string>>;
@@ -218,6 +234,7 @@ const buildPublicCapabilitiesPayload = () => ({
     baselineCompare: true,
     reportExports: true,
     webhookAlerts: true,
+    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl && runtime.browserAuditSharedSecret),
     aiAnalyses: false,
     openApi: true,
     appRpc: true,
@@ -388,6 +405,28 @@ const buildAnalysisListResponse = (query?: ListQuery): AnalysisListResponse =>
       'runId' in analysis.source ? analysis.source.runId : null,
       'comparisonId' in analysis.source ? analysis.source.comparisonId : null,
       analysis.output.narrative
+    ]).pageInfo
+  });
+
+const buildBrowserAuditListResponse = (query?: ListQuery): BrowserAuditListResponse =>
+  browserAuditListResponseSchema.parse({
+    browserAudits: applyListQuery(repository.listBrowserAudits(), query, (audit) => [
+      audit.id,
+      audit.targetUrl,
+      audit.region,
+      audit.status,
+      audit.requestedAt,
+      audit.completedAt,
+      audit.error
+    ]).items,
+    pageInfo: applyListQuery(repository.listBrowserAudits(), query, (audit) => [
+      audit.id,
+      audit.targetUrl,
+      audit.region,
+      audit.status,
+      audit.requestedAt,
+      audit.completedAt,
+      audit.error
     ]).pageInfo
   });
 
@@ -887,6 +926,14 @@ export const server = Bun.serve({
       }
     }
 
+    if (pathname === '/v1/browser-audits' && request.method === 'GET') {
+      return json(buildBrowserAuditListResponse(parseListQueryFromSearchParams(url.searchParams)));
+    }
+
+    if (pathname === '/v1/browser-audits' && request.method === 'POST') {
+      return handleCreateBrowserAudit(request);
+    }
+
     if (pathname === '/v1/scheduler/dispatch' && request.method === 'POST') {
       return handleDispatchScheduledProfiles(request, url);
     }
@@ -1239,11 +1286,16 @@ export const server = Bun.serve({
       return analysis ? json(analysis) : json({ error: 'Analysis not found' }, { status: 404 });
     }
 
+    const browserAuditMatch = pathname.match(/^\/v1\/browser-audits\/([^/]+)$/);
+    if (browserAuditMatch?.[1] && request.method === 'GET') {
+      return handleGetBrowserAudit(browserAuditMatch[1]);
+    }
+
     return json(
       {
         ok: false,
         message:
-          'Use /health, /v1/regions, /v1/jobs, /v1/properties, /v1/route-sets, /v1/region-packs, /v1/check-profiles, or their detail routes'
+          'Use /health, /v1/regions, /v1/jobs, /v1/properties, /v1/route-sets, /v1/region-packs, /v1/check-profiles, /v1/browser-audits, or their detail routes'
       },
       { status: 404 }
     );
@@ -2048,6 +2100,130 @@ function handleExportCheckProfileReport(profileId: string, url: URL) {
       'content-disposition': `attachment; filename="${exportResource.filename}"`
     }
   });
+}
+
+async function handleCreateBrowserAudit(request: Request) {
+  const body = await parseJsonBody<CreateBrowserAuditInput>(request);
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const parsed = createBrowserAuditInputSchema.safeParse(body.data);
+
+  if (!parsed.success) {
+    return json(
+      {
+        error: 'Invalid browser audit payload',
+        issues: parsed.error.flatten()
+      },
+      { status: 400 }
+    );
+  }
+
+  if (!runtime.browserAuditBaseUrl || !runtime.browserAuditSharedSecret) {
+    return json(
+      {
+        error: 'Browser audit direct-run is not configured'
+      },
+      { status: 503 }
+    );
+  }
+
+  const requestedAt = new Date().toISOString();
+  const executionId = `audit_${crypto.randomUUID()}`;
+  const input = parsed.data;
+  const workerRequest: BrowserAuditWorkerRequest = {
+    executionId,
+    targetUrl: input.targetUrl,
+    region: input.region ?? null,
+    policy: input.policy,
+    customHeaders: input.customHeaders,
+    cookies: input.cookies,
+    artifactUpload: null,
+    timestamp: requestedAt,
+    signature: 'pending',
+    keyVersion: 'current'
+  };
+  workerRequest.signature = await createBrowserAuditSignature(runtime.browserAuditSharedSecret, workerRequest);
+
+  let browserAudit: BrowserAuditResource;
+
+  try {
+    const response = await fetch(new URL('/audit', runtime.browserAuditBaseUrl).toString(), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(browserAuditWorkerRequestSchema.parse(workerRequest))
+    });
+    const payload = await readResponsePayload(response);
+    const parsedWorkerResponse = browserAuditWorkerResponseSchema.safeParse(payload);
+
+    if (parsedWorkerResponse.success) {
+      browserAudit = browserAuditResourceSchema.parse({
+        id: executionId,
+        targetUrl: input.targetUrl,
+        region: input.region ?? null,
+        status: parsedWorkerResponse.data.status === 'succeeded' ? 'succeeded' : 'failed',
+        requestedAt,
+        startedAt: parsedWorkerResponse.data.result?.startedAt ?? requestedAt,
+        completedAt: parsedWorkerResponse.data.result?.completedAt ?? new Date().toISOString(),
+        policy: input.policy,
+        customHeaders: input.customHeaders,
+        cookies: input.cookies,
+        result: parsedWorkerResponse.data.result,
+        error: parsedWorkerResponse.data.error
+      });
+    } else {
+      const message =
+        payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+          ? payload.error
+          : `Browser audit worker returned ${response.status}`;
+      browserAudit = browserAuditResourceSchema.parse({
+        id: executionId,
+        targetUrl: input.targetUrl,
+        region: input.region ?? null,
+        status: 'failed',
+        requestedAt,
+        startedAt: requestedAt,
+        completedAt: new Date().toISOString(),
+        policy: input.policy,
+        customHeaders: input.customHeaders,
+        cookies: input.cookies,
+        result: null,
+        error: message
+      });
+    }
+  } catch (error) {
+    browserAudit = browserAuditResourceSchema.parse({
+      id: executionId,
+      targetUrl: input.targetUrl,
+      region: input.region ?? null,
+      status: 'failed',
+      requestedAt,
+      startedAt: requestedAt,
+      completedAt: new Date().toISOString(),
+      policy: input.policy,
+      customHeaders: input.customHeaders,
+      cookies: input.cookies,
+      result: null,
+      error: error instanceof Error ? error.message : 'Browser audit request failed'
+    });
+  }
+
+  repository.saveBrowserAudit(browserAudit);
+  return json(browserAudit, { status: 201 });
+}
+
+function handleGetBrowserAudit(auditId: string) {
+  const browserAudit = repository.getBrowserAudit(auditId);
+
+  if (!browserAudit) {
+    return json({ error: 'Browser audit not found' }, { status: 404 });
+  }
+
+  return json(browserAudit, { status: 200 });
 }
 
 function handleJobStream(jobId: string) {
@@ -2866,6 +3042,9 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     retentionDays: parsed.SELFHOST_RETENTION_DAYS,
     probeSharedSecret: parsed.PROBE_SHARED_SECRET,
     probeSharedSecretNext: parsed.PROBE_SHARED_SECRET_NEXT,
+    browserAuditSharedSecret: parsed.BROWSER_AUDIT_SHARED_SECRET,
+    browserAuditSharedSecretNext: parsed.BROWSER_AUDIT_SHARED_SECRET_NEXT,
+    browserAuditBaseUrl: parsed.SELFHOST_BROWSER_AUDIT_BASE_URL,
     activeRegionCodes: parseRegionCodes(parsed.SELFHOST_ACTIVE_REGION_CODES_JSON),
     regionIds: parseRegionMap(parsed.SELFHOST_REGION_IDS_JSON),
     probeBaseUrls: parseRegionMap(parsed.SELFHOST_PROBE_BASE_URLS_JSON),
@@ -3615,6 +3794,26 @@ const publicRouter = publicApi.router({
 
       return analysis;
     })
+  },
+  browserAudits: {
+    list: publicApi.browserAudits.list.handler(async ({ input }) =>
+      buildBrowserAuditListResponse(input.query)
+    ),
+    create: publicApi.browserAudits.create.handler(async ({ input }) =>
+      unwrapJsonResponse(await handleCreateBrowserAudit(createInternalRequest('/v1/browser-audits', {
+        method: 'POST',
+        body: input
+      })))
+    ),
+    get: publicApi.browserAudits.get.handler(async ({ input }) => {
+      const browserAudit = repository.getBrowserAudit(input.params.auditId);
+
+      if (!browserAudit) {
+        throw new ORPCError('NOT_FOUND', { message: 'Browser audit not found' });
+      }
+
+      return browserAudit;
+    })
   }
 });
 
@@ -3858,6 +4057,24 @@ const appRouter = appApi.router({
   analyses: {
     list: appApi.analyses.list.handler(async ({ input }): Promise<AnalysisListResponse> =>
       buildAnalysisListResponse(input.query)
+    )
+  },
+  browserAudits: {
+    list: appApi.browserAudits.list.handler(async ({ input }): Promise<BrowserAuditListResponse> =>
+      buildBrowserAuditListResponse(input.query)
+    ),
+    create: appApi.browserAudits.create.handler(async ({ input }): Promise<BrowserAuditResource> =>
+      unwrapJsonResponse(
+        await handleCreateBrowserAudit(
+          createInternalRequest('/v1/browser-audits', {
+            method: 'POST',
+            body: input
+          })
+        )
+      )
+    ),
+    get: appApi.browserAudits.get.handler(async ({ input }): Promise<BrowserAuditResource> =>
+      unwrapJsonResponse(handleGetBrowserAudit(input.params.auditId))
     )
   },
   exports: {

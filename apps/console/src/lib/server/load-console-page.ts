@@ -1,5 +1,6 @@
 import { parseWebEnv } from '@webperf/config/public';
 import type {
+  BrowserAuditListResponse,
   CheckProfileComparisonResponse,
   CheckProfileLatestComparisonResponse,
   CheckProfileListResponse,
@@ -32,11 +33,24 @@ export const loadConsolePage = async ({
   });
 
   const regionsPayload = await fetchOptionalJson<RegionsResponse>(fetch, '/api/control/regions');
+  const capabilitiesPayload = await fetchOptionalJson<{
+    features?: {
+      browserAuditDirectRun?: boolean;
+    };
+  }>(fetch, '/api/control/capabilities');
+  const browserAuditsPayload = await fetchOptionalJson<BrowserAuditListResponse>(
+    fetch,
+    `/api/control/browser-audits?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`
+  );
   const savedChecks = await loadSavedChecks(fetch);
 
   return {
     regions: regionsPayload?.regions ?? [],
     turnstileSiteKey: runtime.TURNSTILE_SITE_KEY ?? null,
+    capabilities: {
+      browserAuditDirectRun: Boolean(capabilitiesPayload?.features?.browserAuditDirectRun)
+    },
+    browserAudits: browserAuditsPayload?.browserAudits ?? [],
     savedChecks
   };
 };

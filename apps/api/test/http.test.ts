@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
+import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
 import { appContract, opsContract, publicContract } from '@webperf/contracts';
 import { controlContract } from '@webperf/contracts/control-contract';
 import type { CheckProfileReportResponse } from '@webperf/contracts';
+import { createBrowserAuditSignature } from '@webperf/domain-core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,6 +18,25 @@ type MockProbeScenario = {
   success?: boolean;
   error?: string | null;
 };
+
+type MockBrowserAuditScenario = {
+  status: 'succeeded' | 'failed';
+  error?: string | null;
+};
+
+const selfhostEnvKeys = [
+  'SELFHOST_API_HOST',
+  'SELFHOST_API_PORT',
+  'SELFHOST_DATABASE_PATH',
+  'PROBE_SHARED_SECRET',
+  'SELFHOST_ACTIVE_REGION_CODES_JSON',
+  'SELFHOST_REGION_IDS_JSON',
+  'SELFHOST_PROBE_BASE_URLS_JSON',
+  'SELFHOST_MAX_TARGET_ATTEMPTS',
+  'BROWSER_AUDIT_SHARED_SECRET',
+  'BROWSER_AUDIT_SHARED_SECRET_NEXT',
+  'SELFHOST_BROWSER_AUDIT_BASE_URL'
+] as const;
 
 const tempDirs: string[] = [];
 const startedServers: Array<{ stop: (closeActiveConnections?: boolean) => void }> = [];
@@ -32,6 +53,10 @@ afterEach(() => {
       rmSync(directory, { recursive: true, force: true });
     }
   }
+
+  for (const key of selfhostEnvKeys) {
+    delete process.env[key];
+  }
 });
 
 describe('api service monitoring expansion', () => {
@@ -40,6 +65,7 @@ describe('api service monitoring expansion', () => {
     async () => {
       const probeRequests: unknown[] = [];
       const webhookPayloads: unknown[] = [];
+      const browserAuditRequests: BrowserAuditWorkerRequest[] = [];
       const probe = startProbeServer(
         {
           latencyMs: 650,
@@ -49,8 +75,17 @@ describe('api service monitoring expansion', () => {
         },
         probeRequests
       );
+      const browserAuditWorker = startBrowserAuditWorkerServer(
+        {
+          status: 'succeeded'
+        },
+        browserAuditRequests
+      );
       const webhook = startWebhookServer(webhookPayloads);
-      const harness = await startSelfhostHarness(probe.port);
+      const harness = await startSelfhostHarness(probe.port, {
+        browserAuditBaseUrl: `http://127.0.0.1:${browserAuditWorker.port}`,
+        browserAuditSharedSecret: 'browser-audit-secret'
+      });
       const client = createORPCClient(
         new RPCLink({
           url: `${harness.baseUrl}/rpc`
@@ -78,6 +113,7 @@ describe('api service monitoring expansion', () => {
       expect((await opsClient.system.health()).service).toBe('webperf-api');
       expect((await appClient.system.regions()).regions.length).toBeGreaterThan(0);
       expect((await publicClient.capabilities.get()).deploymentModel).toBe('selfhost');
+      expect((await publicClient.capabilities.get()).features.browserAuditDirectRun).toBe(true);
 
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);
@@ -174,8 +210,103 @@ describe('api service monitoring expansion', () => {
       expect(uptimeReport.latestRunSummary?.alertDeliveries.length).toBe(1);
       await waitForWebhookPayloads(webhookPayloads, 2);
       expect(webhookPayloads).toHaveLength(2);
+
+      const browserAuditCreateResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          targetUrl: 'https://example.com',
+          region: 'tokyo',
+          policy: {
+            preset: 'mobile',
+            flow: {
+              steps: [{ type: 'navigate', url: 'https://example.com' }]
+            }
+          },
+          customHeaders: [{ name: 'Authorization', value: 'Bearer smoke-token' }],
+          cookies: [{ name: 'session', value: 'cookie-value', domain: 'example.com', path: '/' }]
+        })
+      });
+      const createdBrowserAudit = await browserAuditCreateResponse.json() as {
+        id: string;
+        status: string;
+        error: string | null;
+        result: { summary: { performanceScore: number | null }; artifacts: Array<{ kind: string }> } | null;
+      };
+      expect(browserAuditCreateResponse.status).toBe(201);
+      expect(createdBrowserAudit.status).toBe('succeeded');
+      expect(createdBrowserAudit.error).toBeNull();
+      expect(createdBrowserAudit.result?.summary.performanceScore).toBe(0.91);
+      expect(createdBrowserAudit.result?.artifacts.some((artifact) => artifact.kind === 'html')).toBe(true);
+      expect(browserAuditRequests).toHaveLength(1);
+      expect(browserAuditRequests[0]?.signature).not.toBe('pending');
+      const expectedSignature = await createBrowserAuditSignature(
+        'browser-audit-secret',
+        browserAuditRequests[0] as BrowserAuditWorkerRequest
+      );
+      expect(browserAuditRequests[0]?.signature).toBe(expectedSignature);
+
+      const browserAuditListResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=10`);
+      const browserAuditListPayload = await browserAuditListResponse.json() as {
+        browserAudits: Array<{ id: string; status: string }>;
+        pageInfo: { totalCount: number; pageSize: number };
+      };
+      expect(browserAuditListResponse.status).toBe(200);
+      expect(browserAuditListPayload.pageInfo.totalCount).toBe(1);
+      expect(browserAuditListPayload.browserAudits[0]?.id).toBe(createdBrowserAudit.id);
+
+      const browserAuditGetResponse = await fetch(`${harness.baseUrl}/v1/browser-audits/${createdBrowserAudit.id}`);
+      const browserAuditDetail = await browserAuditGetResponse.json() as {
+        id: string;
+        result: { summary: { performanceScore: number | null } } | null;
+      };
+      expect(browserAuditGetResponse.status).toBe(200);
+      expect(browserAuditDetail.id).toBe(createdBrowserAudit.id);
+      expect(browserAuditDetail.result?.summary.performanceScore).toBe(0.91);
+
+      browserAuditWorker.setScenario({
+        status: 'failed',
+        error: 'Lighthouse run failed'
+      });
+
+      const failedBrowserAuditResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          targetUrl: 'https://example.com/failure',
+          policy: {
+            preset: 'desktop',
+            flow: {
+              steps: [{ type: 'navigate', url: 'https://example.com/failure' }]
+            }
+          }
+        })
+      });
+      const failedBrowserAudit = await failedBrowserAuditResponse.json() as {
+        id: string;
+        status: string;
+        error: string | null;
+        result: unknown;
+      };
+      expect(failedBrowserAuditResponse.status).toBe(201);
+      expect(failedBrowserAudit.status).toBe('failed');
+      expect(failedBrowserAudit.error).toBe('Lighthouse run failed');
+      expect(failedBrowserAudit.result).toBeNull();
+
+      const failedBrowserAuditListResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=10`);
+      const failedBrowserAuditListPayload = await failedBrowserAuditListResponse.json() as {
+        browserAudits: Array<{ id: string; status: string; error: string | null }>;
+        pageInfo: { totalCount: number };
+      };
+      expect(failedBrowserAuditListResponse.status).toBe(200);
+      expect(failedBrowserAuditListPayload.pageInfo.totalCount).toBe(2);
+      expect(failedBrowserAuditListPayload.browserAudits.some((audit) => audit.id === failedBrowserAudit.id && audit.status === 'failed')).toBe(true);
     },
-    15_000
+    20_000
   );
 });
 
@@ -277,7 +408,133 @@ const startWebhookServer = (payloads: unknown[]) => {
   };
 };
 
-const startSelfhostHarness = async (probePort: number) => {
+const startBrowserAuditWorkerServer = (
+  scenario: MockBrowserAuditScenario,
+  requests: BrowserAuditWorkerRequest[]
+) => {
+  const current = { ...scenario };
+  const server = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    async fetch(request) {
+      const url = new URL(request.url);
+
+      if (url.pathname === '/healthz') {
+        return Response.json({ ok: true });
+      }
+
+      if (url.pathname === '/capabilities') {
+        return Response.json({
+          flowDslVersion: 'v1',
+          toolchain: {
+            flowDslVersion: 'v1',
+            bunVersion: '1.3.11',
+            chromeVersion: '136.0.0.0',
+            puppeteerVersion: '24.7.1',
+            lighthouseVersion: '12.6.0'
+          },
+          supportedCheckpointModes: ['navigation', 'snapshot', 'timespan'],
+          supportedArtifactKinds: ['json', 'html', 'screenshot', 'trace'],
+          unsupportedFeatures: [],
+          limits: {
+            maxSteps: 20,
+            maxCheckpoints: 3,
+            maxPages: 1,
+            maxContexts: 1,
+            maxArtifactBytes: 25_000_000,
+            defaultTotalTimeoutMs: 120_000,
+            defaultStepTimeoutMs: 10_000
+          }
+        });
+      }
+
+      if (url.pathname !== '/audit') {
+        return new Response('not found', { status: 404 });
+      }
+
+      const payload = await request.json() as BrowserAuditWorkerRequest;
+      requests.push(payload);
+
+      const startedAt = new Date().toISOString();
+      const completedAt = new Date(Date.now() + 250).toISOString();
+
+      return Response.json({
+        executionId: payload.executionId,
+        status: current.status,
+        result:
+          current.status === 'succeeded'
+            ? {
+                summary: {
+                  finalUrl: payload.targetUrl,
+                  statusCode: 200,
+                  performanceScore: 0.91,
+                  accessibilityScore: 0.96,
+                  bestPracticesScore: 0.89,
+                  seoScore: 0.94,
+                  fcpMs: 1_120,
+                  lcpMs: 1_820,
+                  cls: 0.02,
+                  inpMs: 145,
+                  tbtMs: 88,
+                  speedIndexMs: 1_540
+                },
+                checkpoints: [],
+                issues: [],
+                artifacts: [
+                  {
+                    id: `${payload.executionId}_json`,
+                    kind: 'json',
+                    url: `https://artifacts.test/${payload.executionId}.json`,
+                    contentType: 'application/json',
+                    byteSize: 4096,
+                    createdAt: completedAt
+                  },
+                  {
+                    id: `${payload.executionId}_html`,
+                    kind: 'html',
+                    url: `https://artifacts.test/${payload.executionId}.html`,
+                    contentType: 'text/html',
+                    byteSize: 6144,
+                    createdAt: completedAt
+                  }
+                ],
+                toolchain: {
+                  flowDslVersion: 'v1',
+                  bunVersion: '1.3.11',
+                  chromeVersion: '136.0.0.0',
+                  puppeteerVersion: '24.7.1',
+                  lighthouseVersion: '12.6.0'
+                },
+                startedAt,
+                completedAt
+              }
+            : null,
+        error: current.status === 'failed' ? current.error ?? 'Browser audit failed' : null
+      });
+    }
+  });
+
+  startedServers.push(server);
+
+  if (server.port == null) {
+    throw new Error('Browser audit worker did not expose a port');
+  }
+
+  return {
+    port: server.port,
+    setScenario(next: MockBrowserAuditScenario) {
+      Object.assign(current, next);
+    }
+  };
+};
+
+const startSelfhostHarness = async (
+  probePort: number,
+  options?: {
+    browserAuditBaseUrl?: string;
+    browserAuditSharedSecret?: string;
+  }
+) => {
   const controlPort = await openPort();
   const databaseDirectory = createTempDirectory();
   const databasePath = join(databaseDirectory, 'webperf.sqlite');
@@ -290,6 +547,16 @@ const startSelfhostHarness = async (probePort: number) => {
   process.env.SELFHOST_PROBE_BASE_URLS_JSON = `{"tokyo":"http://127.0.0.1:${probePort}"}`;
   process.env.SELFHOST_MAX_TARGET_ATTEMPTS = '1';
 
+  if (options?.browserAuditBaseUrl && options.browserAuditSharedSecret) {
+    process.env.SELFHOST_BROWSER_AUDIT_BASE_URL = options.browserAuditBaseUrl;
+    process.env.BROWSER_AUDIT_SHARED_SECRET = options.browserAuditSharedSecret;
+    process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT = '';
+  } else {
+    delete process.env.SELFHOST_BROWSER_AUDIT_BASE_URL;
+    delete process.env.BROWSER_AUDIT_SHARED_SECRET;
+    delete process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT;
+  }
+
   const modulePath = new URL(`../src/index.ts?instance=${crypto.randomUUID()}`, import.meta.url).href;
   const module = (await import(modulePath)) as { server: { stop: (closeActiveConnections?: boolean) => void } };
   startedServers.push(module.server);
@@ -301,7 +568,7 @@ const startSelfhostHarness = async (probePort: number) => {
 };
 
 const waitForHealth = async (baseUrl: string) => {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
       const response = await fetch(`${baseUrl}/health`);
 

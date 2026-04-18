@@ -37,7 +37,32 @@ try {
   }
 
   await page.locator('input[name="url"]').fill(targetUrl);
+  const createJobResponsePromise = page.waitForResponse((response) => {
+    const request = response.request();
+    return request.method() === 'POST' && response.url().includes('/api/control/jobs');
+  });
   await page.getByRole('button', { name: /Start measurement/i }).click();
+  const createJobResponse = await createJobResponsePromise;
+  const createJobStatus = createJobResponse.status();
+  const createJobBodyText = await createJobResponse.text();
+  let createJobPayload: { error?: string; code?: string } | null = null;
+
+  try {
+    createJobPayload = JSON.parse(createJobBodyText) as { error?: string; code?: string };
+  } catch {
+    createJobPayload = null;
+  }
+
+  const inflightMessage = createJobPayload?.error ?? createJobBodyText;
+
+  if (createJobStatus === 429) {
+    if (!/inflight measurement job/i.test(inflightMessage)) {
+      throw new Error(`Unexpected 429 from manual run create: ${inflightMessage}`);
+    }
+  } else if (createJobStatus !== 201) {
+    throw new Error(`Unexpected ${createJobStatus} from manual run create: ${inflightMessage || 'empty response body'}`);
+  }
+
   await Promise.race([
     page.waitForSelector('.job-summary, .result-card', { timeout: 20000 }),
     page.waitForSelector('.error', { timeout: 20000 })

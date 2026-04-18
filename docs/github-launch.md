@@ -48,61 +48,19 @@ The public README should help a new visitor answer these questions within a minu
 
 The current README is already close; avoid turning it into an exhaustive architecture document.
 
-## License Options
+## License
 
-This repo should not guess the license at random. The decision changes how easy it is for others to adopt and extend the OSS core.
+Selected license:
 
-Recommended candidates:
+- `Apache-2.0`
 
-### Apache-2.0
+Why this choice:
 
-Choose this if the goal is broad adoption with a clear patent grant.
+- broad adoption for infra and developer-tooling users
+- explicit patent grant
+- low friction for companies evaluating self-hosted deployment
 
-Pros:
-
-- familiar and low-friction for infrastructure and developer-tool repos
-- easier for companies to adopt internally
-- explicit patent language
-
-Tradeoff:
-
-- downstreams can modify and host derivatives without sharing those modifications back
-
-### MIT
-
-Choose this only if you want the simplest highly permissive option.
-
-Pros:
-
-- minimal, familiar, easy to understand
-
-Tradeoff:
-
-- weaker patent posture than Apache-2.0
-- gives up essentially all leverage over private forks
-
-### MPL-2.0
-
-Choose this if you want a weak-copyleft middle ground.
-
-Pros:
-
-- modified source files must stay shareable
-- still easier to adopt than full copyleft
-
-Tradeoff:
-
-- some teams will avoid it compared with Apache-2.0
-- adds more legal review friction than permissive licenses
-
-## Recommendation
-
-Default recommendation:
-
-- pick `Apache-2.0` if the main goal is adoption and ecosystem reach
-- pick `MPL-2.0` if the main goal is protecting direct file-level modifications to the OSS core
-
-Do not publish without a real `LICENSE` file. That is the last major public-launch blocker left in this repo.
+The checked-in [LICENSE](../LICENSE) file is now part of the public-launch baseline.
 
 ## GitHub Repo Settings Checklist
 

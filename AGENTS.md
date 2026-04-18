@@ -64,7 +64,7 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-04-15:
+Current repo state as of 2026-04-18:
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit worker now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
@@ -100,6 +100,10 @@ Current repo state as of 2026-04-15:
 - the self-host resources surface now uses those shared setup composites, and the parallel local-dev path is now an explicit supported workflow with console/probe override scripts instead of manual port surgery
 - the self-host console now keeps most route-specific orchestration in repo-local `src/lib/console-workspace/*.svelte.ts` controllers, leaving `ConsoleWorkspace.svelte` primarily responsible for mode wiring and render composition
 - shared operator polish helpers now live in `@webperf/ui/components/operator/*` via `operator-section-header`, `operator-empty-state`, and `inline-status-notice`, keeping section headers, empty states, and inline notices visually aligned across OSS and cloud
+- the self-host API now exposes optional direct-run browser-audit resources at `/v1/browser-audits`, persists summaries plus artifact metadata in SQLite, and advertises availability through `/v1/capabilities`
+- the self-host console `Reports` surface now includes a direct-run browser-audit tab for launching audits and reviewing recent saved summaries, failures, and artifact pointers
+- local dev scripts now preflight the console, API, and probe ports before boot so standalone and parallel workflows fail fast with clear override guidance
+- the repo now includes a checked-in `Apache-2.0` `LICENSE`, and the public launch docs no longer treat license selection as an unresolved blocker
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 
@@ -142,8 +146,8 @@ Current local URLs:
 6. keep trimming the repo-local console controllers and route-scoped workspace components now that the main workspace split is in place
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
-9. finalize the license choice before the public GitHub launch
-10. keep the shared token layer, shadcn component exports, setup/operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
+9. keep the shared token layer, shadcn component exports, setup/operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
+10. keep tightening direct-run browser-audit history/detail UX without pulling managed orchestration concerns into OSS
 
 ## Update Protocol
 

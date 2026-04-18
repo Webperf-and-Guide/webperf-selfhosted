@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import type {
   AnalysisResource,
+  BrowserAuditResource,
   CheckProfile,
   CheckProfileRun,
   ComparisonResource,
@@ -13,6 +14,7 @@ import type {
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
+  browserAuditResourceSchema,
   checkProfileSchema,
   checkProfileRunSchema,
   comparisonResourceSchema,
@@ -64,6 +66,9 @@ export type JobRepository = {
   getAnalysis(id: string): AnalysisResource | null;
   listAnalyses(): AnalysisResource[];
   saveAnalysis(analysis: AnalysisResource): void;
+  getBrowserAudit(id: string): BrowserAuditResource | null;
+  listBrowserAudits(): BrowserAuditResource[];
+  saveBrowserAudit(browserAudit: BrowserAuditResource): void;
   close(): void;
 };
 
@@ -74,7 +79,8 @@ type EntityKind =
   | 'check_profile'
   | 'comparison'
   | 'export'
-  | 'analysis';
+  | 'analysis'
+  | 'browser_audit';
 
 type SavedEntityRow = {
   payload_json: string;
@@ -445,6 +451,19 @@ export const createSqliteJobRepository = ({
       saveEntity('analysis', {
         ...analysis,
         updatedAt: analysis.createdAt
+      });
+    },
+    getBrowserAudit(id) {
+      return getEntity('browser_audit', id, browserAuditResourceSchema);
+    },
+    listBrowserAudits() {
+      return listEntities('browser_audit', browserAuditResourceSchema);
+    },
+    saveBrowserAudit(browserAudit) {
+      saveEntity('browser_audit', {
+        ...browserAudit,
+        createdAt: browserAudit.requestedAt,
+        updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
       });
     },
     close() {

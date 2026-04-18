@@ -9,6 +9,15 @@ api_base_url="${SELFHOST_PARALLEL_CONTROL_BASE_URL:-http://127.0.0.1:8788}"
 
 cd "$root_dir"
 
+bash "$root_dir/tooling/scripts/ensure-port-free.sh" \
+  "$console_port" \
+  "selfhost parallel console" \
+  "Stop the existing process or set SELFHOST_PARALLEL_CONSOLE_PORT to another port."
+bash "$root_dir/tooling/scripts/ensure-port-free.sh" \
+  "$probe_port" \
+  "selfhost parallel probe" \
+  "Stop the existing process or set SELFHOST_PARALLEL_PROBE_PORT to another port."
+
 if [[ -n "${SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON:-}" ]]; then
   export SELFHOST_PROBE_BASE_URLS_JSON="$SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON"
 else

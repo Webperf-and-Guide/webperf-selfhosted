@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { InlineStatusNotice } from '@webperf/ui/components/operator/inline-status-notice';
   import { OperatorEmptyState } from '@webperf/ui/components/operator/operator-empty-state';
   import { OperatorSectionHeader } from '@webperf/ui/components/operator/operator-section-header';
   import { ResourceCountStrip } from '@webperf/ui/components/operator/resource-count-strip';
@@ -8,10 +9,14 @@
   let {
     savedChecksEnabled,
     summaryItems,
+    statusMessage = null,
+    statusError = null,
     children
   } = $props<{
     savedChecksEnabled: boolean;
     summaryItems: MetricGridItem[];
+    statusMessage?: string | null;
+    statusError?: string | null;
     children?: Snippet;
   }>();
 </script>
@@ -24,6 +29,14 @@
 
   {#if savedChecksEnabled}
     <ResourceCountStrip items={summaryItems} />
+
+    {#if statusError}
+      <InlineStatusNotice message={statusError} tone="danger" />
+    {/if}
+
+    {#if statusMessage}
+      <InlineStatusNotice message={statusMessage} tone="success" />
+    {/if}
 
     {@render children?.()}
   {:else}

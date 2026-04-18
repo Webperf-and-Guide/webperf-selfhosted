@@ -2,7 +2,7 @@ import { ORPCError, createORPCClient, safe } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
 import type { ExportResource, JobSnapshotEvent, ListQuery } from '@webperf/contracts';
-import { appContract, opsContract } from '@webperf/contracts';
+import { appContract, opsContract, publicContract } from '@webperf/contracts';
 import { parseWebEnv } from '@webperf/config/public';
 import { env as privateEnv } from '$env/dynamic/private';
 
@@ -12,8 +12,10 @@ export type ControlListQuery = ListQuery;
 
 type AppRpcClient = ContractRouterClient<typeof appContract>;
 type OpsRpcClient = ContractRouterClient<typeof opsContract>;
+type PublicRpcClient = ContractRouterClient<typeof publicContract>;
 
 export type ControlPlaneClient = {
+  public: PublicRpcClient;
   app: AppRpcClient;
   ops: OpsRpcClient;
 };
@@ -147,6 +149,11 @@ const createAppRpcClient = (
   requesterIp?: string | null
 ): AppRpcClient => createORPCClient(createRpcLink(runtime, '/rpc/app', requesterIp));
 
+const createPublicRpcClient = (
+  runtime: ReturnType<typeof resolveRuntime>,
+  requesterIp?: string | null
+): PublicRpcClient => createORPCClient(createRpcLink(runtime, '/rpc/public', requesterIp));
+
 const createOpsRpcClient = (
   runtime: ReturnType<typeof resolveRuntime>,
   requesterIp?: string | null
@@ -179,6 +186,7 @@ export const getControlPlaneClient = (
   const runtime = resolveRuntime(platform);
 
   return {
+    public: createPublicRpcClient(runtime, requesterIp),
     app: createAppRpcClient(runtime, requesterIp),
     ops: createOpsRpcClient(runtime, requesterIp)
   };

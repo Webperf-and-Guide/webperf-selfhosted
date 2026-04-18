@@ -30,6 +30,9 @@ export const formatText = (value: string | null | undefined) => value ?? 'n/a';
 export const formatDateTime = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleString() : 'n/a';
 
+export const formatPercentScore = (value: number | null | undefined) =>
+  value == null ? 'n/a' : `${Math.round(value * 100)} / 100`;
+
 export const formatSchedule = (minutes: number | null | undefined) =>
   minutes == null ? 'manual only' : `every ${minutes} min`;
 

@@ -2,11 +2,13 @@
   import { invalidateAll } from '$app/navigation';
   import { useQueryClient } from '@tanstack/svelte-query';
   import DerivedResourceBrowser from '$lib/components/DerivedResourceBrowser.svelte';
+  import BrowserAuditHistory from '$lib/components/workspace/BrowserAuditHistory.svelte';
   import LiveRunResults from '$lib/components/workspace/LiveRunResults.svelte';
   import LiveRunTargetCard from '$lib/components/workspace/LiveRunTargetCard.svelte';
   import ManualRunPanel from '$lib/components/workspace/ManualRunPanel.svelte';
   import RegionCatalog from '$lib/components/workspace/RegionCatalog.svelte';
   import RegionContinentCard from '$lib/components/workspace/RegionContinentCard.svelte';
+  import ReportsEndpointsTable from '$lib/components/workspace/ReportsEndpointsTable.svelte';
   import ReportsWorkspace from '$lib/components/workspace/ReportsWorkspace.svelte';
   import ResourceEditors from '$lib/components/workspace/ResourceEditors.svelte';
   import SavedCheckCard from '$lib/components/workspace/SavedCheckCard.svelte';
@@ -22,9 +24,7 @@
   import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
   import { ResourceEditorPanel } from '@webperf/ui/components/operator/resource-editor-panel';
   import Button from '@webperf/ui/components/ui/button';
-  import { Card } from '@webperf/ui/components/ui/card';
   import { Checkbox } from '@webperf/ui/components/ui/checkbox';
-  import { CopyButton } from '@webperf/ui/components/ui/copy-button';
   import {
     Root as FieldSet,
     Content as FieldSetContent,
@@ -35,14 +35,6 @@
   import { ScrollArea } from '@webperf/ui/components/ui/scroll-area';
   import { Select } from '@webperf/ui/components/ui/select';
   import { Switch } from '@webperf/ui/components/ui/switch';
-  import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
-  } from '@webperf/ui/components/ui/table';
   import { TagsInput } from '@webperf/ui/components/ui/tags-input';
   import {
     Tabs,
@@ -60,6 +52,12 @@
   import type { CheckProfile, RegionAvailability } from '@webperf/contracts';
   import { onDestroy } from 'svelte';
   import type { ConsolePageData, ConsoleWorkspaceMode } from '$lib/console-data';
+  import {
+    formatDateTime,
+    formatPercentScore,
+    formatText,
+    formatTiming
+  } from '$lib/console-workspace/formatters';
 
   let { data, mode = 'overview' } = $props<{
     data: ConsolePageData;
@@ -68,6 +66,7 @@
   const queryClient = useQueryClient();
 
   const regions = $derived.by(() => data.regions ?? []);
+  const browserAudits = $derived.by(() => data.browserAudits ?? []);
   const savedChecks = $derived.by(() => data.savedChecks ?? null);
   const properties = $derived.by(() => savedChecks?.properties ?? []);
   const routeSets = $derived.by(() => savedChecks?.routeSets ?? []);
@@ -110,7 +109,11 @@
   });
   const checksState = checks.state;
   const reports = createReportsController({
-    getSavedChecksEnabled: () => Boolean(savedChecks)
+    getSavedChecksEnabled: () => Boolean(savedChecks),
+    getBrowserAudits: () => browserAudits,
+    getBrowserAuditDirectRunEnabled: () => data.capabilities.browserAuditDirectRun,
+    getRegions: () => regions,
+    refreshControlData
   });
   const reportsState = reports.state;
   const regionCatalog = createRegionsController({
@@ -726,11 +729,17 @@
 {/if}
 
 {#if showReports}
-  <ReportsWorkspace savedChecksEnabled={Boolean(savedChecks)} summaryItems={reports.summaryItems}>
+  <ReportsWorkspace
+    savedChecksEnabled={Boolean(savedChecks)}
+    statusError={reportsState.browserAuditSubmitError}
+    statusMessage={reportsState.browserAuditStatusMessage}
+    summaryItems={reports.summaryItems}
+  >
     {#if savedChecks}
       <Tabs bind:value={reportsState.workspaceTab}>
         <TabsList variant="line" class="w-full">
-          <TabsTrigger value="browser">Derived browser</TabsTrigger>
+          <TabsTrigger value="browser">Derived resources</TabsTrigger>
+          <TabsTrigger value="browserAudits">Browser audits</TabsTrigger>
           <TabsTrigger value="endpoints">API endpoints</TabsTrigger>
         </TabsList>
         <TabsContent value="browser">
@@ -738,37 +747,92 @@
             <DerivedResourceBrowser />
           </ScrollArea>
         </TabsContent>
+        <TabsContent value="browserAudits">
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            <form class="builder-card" onsubmit={reports.submitBrowserAudit}>
+              <FieldSet>
+                <FieldSetTitle class="text-base">Direct-run browser audit</FieldSetTitle>
+                <FieldSetContent class="grid gap-4">
+                  <label class="field">
+                    <span>Target URL</span>
+                    <Input
+                      bind:value={reportsState.browserAuditTargetUrl}
+                      placeholder="https://example.com"
+                      type="url"
+                    />
+                  </label>
+
+                  <label class="field">
+                    <span>Preset</span>
+                    <Select bind:value={reportsState.browserAuditPreset}>
+                      <option value="mobile">mobile</option>
+                      <option value="desktop">desktop</option>
+                    </Select>
+                  </label>
+
+                  <label class="field">
+                    <span>Region</span>
+                    <Select bind:value={reportsState.browserAuditRegion}>
+                      <option value="">auto-select</option>
+                      {#each reports.browserAuditRegionOptions as option (option.value)}
+                        <option value={option.value}>{option.label}</option>
+                      {/each}
+                    </Select>
+                  </label>
+                </FieldSetContent>
+                <FieldSetFooter class="builder-actions">
+                  <Button
+                    disabled={reportsState.browserAuditSubmitting || !data.capabilities.browserAuditDirectRun}
+                    type="submit"
+                    variant="secondary"
+                  >
+                    {#if reportsState.browserAuditSubmitting}Running audit...{:else}Run browser audit{/if}
+                  </Button>
+                </FieldSetFooter>
+              </FieldSet>
+              <p class="card-copy mt-4">
+                This self-host surface stays direct-run only: one navigation step, persisted summary,
+                and artifact metadata without managed fleet orchestration.
+              </p>
+              {#if !data.capabilities.browserAuditDirectRun}
+                <p class="hint mt-3">
+                  Configure `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET`
+                  to enable direct-run browser audits.
+                </p>
+              {/if}
+            </form>
+
+            <BrowserAuditHistory
+              audits={browserAudits}
+              formatDateTime={formatDateTime}
+              formatPercentScore={formatPercentScore}
+              formatText={formatText}
+              formatTiming={formatTiming}
+              onSelect={reports.selectBrowserAudit}
+              selectedAuditId={reportsState.selectedBrowserAuditId}
+            />
+          </div>
+        </TabsContent>
         <TabsContent value="endpoints">
-          <Card class="p-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Resource</TableHead>
-                  <TableHead>Purpose</TableHead>
-                  <TableHead>Path</TableHead>
-                  <TableHead class="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow>
-                  <TableCell>Comparisons</TableCell>
-                  <TableCell>Query persisted comparison payloads for CI and manual incident review.</TableCell>
-                  <TableCell><code>/api/control/comparisons</code></TableCell>
-                  <TableCell class="text-right">
-                    <CopyButton text="/api/control/comparisons">Copy path</CopyButton>
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Exports</TableCell>
-                  <TableCell>Retrieve deterministic JSON or CSV report exports for release evidence.</TableCell>
-                  <TableCell><code>/api/control/exports</code></TableCell>
-                  <TableCell class="text-right">
-                    <CopyButton text="/api/control/exports">Copy path</CopyButton>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </Card>
+          <ReportsEndpointsTable
+            endpoints={[
+              {
+                resource: 'Comparisons',
+                purpose: 'Query persisted comparison payloads for CI and manual incident review.',
+                path: '/api/control/comparisons'
+              },
+              {
+                resource: 'Exports',
+                purpose: 'Retrieve deterministic JSON or CSV report exports for release evidence.',
+                path: '/api/control/exports'
+              },
+              {
+                resource: 'Browser audits',
+                purpose: 'Inspect optional direct-run browser audit summaries and artifact metadata.',
+                path: '/api/control/browser-audits'
+              }
+            ]}
+          />
         </TabsContent>
       </Tabs>
     {/if}

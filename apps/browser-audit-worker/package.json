@@ -11,6 +11,7 @@
   "dependencies": {
     "@puppeteer/browsers": "2.13.0",
     "@webperf/contracts": "workspace:*",
+    "@webperf/domain-core": "workspace:*",
     "lighthouse": "13.1.0",
     "puppeteer-core": "24.40.0"
   },

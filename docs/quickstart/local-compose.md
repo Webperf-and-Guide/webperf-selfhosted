@@ -65,8 +65,24 @@ docker compose \
 ```
 
 When enabled, it is published on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
-The self-host API does not orchestrate it yet; this remains a standalone optional runtime.
+When `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET` are configured in the API container, the self-host API can call it directly through `POST /v1/browser-audits`.
 The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
+
+Example direct-run request once the worker profile is up:
+
+```sh
+curl -X POST http://127.0.0.1:8788/v1/browser-audits \
+  -H 'content-type: application/json' \
+  -d '{
+    "targetUrl": "https://example.com",
+    "policy": {
+      "preset": "mobile",
+      "flow": {
+        "steps": [{ "type": "navigate", "url": "https://example.com" }]
+      }
+    }
+  }'
+```
 
 ## Scheduling
 

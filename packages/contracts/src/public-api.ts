@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import {
+  browserAuditCookieSchema,
+  browserAuditExecutionStatusSchema,
   browserAuditExecutionSummarySchema,
+  browserAuditHeaderSchema,
+  browserAuditResultSchema,
   browserAuditPolicySchema,
   browserAuditRunSummarySchema
 } from './browser-audit';
@@ -202,6 +206,8 @@ export const publicApiPaths = [
   '/v1/check-profiles/:id/compare/baseline',
   '/v1/check-profiles/:id/report',
   '/v1/check-profiles/:id/report/export',
+  '/v1/browser-audits',
+  '/v1/browser-audits/:id',
   '/v1/scheduler/dispatch'
 ] as const;
 
@@ -377,6 +383,37 @@ export const checkProfileRunSchema = z.object({
   alertDeliveries: z.array(checkProfileAlertDeliverySchema).default([])
 });
 export type CheckProfileRun = z.infer<typeof checkProfileRunSchema>;
+
+export const createBrowserAuditInputSchema = z.object({
+  targetUrl: z.string().url(),
+  region: regionCodeSchema.nullable().optional().default(null),
+  policy: browserAuditPolicySchema,
+  customHeaders: z.array(browserAuditHeaderSchema).max(20).default([]),
+  cookies: z.array(browserAuditCookieSchema).max(20).default([])
+});
+export type CreateBrowserAuditInput = z.infer<typeof createBrowserAuditInputSchema>;
+
+export const browserAuditResourceSchema = z.object({
+  id: z.string().min(1),
+  targetUrl: z.string().url(),
+  region: regionCodeSchema.nullable().default(null),
+  status: browserAuditExecutionStatusSchema,
+  requestedAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable().default(null),
+  completedAt: z.string().datetime().nullable().default(null),
+  policy: browserAuditPolicySchema,
+  customHeaders: z.array(browserAuditHeaderSchema).max(20).default([]),
+  cookies: z.array(browserAuditCookieSchema).max(20).default([]),
+  result: browserAuditResultSchema.nullable().default(null),
+  error: z.string().min(1).nullable().default(null)
+});
+export type BrowserAuditResource = z.infer<typeof browserAuditResourceSchema>;
+
+export const browserAuditListResponseSchema = z.object({
+  browserAudits: z.array(browserAuditResourceSchema),
+  pageInfo: pageInfoSchema
+});
+export type BrowserAuditListResponse = z.infer<typeof browserAuditListResponseSchema>;
 
 export const propertyListResponseSchema = z.object({
   properties: z.array(propertySchema),

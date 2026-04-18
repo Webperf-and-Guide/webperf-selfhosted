@@ -1,65 +1,48 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { InlineStatusNotice } from '@webperf/ui/components/operator/inline-status-notice';
+  import { OperatorEmptyState } from '@webperf/ui/components/operator/operator-empty-state';
+  import { OperatorSectionHeader } from '@webperf/ui/components/operator/operator-section-header';
   import { ResourceCountStrip } from '@webperf/ui/components/operator/resource-count-strip';
+  import type { MetricGridItem } from '@webperf/ui/components/operator/types';
 
   let {
     savedChecksEnabled,
-    checkProfilesCount,
-    scheduledCheckCount,
-    pinnedBaselineCount,
-    totalRecordedRuns,
+    summaryItems,
+    statusMessage = null,
+    statusError = null,
     children
   } = $props<{
     savedChecksEnabled: boolean;
-    checkProfilesCount: number;
-    scheduledCheckCount: number;
-    pinnedBaselineCount: number;
-    totalRecordedRuns: number;
+    summaryItems: MetricGridItem[];
+    statusMessage?: string | null;
+    statusError?: string | null;
     children?: Snippet;
   }>();
-
-  const summaryItems = $derived.by(() => [
-    {
-      id: 'saved-checks',
-      label: 'Saved checks',
-      value: checkProfilesCount,
-      detail: 'Reusable gates ready for manual runs or scheduled dispatch.'
-    },
-    {
-      id: 'scheduled',
-      label: 'Scheduled',
-      value: scheduledCheckCount,
-      detail: 'Checks already configured with an interval.'
-    },
-    {
-      id: 'baselines',
-      label: 'Baselines pinned',
-      value: pinnedBaselineCount,
-      detail: 'Checks with a canonical run for regression comparisons.'
-    },
-    {
-      id: 'recorded-runs',
-      label: 'Recorded runs',
-      value: totalRecordedRuns,
-      detail: 'Recent execution history available for drill-down and export.'
-    }
-  ]);
 </script>
 
 <section class="checks-section" id="checks">
-  <div class="section-heading">
-    <p class="eyebrow">Reusable checks</p>
-    <h2>Promote stable manual runs into baseline-aware release gates with schedules and alerts.</h2>
-  </div>
+  <OperatorSectionHeader
+    eyebrow="Reusable checks"
+    title="Promote stable manual runs into baseline-aware release gates with schedules and alerts."
+  />
 
   {#if savedChecksEnabled}
     <ResourceCountStrip items={summaryItems} />
 
     {@render children?.()}
+
+    {#if statusError}
+      <InlineStatusNotice message={statusError} tone="danger" />
+    {/if}
+
+    {#if statusMessage}
+      <InlineStatusNotice message={statusMessage} tone="success" />
+    {/if}
   {:else}
-    <div class="empty-state">
-      <p>Saved checks are not available on this control endpoint.</p>
-      <small>Connect the full self-host API service to unlock schedules, baselines, alerts, and exports.</small>
-    </div>
+    <OperatorEmptyState
+      detail="Connect the full self-host API service to unlock schedules, baselines, alerts, and exports."
+      title="Saved checks are not available on this control endpoint."
+    />
   {/if}
 </section>

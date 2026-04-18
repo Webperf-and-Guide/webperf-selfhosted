@@ -84,3 +84,13 @@ Current shared operator composites:
 - `comparison-summary-panel`
 - `saved-check-summary-card`
 - `derived-resource-panel`
+- `operator-section-header`
+- `operator-empty-state`
+- `inline-status-notice`
+
+## Ownership notes
+
+- shared primitives and shared operator composites belong here
+- repo-local console controllers and submit/delete orchestration belong in each app under
+  `src/lib/console-workspace/*.svelte.ts`
+- cloud should continue consuming this package through sibling `file:` dependencies, not `bun link`

@@ -1,6 +1,7 @@
 import type { ButtonSize, ButtonVariant } from '../ui/button';
 
 export type OperatorTone = 'default' | 'muted' | 'accent' | 'success' | 'warning' | 'danger';
+export type InlineStatusTone = 'default' | 'success' | 'warning' | 'danger';
 
 export type MetricGridItem = {
   id?: string;

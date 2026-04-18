@@ -75,6 +75,7 @@ If you want to run `webperf-selfhosted` alongside the managed cloud repo on the 
 
 ```bash
 bun run dev:parallel:cloud
+bun run smoke:console:parallel:cloud
 ```
 
 That keeps the default standalone ports unchanged while moving the selfhosted parallel workflow to:
@@ -91,6 +92,12 @@ The helper scripts also support explicit overrides through:
 - `SELFHOST_PARALLEL_PROBE_PORT`
 - `SELFHOST_PARALLEL_PROBE_BASE_URL`
 - `SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON`
+
+The standalone smoke path still uses the default ports:
+
+```bash
+bun run smoke:console
+```
 
 ## Compose Bundle
 

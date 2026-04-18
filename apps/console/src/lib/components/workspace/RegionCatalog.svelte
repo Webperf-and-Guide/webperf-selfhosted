@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { OperatorSectionHeader } from '@webperf/ui/components/operator/operator-section-header';
 
   let {
     selectableCount,
@@ -13,11 +14,11 @@
 </script>
 
 <section class="regions-section" id="regions">
-  <div class="section-heading">
-    <p class="eyebrow">Region catalog</p>
-    <h2>Keep the rollout corridor visible without making it the center of the page.</h2>
-    <p class="hint">{selectableCount} of {regionCount} modeled regions are currently activated for measurement.</p>
-  </div>
+  <OperatorSectionHeader
+    eyebrow="Region catalog"
+    title="Keep the rollout corridor visible without making it the center of the page."
+    description={`${selectableCount} of ${regionCount} modeled regions are currently activated for measurement.`}
+  />
 
   {@render children?.()}
 </section>

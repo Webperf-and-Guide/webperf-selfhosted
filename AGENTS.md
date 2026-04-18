@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-17
+Last updated: 2026-04-18
 
 ## Mission
 
@@ -98,6 +98,8 @@ Current repo state as of 2026-04-15:
 - `packages/ui` now also exposes shared operator composites under `@webperf/ui/components/operator/*`, and the self-host console uses those for metric strips, quick region picks, run status cards, saved-check summaries, comparison panels, and derived-resource browsing
 - `packages/ui` now also carries second-wave setup/operator composites for resource workflow strips, inventory strips, editor panels, and paged list toolbars
 - the self-host resources surface now uses those shared setup composites, and the parallel local-dev path is now an explicit supported workflow with console/probe override scripts instead of manual port surgery
+- the self-host console now keeps most route-specific orchestration in repo-local `src/lib/console-workspace/*.svelte.ts` controllers, leaving `ConsoleWorkspace.svelte` primarily responsible for mode wiring and render composition
+- shared operator polish helpers now live in `@webperf/ui/components/operator/*` via `operator-section-header`, `operator-empty-state`, and `inline-status-notice`, keeping section headers, empty states, and inline notices visually aligned across OSS and cloud
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 
@@ -109,6 +111,8 @@ Current local dev entrypoints:
 - `bun run dev:api`
 - `bun run dev:scheduler`
 - `bun run dev:probe`
+- `bun run smoke:console`
+- `bun run smoke:console:parallel:cloud`
 
 Current local URLs:
 - console: `http://localhost:5173`
@@ -135,7 +139,7 @@ Current local URLs:
 3. keep refining install docs and compose ergonomics
 4. decide how package publishing should work once the repo is public
 5. decide whether public comparison/export resources should get richer server-side pagination and filtering
-6. continue breaking the shared console workspace into smaller route-scoped components now that the operator routes exist
+6. keep trimming the repo-local console controllers and route-scoped workspace components now that the main workspace split is in place
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 9. finalize the license choice before the public GitHub launch

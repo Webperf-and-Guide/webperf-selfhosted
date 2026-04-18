@@ -44,6 +44,7 @@ export { Checkbox } from './lib/components/ui/checkbox';
 export { CopyButton } from './lib/components/ui/copy-button';
 export { ComparisonSummaryPanel } from './lib/components/operator/comparison-summary-panel';
 export { DerivedResourcePanel } from './lib/components/operator/derived-resource-panel';
+export { InlineStatusNotice } from './lib/components/operator/inline-status-notice';
 export { PagedListToolbar } from './lib/components/operator/paged-list-toolbar';
 export {
   Dialog,
@@ -71,6 +72,8 @@ export {
 } from './lib/components/ui/field-set';
 export { Input } from './lib/components/ui/input';
 export { MetricGrid } from './lib/components/operator/metric-grid';
+export { OperatorEmptyState } from './lib/components/operator/operator-empty-state';
+export { OperatorSectionHeader } from './lib/components/operator/operator-section-header';
 export {
   NumberField,
   NumberFieldDecrement,
@@ -127,6 +130,7 @@ export type {
   ComparisonSummaryData,
   DerivedResourceItem,
   DerivedResourceTab,
+  InlineStatusTone,
   MetricGridItem,
   OperatorActionItem,
   OperatorTone,

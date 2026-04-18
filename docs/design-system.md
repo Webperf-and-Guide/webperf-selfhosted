@@ -132,6 +132,17 @@ Preferred app import shape:
 Use the root `@webperf/ui` barrel only for shared shell metadata like nav definitions and theme
 descriptors. Shared app screens should not import primitives directly from `@webperf/ui/primitives/*`.
 
+## Repo-local console controllers
+
+Console orchestration stays repo-local even when the rendered surface is shared.
+
+- `apps/console/src/lib/console-workspace/*.svelte.ts` owns mutable form state, route-specific derived
+  state, pagination, submit/delete handlers, live-run orchestration, and region toggle helpers
+- `ConsoleWorkspace.svelte` should stay focused on shaping `data` + `mode`, creating controllers,
+  and composing route surfaces
+- cloud should mirror this pattern in its own repo-local controller folder instead of trying to
+  share action wiring through `@webperf/ui`
+
 ## Operator composites
 
 Higher-level console presentation now lives under `packages/ui/src/lib/components/operator/*`.
@@ -152,6 +163,12 @@ Current setup and list-management operator components:
 - `resource-inventory-strip`
 - `resource-editor-panel`
 - `paged-list-toolbar`
+
+Current operator polish helpers:
+
+- `operator-section-header`
+- `operator-empty-state`
+- `inline-status-notice`
 
 These components are presentational-first and should accept normalized props from the app layer.
 They should not fetch data, submit forms, or absorb control-plane/runtime assumptions.

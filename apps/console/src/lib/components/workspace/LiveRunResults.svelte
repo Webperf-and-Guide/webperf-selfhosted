@@ -1,14 +1,15 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { OperatorSectionHeader } from '@webperf/ui/components/operator/operator-section-header';
 
   let { children } = $props<{ children?: Snippet }>();
 </script>
 
 <section class="results-section" id="results">
-  <div class="section-heading">
-    <p class="eyebrow">Live run state</p>
-    <h2>Watch the current verification stream back from the control plane.</h2>
-  </div>
+  <OperatorSectionHeader
+    eyebrow="Live run state"
+    title="Watch the current verification stream back from the control plane."
+  />
 
   {@render children?.()}
 </section>

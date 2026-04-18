@@ -13,6 +13,7 @@ import type {
 } from '@webperf/contracts';
 import { env as privateEnv } from '$env/dynamic/private';
 import type { ConsolePageData, SavedChecksData } from '$lib/console-data';
+import { CONSOLE_COLLECTION_PAGE_SIZE, CONSOLE_RECENT_RUN_COUNT, CONSOLE_RUN_PAGE_SIZE } from '$lib/console-workspace/formatters';
 
 type LoaderFetch = typeof fetch;
 type Platform = App.Platform | undefined;
@@ -43,7 +44,7 @@ export const loadConsolePage = async ({
 const loadSavedChecks = async (fetchFn: LoaderFetch) => {
   const checkProfilesPayload = await fetchOptionalJson<CheckProfileListResponse>(
     fetchFn,
-    '/api/control/check-profiles?pageSize=200'
+    `/api/control/check-profiles?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`
   );
 
   if (!checkProfilesPayload) {
@@ -51,15 +52,15 @@ const loadSavedChecks = async (fetchFn: LoaderFetch) => {
   }
 
   const [propertiesPayload, routeSetsPayload, regionPacksPayload, profileMeta] = await Promise.all([
-    fetchOptionalJson<PropertyListResponse>(fetchFn, '/api/control/properties?pageSize=200'),
-    fetchOptionalJson<RouteSetListResponse>(fetchFn, '/api/control/route-sets?pageSize=200'),
-    fetchOptionalJson<RegionPackListResponse>(fetchFn, '/api/control/region-packs?pageSize=200'),
+    fetchOptionalJson<PropertyListResponse>(fetchFn, `/api/control/properties?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`),
+    fetchOptionalJson<RouteSetListResponse>(fetchFn, `/api/control/route-sets?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`),
+    fetchOptionalJson<RegionPackListResponse>(fetchFn, `/api/control/region-packs?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`),
     Promise.all(
       checkProfilesPayload.checkProfiles.map(async (profile) => {
         const [runsPayload, latestComparison, baselineComparison, report] = await Promise.all([
           fetchOptionalJson<CheckProfileRunListResponse>(
             fetchFn,
-            `/api/control/check-profiles/${profile.id}/runs?pageSize=10`
+            `/api/control/check-profiles/${profile.id}/runs?pageSize=${CONSOLE_RUN_PAGE_SIZE}`
           ),
           fetchOptionalJson<CheckProfileLatestComparisonResponse>(
             fetchFn,
@@ -72,7 +73,7 @@ const loadSavedChecks = async (fetchFn: LoaderFetch) => {
           fetchOptionalJson<CheckProfileReportResponse>(fetchFn, `/api/control/check-profiles/${profile.id}/report`)
         ]);
 
-        const recentRunIds = runsPayload?.runs.slice(0, 3).map((run) => run.id) ?? [];
+        const recentRunIds = runsPayload?.runs.slice(0, CONSOLE_RECENT_RUN_COUNT).map((run) => run.id) ?? [];
         const recentRunDetails = (
           await Promise.all(
             recentRunIds.map((runId) =>

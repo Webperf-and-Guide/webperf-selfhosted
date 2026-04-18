@@ -194,9 +194,26 @@
   .saved-note,
   .comparison-route small,
   .hint,
+  .status-notice,
   .empty-state small,
   .result-card dd {
     @apply text-muted leading-7;
+  }
+
+  .status-notice {
+    @apply rounded-[var(--wp-radius-md)] border border-line bg-white/4 px-4 py-3 text-sm;
+  }
+
+  .status-notice[data-tone="success"] {
+    @apply border-success/40 bg-success/10 text-success;
+  }
+
+  .status-notice[data-tone="warning"] {
+    @apply border-warning/40 bg-warning/10 text-warning;
+  }
+
+  .status-notice[data-tone="danger"] {
+    @apply border-danger/40 bg-danger/10 text-danger;
   }
 
   section[id] {

@@ -4,7 +4,6 @@
   import DerivedResourceBrowser from '$lib/components/DerivedResourceBrowser.svelte';
   import BrowserAuditHistory from '$lib/components/workspace/BrowserAuditHistory.svelte';
   import LiveRunResults from '$lib/components/workspace/LiveRunResults.svelte';
-  import LiveRunTargetCard from '$lib/components/workspace/LiveRunTargetCard.svelte';
   import ManualRunPanel from '$lib/components/workspace/ManualRunPanel.svelte';
   import RegionCatalog from '$lib/components/workspace/RegionCatalog.svelte';
   import ReportsEndpointsTable from '$lib/components/workspace/ReportsEndpointsTable.svelte';
@@ -21,6 +20,7 @@
   import { createRegionsController } from '$lib/console-workspace/regions-controller.svelte';
   import { createReportsController } from '$lib/console-workspace/reports-controller.svelte';
   import { createResourcesController } from '$lib/console-workspace/resources-controller.svelte';
+  import { LiveRunTargetCard } from '@webperf/ui/components/operator/live-run-target-card';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
   import { RegionContinentCard } from '@webperf/ui/components/operator/region-continent-card';
   import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
@@ -273,7 +273,34 @@
 
     <div class="result-grid">
       {#each overviewState.job.targets as target (target.region)}
-        <LiveRunTargetCard formatText={overview.formatText} formatTiming={overview.formatTiming} {target} />
+        <LiveRunTargetCard
+          details={target.measurement
+            ? [
+                { id: 'final-url', label: 'Final URL', value: overview.formatText(target.measurement.finalUrl) },
+                { id: 'redirects', label: 'Redirects', value: target.measurement.redirectCount },
+                { id: 'total', label: 'Total', value: overview.formatTiming(target.measurement.timings.totalMs) },
+                { id: 'dns', label: 'DNS', value: overview.formatTiming(target.measurement.timings.dnsMs) },
+                { id: 'tcp', label: 'TCP', value: overview.formatTiming(target.measurement.timings.tcpMs) },
+                { id: 'tls', label: 'TLS', value: overview.formatTiming(target.measurement.timings.tlsMs) },
+                { id: 'ttfb', label: 'TTFB', value: overview.formatTiming(target.measurement.timings.ttfbMs) },
+                { id: 'tls-version', label: 'TLS version', value: overview.formatText(target.measurement.tls?.version) },
+                { id: 'alpn', label: 'ALPN', value: overview.formatText(target.measurement.tls?.alpn) },
+                { id: 'cipher', label: 'Cipher', value: overview.formatText(target.measurement.tls?.cipherSuite) },
+                { id: 'server-name', label: 'Server name', value: overview.formatText(target.measurement.tls?.serverName) }
+              ]
+            : []}
+          errorMessage={target.errorMessage}
+          status={target.status}
+          statusTone={target.status === 'succeeded' ? 'success' : target.status === 'failed' ? 'danger' : 'accent'}
+          summary={[
+            { id: 'attempt', label: 'Attempt', value: target.attemptNo },
+            { id: 'latency', label: 'Latency', value: target.latencyMs == null ? 'pending' : `${target.latencyMs} ms` },
+            { id: 'status-code', label: 'Status code', value: target.statusCode ?? 'n/a' },
+            { id: 'implementation', label: 'Implementation', value: target.probeImpl ?? 'pending' },
+            { id: 'slot', label: 'Slot', value: target.slotId ?? 'allocating' }
+          ]}
+          title={target.region}
+        />
       {/each}
     </div>
     {:else}

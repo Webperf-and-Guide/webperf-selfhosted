@@ -111,6 +111,8 @@ Current repo state as of 2026-04-18:
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 - the latest operator design pass tightened `Resources / Checks / Reports` hierarchy, switched the self-host resources surface to the same three-panel layout as cloud, and added shared Tailwind `@source` coverage so package-level shadcn buttons, tabs, and pagers render correctly in both consoles
 - launch docs are now grouped around single-machine quickstart, compose install, optional browser-audit worker enablement, parallel local dev, runtime images, and a frozen public API surface note
+- the frozen public API surface note now matches the real v1 shape more closely by treating `runs` as detail resources plus nested check-run lists, and the HTTP integration suite now regression-tests compatibility alias pagination/filtering alongside the primary list resources
+- the shared UI package now also owns a `LiveRunTargetCard` operator composite so both OSS and cloud overview streams render the same live regional target card shape
 - the regions surface now also uses a shared `RegionContinentCard` operator component so OSS and cloud keep the same region catalog structure
 - browser-audit history now surfaces direct-run policy, toolchain, artifact byte sizes, and saved summary context more clearly in the reports workspace
 
@@ -155,6 +157,7 @@ Current local URLs:
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 9. keep the shared token layer, shadcn component exports, setup/operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
 10. keep tightening direct-run browser-audit history/detail UX without pulling managed orchestration concerns into OSS
+11. keep the frozen public API docs and compatibility alias regression coverage aligned as the v1 surface hardens
 
 ## Update Protocol
 

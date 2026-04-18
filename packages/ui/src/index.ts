@@ -24,10 +24,10 @@ export const cloudConsoleShellLinks = [
 ] as const;
 
 export const marketingShellLinks = [
-  { href: '/#positioning', label: 'Positioning' },
-  { href: '/#compare', label: 'Compare' },
+  { href: '/compare', label: 'Compare' },
+  { href: '/pricing', label: 'Pricing' },
   { href: '/posts', label: 'Posts' },
-  { href: '/#roadmap', label: 'Roadmap' }
+  { href: '/roadmap', label: 'Roadmap' }
 ] as const;
 
 export { cn } from './cn';
@@ -45,6 +45,7 @@ export { CopyButton } from './lib/components/ui/copy-button';
 export { ComparisonSummaryPanel } from './lib/components/operator/comparison-summary-panel';
 export { DerivedResourcePanel } from './lib/components/operator/derived-resource-panel';
 export { InlineStatusNotice } from './lib/components/operator/inline-status-notice';
+export { LiveRunTargetCard } from './lib/components/operator/live-run-target-card';
 export { PagedListToolbar } from './lib/components/operator/paged-list-toolbar';
 export {
   Dialog,

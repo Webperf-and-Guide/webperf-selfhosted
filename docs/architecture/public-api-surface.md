@@ -18,7 +18,8 @@ The intent is to stabilize this shape before adding new top-level resources.
 - `GET /v1/checks`
 - `POST /v1/checks`
 - `GET /v1/checks/:checkId`
-- `GET /v1/runs`
+- `GET /v1/checks/:checkId/runs`
+- `POST /v1/checks/:checkId/runs`
 - `GET /v1/runs/:runId`
 - `GET /v1/comparisons`
 - `POST /v1/comparisons`
@@ -44,6 +45,7 @@ The older self-host aliases remain supported:
 - `/v1/check-profiles`
 
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
+Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
 
 ## List Contract
 
@@ -64,7 +66,7 @@ List responses return:
 Current stabilization focus is on keeping this list contract consistent across:
 
 - `checks`
-- `runs`
+- compatibility aliases for `properties`, `route-sets`, `region-packs`, and `check-profiles`
 - `comparisons`
 - `exports`
 - `analyses`

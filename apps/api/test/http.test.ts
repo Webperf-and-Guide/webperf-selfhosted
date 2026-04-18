@@ -518,6 +518,116 @@ describe('api service monitoring expansion', () => {
       expect(filteredBrowserAuditsPayload.pageInfo.filter).toBe('beta');
       expect(filteredBrowserAuditsPayload.browserAudits[0]?.targetUrl).toBe('https://example.com/beta');
 
+      const secondaryPropertyResponse = await fetch(`${harness.baseUrl}/v1/properties`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'Secondary site',
+          baseUrl: 'https://secondary.example.com'
+        })
+      });
+      const secondaryPropertyPayload = await secondaryPropertyResponse.json() as {
+        property: { id: string; name: string };
+      };
+      expect(secondaryPropertyResponse.status).toBe(201);
+
+      const secondaryRouteSetResponse = await fetch(`${harness.baseUrl}/v1/route-sets`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          propertyId: secondaryPropertyPayload.property.id,
+          name: 'Secondary checkout',
+          routes: [{ label: 'Checkout', url: 'https://secondary.example.com/checkout' }]
+        })
+      });
+      expect(secondaryRouteSetResponse.status).toBe(201);
+
+      const secondaryRegionPackResponse = await fetch(`${harness.baseUrl}/v1/region-packs`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'Backup APAC',
+          regions: ['tokyo']
+        })
+      });
+      expect(secondaryRegionPackResponse.status).toBe(201);
+
+      const propertiesPageResponse = await fetch(`${harness.baseUrl}/v1/properties?pageSize=1`);
+      const propertiesPagePayload = await propertiesPageResponse.json() as {
+        properties: Array<{ id: string; name: string }>;
+        pageInfo: { totalCount: number; pageSize: number; nextPageToken: string | null };
+      };
+      expect(propertiesPageResponse.status).toBe(200);
+      expect(propertiesPagePayload.pageInfo.totalCount).toBe(2);
+      expect(propertiesPagePayload.pageInfo.pageSize).toBe(1);
+      expect(propertiesPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredPropertiesResponse = await fetch(`${harness.baseUrl}/v1/properties?pageSize=5&filter=secondary`);
+      const filteredPropertiesPayload = await filteredPropertiesResponse.json() as {
+        properties: Array<{ name: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredPropertiesResponse.status).toBe(200);
+      expect(filteredPropertiesPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredPropertiesPayload.pageInfo.filter).toBe('secondary');
+      expect(filteredPropertiesPayload.properties[0]?.name).toBe('Secondary site');
+
+      const routeSetsPageResponse = await fetch(`${harness.baseUrl}/v1/route-sets?pageSize=1`);
+      const routeSetsPagePayload = await routeSetsPageResponse.json() as {
+        routeSets: Array<{ id: string; name: string }>;
+        pageInfo: { totalCount: number; pageSize: number; nextPageToken: string | null };
+      };
+      expect(routeSetsPageResponse.status).toBe(200);
+      expect(routeSetsPagePayload.pageInfo.totalCount).toBe(2);
+      expect(routeSetsPagePayload.pageInfo.pageSize).toBe(1);
+      expect(routeSetsPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredRouteSetsResponse = await fetch(`${harness.baseUrl}/v1/route-sets?pageSize=5&filter=secondary`);
+      const filteredRouteSetsPayload = await filteredRouteSetsResponse.json() as {
+        routeSets: Array<{ name: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredRouteSetsResponse.status).toBe(200);
+      expect(filteredRouteSetsPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredRouteSetsPayload.pageInfo.filter).toBe('secondary');
+      expect(filteredRouteSetsPayload.routeSets[0]?.name).toBe('Secondary checkout');
+
+      const regionPacksPageResponse = await fetch(`${harness.baseUrl}/v1/region-packs?pageSize=1`);
+      const regionPacksPagePayload = await regionPacksPageResponse.json() as {
+        regionPacks: Array<{ id: string; name: string }>;
+        pageInfo: { totalCount: number; pageSize: number; nextPageToken: string | null };
+      };
+      expect(regionPacksPageResponse.status).toBe(200);
+      expect(regionPacksPagePayload.pageInfo.totalCount).toBe(2);
+      expect(regionPacksPagePayload.pageInfo.pageSize).toBe(1);
+      expect(regionPacksPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredRegionPacksResponse = await fetch(`${harness.baseUrl}/v1/region-packs?pageSize=5&filter=backup`);
+      const filteredRegionPacksPayload = await filteredRegionPacksResponse.json() as {
+        regionPacks: Array<{ name: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredRegionPacksResponse.status).toBe(200);
+      expect(filteredRegionPacksPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredRegionPacksPayload.pageInfo.filter).toBe('backup');
+      expect(filteredRegionPacksPayload.regionPacks[0]?.name).toBe('Backup APAC');
+
+      const compatibilityChecksResponse = await fetch(`${harness.baseUrl}/v1/check-profiles?pageSize=5&filter=uptime`);
+      const compatibilityChecksPayload = await compatibilityChecksResponse.json() as {
+        checkProfiles: Array<{ name: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(compatibilityChecksResponse.status).toBe(200);
+      expect(compatibilityChecksPayload.pageInfo.totalCount).toBe(1);
+      expect(compatibilityChecksPayload.pageInfo.filter).toBe('uptime');
+      expect(compatibilityChecksPayload.checkProfiles[0]?.name).toBe('Profile uptime');
+
       const stabilizedPublicOpenApiResponse = await fetch(`${harness.baseUrl}/openapi/public.json`);
       const stabilizedPublicOpenApi = await stabilizedPublicOpenApiResponse.json() as {
         paths?: Record<string, unknown>;

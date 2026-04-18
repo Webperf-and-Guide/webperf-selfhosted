@@ -547,14 +547,43 @@
     .result-grid,
     .builder-grid,
     .saved-grid,
-    .job-summary,
     .saved-stats,
     .comparison-summary,
     .recent-runs,
     .saved-summary,
-    .hero-metrics,
     .region-list {
       @apply grid-cols-1;
+    }
+
+    .job-summary,
+    .hero-metrics {
+      @apply grid-cols-2;
+    }
+
+    .control-card,
+    .hero-copy,
+    .continent-card,
+    .saved-card,
+    .result-card {
+      @apply p-5;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .job-summary,
+    .hero-metrics,
+    .resource-flow,
+    .resource-summary,
+    .report-summary {
+      @apply grid-cols-1;
+    }
+
+    .region-list {
+      @apply grid-cols-2;
+    }
+
+    .region-list button {
+      @apply min-h-18 p-3;
     }
   }
 
@@ -575,6 +604,10 @@
 
     .nav a {
       @apply border border-line text-center;
+    }
+
+    .content {
+      @apply gap-6;
     }
   }
 }

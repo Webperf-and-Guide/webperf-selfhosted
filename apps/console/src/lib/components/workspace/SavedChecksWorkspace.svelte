@@ -30,8 +30,6 @@
   {#if savedChecksEnabled}
     <ResourceCountStrip items={summaryItems} />
 
-    {@render children?.()}
-
     {#if statusError}
       <InlineStatusNotice message={statusError} tone="danger" />
     {/if}
@@ -39,6 +37,8 @@
     {#if statusMessage}
       <InlineStatusNotice message={statusMessage} tone="success" />
     {/if}
+
+    {@render children?.()}
   {:else}
     <OperatorEmptyState
       detail="Connect the full self-host API service to unlock schedules, baselines, alerts, and exports."

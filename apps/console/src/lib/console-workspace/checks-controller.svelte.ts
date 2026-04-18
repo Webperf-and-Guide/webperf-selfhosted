@@ -167,6 +167,10 @@ export class ChecksController {
   }
 
   get summaryItems(): MetricGridItem[] {
+    return this.globalSummaryItems;
+  }
+
+  get globalSummaryItems(): MetricGridItem[] {
     return [
       {
         id: 'saved-checks',
@@ -191,6 +195,42 @@ export class ChecksController {
         label: 'Recorded runs',
         value: this.totalRecordedRuns,
         detail: 'Recent execution history available for drill-down and export.'
+      }
+    ];
+  }
+
+  get browseSummaryItems(): MetricGridItem[] {
+    const totalPages =
+      this.checkProfilePageInfo.totalCount > 0
+        ? Math.ceil(this.checkProfilePageInfo.totalCount / this.state.checkProfilePageSize)
+        : 1;
+    const currentPage =
+      this.checkProfilePageInfo.totalCount > 0 ? this.state.checkProfilePreviousTokens.length + 1 : 1;
+
+    return [
+      {
+        id: 'visible',
+        label: 'Visible now',
+        value: `${this.visibleCheckProfiles.length} of ${this.checkProfilePageInfo.totalCount}`,
+        detail: 'Current browse slice after filter and pagination.'
+      },
+      {
+        id: 'filter',
+        label: 'Active filter',
+        value: this.checkProfilePageInfo.filter ?? 'all saved checks',
+        detail: this.checkProfilePageInfo.filter ? 'Scoped result set.' : 'No filter applied.'
+      },
+      {
+        id: 'page-size',
+        label: 'Page size',
+        value: this.state.checkProfilePageSize,
+        detail: 'Profiles shown per page.'
+      },
+      {
+        id: 'page',
+        label: 'Page',
+        value: `${currentPage} / ${totalPages}`,
+        detail: 'Current position in the browse flow.'
       }
     ];
   }

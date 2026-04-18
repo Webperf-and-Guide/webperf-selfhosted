@@ -65,7 +65,17 @@
     onRun: (profileId: string) => void;
   }>();
 
-  const cardActions = $derived.by<OperatorActionItem[]>(() => [
+  const primaryActions = $derived.by<OperatorActionItem[]>(() => [
+    {
+      id: 'run',
+      label: running ? 'Running...' : 'Run check',
+      variant: 'secondary',
+      disabled: running,
+      onclick: () => onRun(profile.id)
+    }
+  ]);
+
+  const secondaryActions = $derived.by<OperatorActionItem[]>(() => [
     {
       id: 'edit',
       label: 'Edit',
@@ -78,13 +88,6 @@
       variant: 'destructive',
       disabled: configBusy,
       onclick: () => onDelete(profile.id)
-    },
-    {
-      id: 'run',
-      label: running ? 'Running...' : 'Run check',
-      variant: 'secondary',
-      disabled: running,
-      onclick: () => onRun(profile.id)
     }
   ]);
 
@@ -319,13 +322,14 @@
 </script>
 
 <SavedCheckSummaryCard
-  actions={cardActions}
   comparisonEmptyMessage="Run this profile at least twice to unlock latest-vs-previous comparison."
   comparisonPanels={comparisonPanels}
+  primaryActions={primaryActions}
   meta={`${propertyName} · ${routeSetName} · ${regionPackName}`}
   note={profile.note ?? undefined}
   reportPanel={reportPanel}
   runHistory={runHistory}
+  secondaryActions={secondaryActions}
   summary={summaryItems}
   title={profile.name}
 />

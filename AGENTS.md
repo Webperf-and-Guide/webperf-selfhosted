@@ -100,6 +100,8 @@ Current repo state as of 2026-04-18:
 - the self-host resources surface now uses those shared setup composites, and the parallel local-dev path is now an explicit supported workflow with console/probe override scripts instead of manual port surgery
 - the self-host console now keeps most route-specific orchestration in repo-local `src/lib/console-workspace/*.svelte.ts` controllers, leaving `ConsoleWorkspace.svelte` primarily responsible for mode wiring and render composition
 - shared operator polish helpers now live in `@webperf/ui/components/operator/*` via `operator-section-header`, `operator-empty-state`, and `inline-status-notice`, keeping section headers, empty states, and inline notices visually aligned across OSS and cloud
+- the self-host `Checks` surface is now split into route-local `SavedCheckEditor`, `SavedCheckBrowseToolbar`, `SavedCheckList`, and `SavedCheckEmptyState` components so the route shell no longer mixes the whole browse/editor flow in one block
+- the shared `saved-check-summary-card` is now compact and summary-first by default, with explicit expansion for comparison panels, recent run history, per-target details, and secondary actions
 - the self-host API now exposes optional direct-run browser-audit resources at `/v1/browser-audits`, persists summaries plus artifact metadata in SQLite, and advertises availability through `/v1/capabilities`
 - the self-host console `Reports` surface now includes a direct-run browser-audit tab for launching audits and reviewing recent saved summaries, failures, and artifact pointers
 - local dev scripts now preflight the console, API, and probe ports before boot so standalone and parallel workflows fail fast with clear override guidance
@@ -143,7 +145,7 @@ Current local URLs:
 3. keep refining install docs and compose ergonomics
 4. decide how package publishing should work once the repo is public
 5. decide whether public comparison/export resources should get richer server-side pagination and filtering
-6. keep trimming the repo-local console controllers and route-scoped workspace components now that the main workspace split is in place
+6. keep refining the compact saved-check and report surfaces now that the main route/controller split is in place
 7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
 8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
 9. keep the shared token layer, shadcn component exports, setup/operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers

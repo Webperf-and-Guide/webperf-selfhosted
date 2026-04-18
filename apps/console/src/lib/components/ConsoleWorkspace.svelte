@@ -11,7 +11,10 @@
   import ReportsEndpointsTable from '$lib/components/workspace/ReportsEndpointsTable.svelte';
   import ReportsWorkspace from '$lib/components/workspace/ReportsWorkspace.svelte';
   import ResourceEditors from '$lib/components/workspace/ResourceEditors.svelte';
-  import SavedCheckCard from '$lib/components/workspace/SavedCheckCard.svelte';
+  import SavedCheckBrowseToolbar from '$lib/components/workspace/SavedCheckBrowseToolbar.svelte';
+  import SavedCheckEditor from '$lib/components/workspace/SavedCheckEditor.svelte';
+  import SavedCheckEmptyState from '$lib/components/workspace/SavedCheckEmptyState.svelte';
+  import SavedCheckList from '$lib/components/workspace/SavedCheckList.svelte';
   import SavedChecksWorkspace from '$lib/components/workspace/SavedChecksWorkspace.svelte';
   import WorkspaceMap from '$lib/components/workspace/WorkspaceMap.svelte';
   import { createChecksController } from '$lib/console-workspace/checks-controller.svelte';
@@ -20,7 +23,6 @@
   import { createReportsController } from '$lib/console-workspace/reports-controller.svelte';
   import { createResourcesController } from '$lib/console-workspace/resources-controller.svelte';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
-  import { PagedListToolbar } from '@webperf/ui/components/operator/paged-list-toolbar';
   import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
   import { ResourceEditorPanel } from '@webperf/ui/components/operator/resource-editor-panel';
   import Button from '@webperf/ui/components/ui/button';
@@ -472,208 +474,31 @@
 {#if showChecks}
   <SavedChecksWorkspace
     savedChecksEnabled={Boolean(savedChecks)}
-    summaryItems={checks.summaryItems}
+    summaryItems={checks.globalSummaryItems}
     statusError={checksState.profileActionError}
     statusMessage={checksState.profileActionMessage}
   >
     {#if savedChecks}
-    <div class="builder-grid check-builder-grid">
-      <form class="builder-card" onsubmit={checks.submitCheckProfile}>
-        <h3>{checksState.editingProfileId ? 'Edit saved check' : 'Create saved check'}</h3>
-        <FieldSet class="mb-4">
-          <FieldSetTitle class="text-base">Scope</FieldSetTitle>
-          <FieldSetContent class="grid gap-4">
-            <label class="field">
-              <span>Existing check</span>
-              <Select
-                bind:value={checksState.editingProfileId}
-                onchange={(event: Event) =>
-                  checks.loadProfileEditor((event.currentTarget as HTMLSelectElement).value)}
-              >
-                <option value="">Create new saved check</option>
-                {#each checkProfiles as profile (profile.id)}
-                  <option value={profile.id}>{profile.name}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="field">
-              <span>Site</span>
-              <Select bind:value={checksState.profilePropertyId}>
-                <option value="">Select site</option>
-                {#each properties as property (property.id)}
-                  <option value={property.id}>{property.name}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="field">
-              <span>Route group</span>
-              <Select bind:value={checksState.profileRouteSetId}>
-                <option value="">Select route group</option>
-                {#each routeSets as routeSet (routeSet.id)}
-                  <option value={routeSet.id}>{routeSet.name}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="field">
-              <span>Region set</span>
-              <Select bind:value={checksState.profileRegionPackId}>
-                <option value="">Select region set</option>
-                {#each regionPacks as regionPack (regionPack.id)}
-                  <option value={regionPack.id}>{regionPack.name}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="field">
-              <span>Name</span>
-              <Input bind:value={checksState.profileName} placeholder="Release gate" />
-            </label>
-            <label class="field">
-              <span>Note</span>
-              <Input bind:value={checksState.profileNote} placeholder="critical pages" />
-            </label>
-          </FieldSetContent>
-        </FieldSet>
+      <SavedCheckEditor
+        busy={checks.isConfigBusy('check-profile')}
+        {checkProfiles}
+        {properties}
+        {regionPacks}
+        {routeSets}
+        onDelete={checks.deleteCheckProfile}
+        onLoadProfileEditor={checks.loadProfileEditor}
+        onReset={checks.resetProfileForm}
+        onSubmit={checks.submitCheckProfile}
+        state={checksState}
+      />
 
-        <FieldSet class="mb-4">
-          <FieldSetTitle class="text-base">Request and policy</FieldSetTitle>
-          <FieldSetContent class="grid gap-4">
-            <label class="field">
-              <span>Request method</span>
-              <Select bind:value={checksState.profileRequestMethod}>
-                <option value="GET">GET</option>
-                <option value="HEAD">HEAD</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="PATCH">PATCH</option>
-                <option value="DELETE">DELETE</option>
-                <option value="OPTIONS">OPTIONS</option>
-              </Select>
-            </label>
-            <label class="field">
-              <span>Request headers</span>
-              <Textarea
-                bind:value={checksState.profileRequestHeadersText}
-                rows={3}
-                placeholder="Authorization: Bearer sample-token&#10;X-Env: staging"
-              />
-            </label>
-            <label class="field">
-              <span>Request body</span>
-              <Textarea
-                bind:value={checksState.profileRequestBody}
-                rows={3}
-                placeholder="&#123;&quot;release&quot;:&quot;2026.04.12&quot;&#125;"
-              />
-            </label>
-            <label class="field">
-              <span>Body content type</span>
-              <Input bind:value={checksState.profileRequestContentType} placeholder="application/json" />
-            </label>
-            <label class="field">
-              <span>Monitor type</span>
-              <Select bind:value={checksState.profileMonitorType}>
-                <option value="latency">latency</option>
-                <option value="uptime">uptime</option>
-              </Select>
-            </label>
-            <label class="field">
-              <span>Latency threshold ms</span>
-              <Input bind:value={checksState.profileLatencyThresholdMs} inputmode="numeric" placeholder="400" />
-            </label>
-            <label class="field">
-              <span>Schedule minutes</span>
-              <Input bind:value={checksState.profileScheduleMinutes} inputmode="numeric" placeholder="5" />
-            </label>
-          </FieldSetContent>
-        </FieldSet>
-
-        <FieldSet>
-          <FieldSetTitle class="text-base">Alerts</FieldSetTitle>
-          <FieldSetContent class="grid gap-4">
-            <label class="checkbox-field justify-between rounded-[var(--wp-radius-md)] border border-line px-4 py-3">
-              <span>Enable webhook alerts</span>
-              <Switch bind:checked={checksState.profileAlertEnabled} />
-            </label>
-            <div class="field">
-              <span>Alert triggers</span>
-              <div class="checkbox-list">
-                <label class="checkbox-field">
-                  <Checkbox bind:checked={checksState.profileAlertOnFailure} />
-                  <span>Failed checks</span>
-                </label>
-                <label class="checkbox-field">
-                  <Checkbox bind:checked={checksState.profileAlertOnThreshold} />
-                  <span>Threshold breach</span>
-                </label>
-                <label class="checkbox-field">
-                  <Checkbox bind:checked={checksState.profileAlertOnRegression} />
-                  <span>Baseline regression</span>
-                </label>
-              </div>
-            </div>
-            <label class="field">
-              <span>Webhook targets</span>
-              <Textarea
-                bind:value={checksState.profileWebhookTargetsText}
-                rows={3}
-                placeholder="Primary | https://example.com/hooks/webperf | optional-secret"
-              />
-            </label>
-          </FieldSetContent>
-          <FieldSetFooter class="builder-actions">
-            <Button type="submit" variant="secondary" disabled={checks.isConfigBusy('check-profile')}>
-              {#if checks.isConfigBusy('check-profile')}{checksState.editingProfileId ? 'Updating...' : 'Saving...'}{:else}{checksState.editingProfileId ? 'Update saved check' : 'Save saved check'}{/if}
-            </Button>
-            {#if checksState.editingProfileId}
-              <Button variant="ghost" type="button" onclick={checks.resetProfileForm} disabled={checks.isConfigBusy('check-profile')}>Cancel</Button>
-              <Button variant="destructive" type="button" onclick={() => checks.deleteCheckProfile(checksState.editingProfileId)} disabled={checks.isConfigBusy('check-profile')}>Delete</Button>
-            {/if}
-          </FieldSetFooter>
-        </FieldSet>
-      </form>
-
-      <article class="builder-card builder-guide">
-        <h3>Saved check loop</h3>
-        <p class="card-copy">
-          Build one check around a real release decision, then keep the review loop consistent:
-          run it, pin a trustworthy baseline, compare the next run, and export the resulting evidence.
-        </p>
-
-        <div class="guide-grid">
-          <div>
-            <span>Definition</span>
-            <strong>site + route group + region set</strong>
-          </div>
-          <div>
-            <span>Execution</span>
-            <strong>manual run or scheduler interval</strong>
-          </div>
-          <div>
-            <span>Decision</span>
-            <strong>threshold, regression, webhook alerts</strong>
-          </div>
-          <div>
-            <span>Evidence</span>
-            <strong>report export, comparisons, recent runs</strong>
-          </div>
-        </div>
-      </article>
-    </div>
-
-    {#if checkProfiles.length > 0}
-      <PagedListToolbar
+      <SavedCheckBrowseToolbar
         appliedFilter={checkProfilePageInfo.filter}
-        bind:filterValue={checksState.checkProfileFilterDraft}
-        bind:pageSize={checksState.checkProfilePageSize}
+        browseSummaryItems={checks.browseSummaryItems}
         canGoNext={Boolean(checkProfilePageInfo.nextPageToken)}
         canGoPrevious={checksState.checkProfilePreviousTokens.length > 0}
-        copy={{
-          label: 'Browse saved checks',
-          filterPlaceholder: 'check name, note, site, route group',
-          applyLabel: 'Apply',
-          clearLabel: 'Clear',
-          pageSizeLabel: 'Page size'
-        }}
+        bind:filterValue={checksState.checkProfileFilterDraft}
+        bind:pageSize={checksState.checkProfilePageSize}
         onApply={checks.applyCheckProfileFilter}
         onClear={checks.clearCheckProfileFilter}
         onNext={checks.goToNextCheckProfilePage}
@@ -683,47 +508,41 @@
         visibleCount={visibleCheckProfiles.length}
       />
 
-      <div class="saved-grid">
-        {#each visibleCheckProfiles as profile (profile.id)}
-          <SavedCheckCard
-            baselineBusy={checksState.baselineActionProfileId === profile.id}
-            comparisonSections={checks.comparisonSections(profile)}
-            configBusy={checks.isConfigBusy('check-profile')}
-            formatAlertSummary={checks.formatAlertSummary}
-            formatDateTime={checks.formatDateTime}
-            formatMonitorSummary={checks.formatMonitorSummary}
-            formatRequestConfig={checks.formatRequestConfig}
-            formatSchedule={checks.formatSchedule}
-            formatText={checks.formatText}
-            formatTiming={checks.formatTiming}
-            isBaselineRun={checks.isBaselineRun}
-            onClearBaseline={checks.clearBaseline}
-            onDelete={checks.deleteCheckProfile}
-            onDownloadReport={checks.downloadReport}
-            onEdit={checks.loadProfileEditor}
-            onPinBaseline={checks.pinBaseline}
-            onRun={checks.runCheckProfile}
-            profile={profile}
-            propertyName={checks.getPropertyName(profile)}
-            recentRunDetails={checks.getRecentRunDetails(profile.id)}
-            regionPackName={checks.getRegionPackName(profile)}
-            report={checks.getReport(profile.id)}
-            routeSetName={checks.getRouteSetName(profile)}
-            running={checksState.runningProfileId === profile.id}
-          />
-        {/each}
-      </div>
-    {:else}
-      <div class="empty-state">
-        <p>No saved checks yet.</p>
-        <small>Create a site, route group, region set, and saved check above, then run it manually or through the scheduler endpoint.</small>
-      </div>
-    {/if}
-  {:else}
-      <div class="empty-state">
-        <p>This control endpoint is running in live-check mode only.</p>
-        <small>Manual runs still work, but persistent sites, route groups, region sets, baselines, and exports require the full self-host API service.</small>
-      </div>
+      {#if visibleCheckProfiles.length > 0}
+        <SavedCheckList
+          baselineActionProfileId={checksState.baselineActionProfileId}
+          configBusy={checks.isConfigBusy('check-profile')}
+          formatAlertSummary={checks.formatAlertSummary}
+          formatDateTime={checks.formatDateTime}
+          formatMonitorSummary={checks.formatMonitorSummary}
+          formatRequestConfig={checks.formatRequestConfig}
+          formatSchedule={checks.formatSchedule}
+          formatText={checks.formatText}
+          formatTiming={checks.formatTiming}
+          getComparisonSections={checks.comparisonSections}
+          getPropertyName={checks.getPropertyName}
+          getRecentRunDetails={checks.getRecentRunDetails}
+          getRegionPackName={checks.getRegionPackName}
+          getReport={checks.getReport}
+          getRouteSetName={checks.getRouteSetName}
+          isBaselineRun={checks.isBaselineRun}
+          onClearBaseline={checks.clearBaseline}
+          onDelete={checks.deleteCheckProfile}
+          onDownloadReport={checks.downloadReport}
+          onEdit={checks.loadProfileEditor}
+          onPinBaseline={checks.pinBaseline}
+          onRun={checks.runCheckProfile}
+          profiles={visibleCheckProfiles}
+          runningProfileId={checksState.runningProfileId}
+        />
+      {:else}
+        <SavedCheckEmptyState
+          detail={checkProfiles.length > 0
+            ? 'Try clearing the current filter or paging back to see more saved checks.'
+            : undefined}
+          title={checkProfiles.length > 0 ? 'No saved checks match the current browse state.' : undefined}
+        />
+      {/if}
     {/if}
   </SavedChecksWorkspace>
 {/if}

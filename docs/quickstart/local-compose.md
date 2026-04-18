@@ -1,4 +1,6 @@
-# Local Compose Quickstart
+# Docker Compose Install
+
+Use this path when you want the default stack in Docker rather than local process mode.
 
 ## Quick Start
 
@@ -24,6 +26,12 @@ open http://localhost:5173
 
 ```sh
 curl http://127.0.0.1:8788/health
+```
+
+5. Smoke the console path:
+
+```sh
+bun run smoke:console
 ```
 
 ## What You Get
@@ -96,3 +104,9 @@ curl -X POST http://127.0.0.1:8788/v1/scheduler/dispatch
 ```
 
 An example GitHub Actions workflow lives in [examples/github-actions/scheduler-dispatch.yml](../../examples/github-actions/scheduler-dispatch.yml).
+
+## Related Docs
+
+- [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
+- [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
+- [browser-audit worker](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-worker.md)

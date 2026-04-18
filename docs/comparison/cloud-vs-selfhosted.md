@@ -43,6 +43,8 @@ It should not include:
 - AI analyst product features
 - provider-specific deployment walkthroughs, affiliate CTAs, or platform-marketing content
 
+When those guides are useful, publish them on `webperf.and.guide/posts` and keep the OSS docs linked but vendor-neutral.
+
 ## Managed Cloud Repo
 
 `webperf.and.guide` is the managed product and business layer.

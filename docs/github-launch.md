@@ -48,6 +48,22 @@ The public README should help a new visitor answer these questions within a minu
 
 The current README is already close; avoid turning it into an exhaustive architecture document.
 
+## Launch Packaging Policy
+
+For the first public launch:
+
+- keep the repo as the source of truth for `@webperf/*`
+- keep runtime image delivery on GHCR
+- do not treat npm package publishing as a launch blocker
+
+If external consumers later need versioned packages, consider publishing only:
+
+- `@webperf/contracts`
+- `@webperf/config`
+- `@webperf/domain-core`
+- `@webperf/report-core`
+- `@webperf/ui`
+
 ## License
 
 Selected license:

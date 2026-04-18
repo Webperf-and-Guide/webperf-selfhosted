@@ -25,9 +25,9 @@ export const cloudConsoleShellLinks = [
 
 export const marketingShellLinks = [
   { href: '/#positioning', label: 'Positioning' },
-  { href: '/#workflows', label: 'Workflows' },
+  { href: '/#compare', label: 'Compare' },
   { href: '/posts', label: 'Posts' },
-  { href: '/#open-core', label: 'Open Core' }
+  { href: '/#roadmap', label: 'Roadmap' }
 ] as const;
 
 export { cn } from './cn';
@@ -92,6 +92,7 @@ export {
   PopoverTrigger
 } from './lib/components/ui/popover';
 export { RegionQuickPick } from './lib/components/operator/region-quick-pick';
+export { RegionContinentCard } from './lib/components/operator/region-continent-card';
 export { ResourceEditorPanel } from './lib/components/operator/resource-editor-panel';
 export { ResourceInventoryStrip } from './lib/components/operator/resource-inventory-strip';
 export { ResourceCountStrip } from './lib/components/operator/resource-count-strip';

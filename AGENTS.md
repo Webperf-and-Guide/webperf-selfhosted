@@ -110,6 +110,9 @@ Current repo state as of 2026-04-18:
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package
 - self-host console smoke, cloud console smoke, and local Bunny-like probe/browser-audit smokes are all green after the shared shadcn rollout
 - the latest operator design pass tightened `Resources / Checks / Reports` hierarchy, switched the self-host resources surface to the same three-panel layout as cloud, and added shared Tailwind `@source` coverage so package-level shadcn buttons, tabs, and pagers render correctly in both consoles
+- launch docs are now grouped around single-machine quickstart, compose install, optional browser-audit worker enablement, parallel local dev, runtime images, and a frozen public API surface note
+- the regions surface now also uses a shared `RegionContinentCard` operator component so OSS and cloud keep the same region catalog structure
+- browser-audit history now surfaces direct-run policy, toolchain, artifact byte sizes, and saved summary context more clearly in the reports workspace
 
 Current local dev entrypoints:
 - `bun run dev`

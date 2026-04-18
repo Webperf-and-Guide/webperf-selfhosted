@@ -7,7 +7,6 @@
   import LiveRunTargetCard from '$lib/components/workspace/LiveRunTargetCard.svelte';
   import ManualRunPanel from '$lib/components/workspace/ManualRunPanel.svelte';
   import RegionCatalog from '$lib/components/workspace/RegionCatalog.svelte';
-  import RegionContinentCard from '$lib/components/workspace/RegionContinentCard.svelte';
   import ReportsEndpointsTable from '$lib/components/workspace/ReportsEndpointsTable.svelte';
   import ReportsWorkspace from '$lib/components/workspace/ReportsWorkspace.svelte';
   import ResourceEditors from '$lib/components/workspace/ResourceEditors.svelte';
@@ -23,6 +22,7 @@
   import { createReportsController } from '$lib/console-workspace/reports-controller.svelte';
   import { createResourcesController } from '$lib/console-workspace/resources-controller.svelte';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
+  import { RegionContinentCard } from '@webperf/ui/components/operator/region-continent-card';
   import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
   import { ResourceEditorPanel } from '@webperf/ui/components/operator/resource-editor-panel';
   import Button from '@webperf/ui/components/ui/button';
@@ -642,9 +642,15 @@
         {#each groupedRegions as group (group.continent)}
           <RegionContinentCard
             continent={group.continent}
-            regions={group.regions}
-            {selectedRegions}
-            toggleRegion={regionCatalog.toggleRegion}
+            itemCount={group.regions.length}
+            items={group.regions.map((region) => ({
+              id: region.code,
+              label: region.label,
+              detail: region.launchStage === 'core' ? 'launch active' : 'catalog only',
+              selected: selectedRegions.includes(region.code),
+              disabled: !region.selectable,
+              onSelect: () => regionCatalog.toggleRegion(region)
+            }))}
           />
         {/each}
       </div>

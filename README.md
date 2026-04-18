@@ -49,7 +49,7 @@ but the install and runtime docs in this repo should stay vendor-neutral.
 
 ## Quick Start
 
-Single-machine local development:
+Fastest local path:
 
 ```bash
 bun install
@@ -63,28 +63,15 @@ Default local URLs:
 - probe: `http://127.0.0.1:8080`
 - browser-audit worker when run separately: `http://127.0.0.1:8081`
 
-If you want the optional browser-audit direct-run surface too:
+Launch-ready docs are grouped into five operator paths:
 
-```bash
-BROWSER_AUDIT_SHARED_SECRET=dev-browser-audit-shared-secret \
-SELFHOST_BROWSER_AUDIT_BASE_URL=http://127.0.0.1:8081 \
-bun run dev:api
-```
+- [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
+- [docker compose install](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md)
+- [optional browser-audit worker](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-worker.md)
+- [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
+- [GHCR runtime images](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md)
 
-Then run the worker in a second shell:
-
-```bash
-BROWSER_AUDIT_SHARED_SECRET=dev-browser-audit-shared-secret \
-bun run dev:browser-audit-worker
-```
-
-The API then exposes:
-
-- `GET /v1/browser-audits`
-- `POST /v1/browser-audits`
-- `GET /v1/browser-audits/:id`
-
-Compose-based setup lives in [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md).
+Provider-specific deployment walkthroughs belong on `webperf.and.guide`, not in this repo.
 
 ## Useful Commands
 
@@ -99,39 +86,37 @@ bun run test:report-core
 bun run compose:config
 ```
 
+## Public API
+
+The current v1 resource-oriented surface is intentionally stabilized around:
+
+- `sites`
+- `routeGroups`
+- `regionSets`
+- `checks`
+- `runs`
+- `comparisons`
+- `exports`
+- `analyses`
+- `browserAudits`
+- `capabilities`
+
+Compatibility aliases remain available for:
+
+- `/v1/properties`
+- `/v1/route-sets`
+- `/v1/region-packs`
+- `/v1/check-profiles`
+
+See [public-api-surface.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/architecture/public-api-surface.md) for the current freeze line and list-query contract.
+
 ## Parallel Local Dev
 
-If you want to run `webperf-selfhosted` alongside the managed cloud repo on the same machine, use:
-
-```bash
-bun run dev:parallel:cloud
-bun run smoke:console:parallel:cloud
-```
-
-That keeps the default standalone ports unchanged while moving the selfhosted parallel workflow to:
-
-- console: `http://localhost:4174`
-- probe: `http://127.0.0.1:8082`
-
-The helper scripts also support explicit overrides through:
-
-- `SELFHOST_CONSOLE_PORT`
-- `SELFHOST_CONTROL_BASE_URL`
-- `SELFHOST_PROBE_PORT`
-- `SELFHOST_PARALLEL_CONSOLE_PORT`
-- `SELFHOST_PARALLEL_PROBE_PORT`
-- `SELFHOST_PARALLEL_PROBE_BASE_URL`
-- `SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON`
-
-The standalone smoke path still uses the default ports:
-
-```bash
-bun run smoke:console
-```
+Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md) when `webperf-selfhosted` and `webperf.and.guide` need to run side-by-side.
 
 ## Optional Browser Audit Direct-Run
 
-`apps/browser-audit-worker` remains an optional runtime, but the self-host API can now call it directly when you configure:
+`apps/browser-audit-worker` remains an optional runtime, but the self-host API can call it directly when you configure:
 
 - `SELFHOST_BROWSER_AUDIT_BASE_URL`
 - `BROWSER_AUDIT_SHARED_SECRET`
@@ -165,17 +150,8 @@ Pending release notes live under `.sampo/changesets/`.
 
 ## Published Images
 
-The reusable runtime images in this repo are intended to publish as:
+See [runtime-images.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md) for the current GHCR image policy and checked-in metadata refs.
 
-- `ghcr.io/webperf-and-guide/webperf-probe`
-- `ghcr.io/webperf-and-guide/webperf-browser-audit-worker`
-
-Checked-in image refs live under:
-
-- [infra/docker/metadata/probe.json](infra/docker/metadata/probe.json)
-- [infra/docker/metadata/browser-audit-worker.json](infra/docker/metadata/browser-audit-worker.json)
-
-Those metadata files are consumed by the managed cloud repo when it renders Cloudflare/Bunny runtime config.
 Cloud local development continues to consume OSS packages through sibling `file:` dependencies, while runtime images continue to publish through GHCR.
 
 ## Public Launch Notes

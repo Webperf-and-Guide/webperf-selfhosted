@@ -305,6 +305,229 @@ describe('api service monitoring expansion', () => {
       expect(failedBrowserAuditListResponse.status).toBe(200);
       expect(failedBrowserAuditListPayload.pageInfo.totalCount).toBe(2);
       expect(failedBrowserAuditListPayload.browserAudits.some((audit) => audit.id === failedBrowserAudit.id && audit.status === 'failed')).toBe(true);
+      const checksPageResponse = await fetch(`${harness.baseUrl}/v1/checks?pageSize=1`);
+      const checksPagePayload = await checksPageResponse.json() as {
+        checks: Array<{ id: string; name: string }>;
+        pageInfo: { totalCount: number; pageSize: number; nextPageToken: string | null; filter: string | null };
+      };
+      expect(checksPageResponse.status).toBe(200);
+      expect(checksPagePayload.pageInfo.totalCount).toBe(2);
+      expect(checksPagePayload.pageInfo.pageSize).toBe(1);
+      expect(checksPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredChecksResponse = await fetch(`${harness.baseUrl}/v1/checks?pageSize=5&filter=uptime`);
+      const filteredChecksPayload = await filteredChecksResponse.json() as {
+        checks: Array<{ id: string; name: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredChecksResponse.status).toBe(200);
+      expect(filteredChecksPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredChecksPayload.pageInfo.filter).toBe('uptime');
+      expect(filteredChecksPayload.checks[0]?.name).toBe('Profile uptime');
+
+      await runCheckProfile(harness.baseUrl, thresholdProfile.id);
+      const runs = await waitForRuns(harness.baseUrl, thresholdProfile.id, 2);
+      const latestRun = runs[0]!;
+      const previousRun = runs[1]!;
+
+      const comparisonResponse = await fetch(`${harness.baseUrl}/v1/comparisons`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          checkId: thresholdProfile.id,
+          runId: latestRun.id,
+          target: { type: 'latest_previous' }
+        })
+      });
+      const comparison = await comparisonResponse.json() as { id: string };
+      expect(comparisonResponse.status).toBe(201);
+
+      const customComparisonResponse = await fetch(`${harness.baseUrl}/v1/comparisons`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          checkId: thresholdProfile.id,
+          runId: latestRun.id,
+          target: { type: 'run', runId: previousRun.id }
+        })
+      });
+      const customComparison = await customComparisonResponse.json() as { id: string };
+      expect(customComparisonResponse.status).toBe(201);
+
+      const comparisonsPageResponse = await fetch(`${harness.baseUrl}/v1/comparisons?pageSize=1`);
+      const comparisonsPagePayload = await comparisonsPageResponse.json() as {
+        comparisons: Array<{ id: string; mode: string }>;
+        pageInfo: { totalCount: number; nextPageToken: string | null };
+      };
+      expect(comparisonsPageResponse.status).toBe(200);
+      expect(comparisonsPagePayload.pageInfo.totalCount).toBe(2);
+      expect(comparisonsPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredComparisonsResponse = await fetch(`${harness.baseUrl}/v1/comparisons?pageSize=5&filter=custom`);
+      const filteredComparisonsPayload = await filteredComparisonsResponse.json() as {
+        comparisons: Array<{ id: string; mode: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredComparisonsResponse.status).toBe(200);
+      expect(filteredComparisonsPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredComparisonsPayload.pageInfo.filter).toBe('custom');
+      expect(filteredComparisonsPayload.comparisons[0]?.id).toBe(customComparison.id);
+
+      const exportJsonResponse = await fetch(`${harness.baseUrl}/v1/exports`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          source: { type: 'comparison', comparisonId: comparison.id },
+          format: 'json'
+        })
+      });
+      expect(exportJsonResponse.status).toBe(201);
+
+      const exportCsvResponse = await fetch(`${harness.baseUrl}/v1/exports`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          source: { type: 'check_report', checkId: thresholdProfile.id },
+          format: 'csv'
+        })
+      });
+      expect(exportCsvResponse.status).toBe(201);
+
+      const exportsPageResponse = await fetch(`${harness.baseUrl}/v1/exports?pageSize=1`);
+      const exportsPagePayload = await exportsPageResponse.json() as {
+        exports: Array<{ id: string; format: string }>;
+        pageInfo: { totalCount: number; nextPageToken: string | null };
+      };
+      expect(exportsPageResponse.status).toBe(200);
+      expect(exportsPagePayload.pageInfo.totalCount).toBe(2);
+      expect(exportsPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredExportsResponse = await fetch(`${harness.baseUrl}/v1/exports?pageSize=5&filter=csv`);
+      const filteredExportsPayload = await filteredExportsResponse.json() as {
+        exports: Array<{ format: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredExportsResponse.status).toBe(200);
+      expect(filteredExportsPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredExportsPayload.pageInfo.filter).toBe('csv');
+      expect(filteredExportsPayload.exports[0]?.format).toBe('csv');
+
+      const analysisFromComparisonResponse = await fetch(`${harness.baseUrl}/v1/analyses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          source: { type: 'comparison', comparisonId: comparison.id },
+          kind: 'regression_summary'
+        })
+      });
+      expect(analysisFromComparisonResponse.status).toBe(201);
+
+      const analysisFromRunResponse = await fetch(`${harness.baseUrl}/v1/analyses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          source: { type: 'run', runId: latestRun.id, checkId: thresholdProfile.id },
+          kind: 'regression_summary'
+        })
+      });
+      expect(analysisFromRunResponse.status).toBe(201);
+
+      const analysesPageResponse = await fetch(`${harness.baseUrl}/v1/analyses?pageSize=1`);
+      const analysesPagePayload = await analysesPageResponse.json() as {
+        analyses: Array<{ id: string; source: { type: string } }>;
+        pageInfo: { totalCount: number; nextPageToken: string | null };
+      };
+      expect(analysesPageResponse.status).toBe(200);
+      expect(analysesPagePayload.pageInfo.totalCount).toBe(2);
+      expect(analysesPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredAnalysesResponse = await fetch(`${harness.baseUrl}/v1/analyses?pageSize=5&filter=run`);
+      const filteredAnalysesPayload = await filteredAnalysesResponse.json() as {
+        analyses: Array<{ source: { type: string } }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredAnalysesResponse.status).toBe(200);
+      expect(filteredAnalysesPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredAnalysesPayload.pageInfo.filter).toBe('run');
+      expect(filteredAnalysesPayload.analyses[0]?.source.type).toBe('run');
+
+      const alphaAuditResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          targetUrl: 'https://example.com/alpha',
+          region: 'tokyo',
+          policy: {
+            preset: 'mobile',
+            flow: {
+              steps: [{ type: 'navigate', url: 'https://example.com/alpha' }]
+            }
+          }
+        })
+      });
+      expect(alphaAuditResponse.status).toBe(201);
+
+      const betaAuditResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          targetUrl: 'https://example.com/beta',
+          region: 'tokyo',
+          policy: {
+            preset: 'desktop',
+            flow: {
+              steps: [{ type: 'navigate', url: 'https://example.com/beta' }]
+            }
+          }
+        })
+      });
+      expect(betaAuditResponse.status).toBe(201);
+
+      const browserAuditsPageResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=1`);
+      const browserAuditsPagePayload = await browserAuditsPageResponse.json() as {
+        browserAudits: Array<{ id: string; targetUrl: string }>;
+        pageInfo: { totalCount: number; nextPageToken: string | null };
+      };
+      expect(browserAuditsPageResponse.status).toBe(200);
+      expect(browserAuditsPagePayload.pageInfo.totalCount).toBe(4);
+      expect(browserAuditsPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredBrowserAuditsResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=5&filter=beta`);
+      const filteredBrowserAuditsPayload = await filteredBrowserAuditsResponse.json() as {
+        browserAudits: Array<{ targetUrl: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredBrowserAuditsResponse.status).toBe(200);
+      expect(filteredBrowserAuditsPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredBrowserAuditsPayload.pageInfo.filter).toBe('beta');
+      expect(filteredBrowserAuditsPayload.browserAudits[0]?.targetUrl).toBe('https://example.com/beta');
+
+      const stabilizedPublicOpenApiResponse = await fetch(`${harness.baseUrl}/openapi/public.json`);
+      const stabilizedPublicOpenApi = await stabilizedPublicOpenApiResponse.json() as {
+        paths?: Record<string, unknown>;
+      };
+      expect(stabilizedPublicOpenApiResponse.status).toBe(200);
+      expect(stabilizedPublicOpenApi.paths?.['/v1/comparisons']).toBeTruthy();
+      expect(stabilizedPublicOpenApi.paths?.['/v1/exports']).toBeTruthy();
+      expect(stabilizedPublicOpenApi.paths?.['/v1/analyses']).toBeTruthy();
+      expect(stabilizedPublicOpenApi.paths?.['/v1/browser-audits']).toBeTruthy();
+      expect(stabilizedPublicOpenApi.paths?.['/v1/capabilities']).toBeTruthy();
     },
     20_000
   );
@@ -678,6 +901,8 @@ const createCheckProfile = async (
     latencyThresholdMs: number | null;
     webhookUrl: string;
     scheduleIntervalMinutes?: number;
+    name?: string;
+    note?: string;
   }
 ) => {
   const response = await fetch(`${baseUrl}/v1/check-profiles`, {
@@ -689,8 +914,8 @@ const createCheckProfile = async (
       propertyId: input.propertyId,
       routeSetId: input.routeSetId,
       regionPackId: input.regionPackId,
-      name: `Profile ${input.monitorType}`,
-      note: 'http integration test',
+      name: input.name ?? `Profile ${input.monitorType}`,
+      note: input.note ?? 'http integration test',
       request: {
         method: 'POST',
         headers: [{ name: 'Authorization', value: 'Bearer staging-token' }],
@@ -720,4 +945,36 @@ const createCheckProfile = async (
   const payload = await response.json();
   expect(response.ok).toBe(true);
   return payload.profile as { id: string };
+};
+
+const runCheckProfile = async (baseUrl: string, profileId: string) => {
+  const response = await fetch(`${baseUrl}/v1/check-profiles/${profileId}/runs`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: '{}'
+  });
+
+  expect(response.ok).toBe(true);
+};
+
+const waitForRuns = async (baseUrl: string, profileId: string, expectedLength: number) => {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const response = await fetch(`${baseUrl}/v1/check-profiles/${profileId}/runs?pageSize=10`);
+
+    if (response.ok) {
+      const payload = await response.json() as {
+        runs: Array<{ id: string; profileId: string }>;
+      };
+
+      if (payload.runs.length >= expectedLength) {
+        return payload.runs;
+      }
+    }
+
+    await Bun.sleep(100);
+  }
+
+  throw new Error(`Timed out waiting for ${expectedLength} runs for ${profileId}`);
 };

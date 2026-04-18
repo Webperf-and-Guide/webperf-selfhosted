@@ -73,6 +73,8 @@ It intentionally does not add:
 - managed queue/fleet/provider orchestration
 - SaaS tenancy or hosted retention rules
 
+Provider-specific deployment walkthroughs for this worker belong on `webperf.and.guide`. The OSS docs stay focused on the worker as a portable optional runtime.
+
 ## Optional Compose Profile
 
 The worker is not part of the default Compose boot path.

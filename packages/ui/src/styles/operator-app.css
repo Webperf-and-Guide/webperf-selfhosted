@@ -141,7 +141,7 @@
   }
 
   .workspace-map {
-    @apply grid-cols-5;
+    @apply grid-cols-[repeat(auto-fit,minmax(170px,1fr))];
   }
 
   .map-card,
@@ -171,7 +171,7 @@
   }
 
   .map-card {
-    @apply gap-2 bg-surface/80;
+    @apply gap-2 bg-surface/80 transition-transform duration-200 hover:-translate-y-0.5 hover:border-accent/35 hover:bg-surface-strong/70;
   }
 
   .map-card span,
@@ -228,7 +228,7 @@
   }
 
   .hero {
-    @apply grid grid-cols-[minmax(0,1fr)_minmax(340px,0.72fr)] items-start gap-5;
+    @apply grid grid-cols-[minmax(0,1fr)_minmax(360px,0.76fr)] items-start gap-6;
   }
 
   .hero-copy {
@@ -402,6 +402,10 @@
     @apply grid-cols-2;
   }
 
+  .result-grid {
+    @apply grid-cols-[repeat(auto-fit,minmax(280px,1fr))];
+  }
+
   .resources-grid {
     @apply items-start md:grid-cols-2 xl:grid-cols-3;
   }
@@ -482,11 +486,11 @@
   }
 
   .continent-card {
-    @apply grid gap-4;
+    @apply grid gap-4 bg-[linear-gradient(180deg,rgba(14,24,37,0.94)_0%,rgba(17,28,42,0.88)_100%)];
   }
 
   .region-list {
-    @apply grid grid-cols-2 gap-2.5;
+    @apply grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5;
   }
 
   .region-list button,
@@ -495,12 +499,12 @@
   }
 
   .region-list button {
-    @apply grid gap-1 p-4;
+    @apply grid min-h-20 gap-1 p-4;
   }
 
   .region-list button.selected,
   .pill-button.selected {
-    @apply border-accent/60 bg-accent/10;
+    @apply border-accent/60 bg-accent/12 shadow-[var(--wp-shadow-soft)];
   }
 
   .region-list button.disabled {

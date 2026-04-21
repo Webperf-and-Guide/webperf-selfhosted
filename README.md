@@ -80,6 +80,9 @@ bun run check
 bun run dev:browser-audit-worker
 bun run dev:parallel:cloud
 bun run smoke:console
+bun run smoke:compose
+bun run smoke:compose:browser-audit
+bun run capture:console:baselines
 bun run --cwd apps/api check
 bun test apps/api/test
 bun run test:report-core
@@ -153,6 +156,7 @@ Pending release notes live under `.sampo/changesets/`.
 See [runtime-images.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md) for the current GHCR image policy and checked-in metadata refs.
 
 Cloud local development continues to consume OSS packages through sibling `file:` dependencies, while runtime images continue to publish through GHCR.
+Merges or direct pushes to `main` automatically publish the probe and browser-audit images through the checked-in GitHub Actions workflows.
 
 ## Public Launch Notes
 

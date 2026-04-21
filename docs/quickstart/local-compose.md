@@ -34,6 +34,12 @@ curl http://127.0.0.1:8788/health
 bun run smoke:console
 ```
 
+6. Optional: capture route baselines from the running Compose console:
+
+```sh
+bun run capture:console:baselines
+```
+
 ## What You Get
 
 - `console`: SvelteKit UI
@@ -57,6 +63,18 @@ bun run smoke:console
 
 The probe is intentionally not published on a host port by default.
 If you need direct host access for debugging, add a temporary port mapping in your local Compose override instead of exposing it permanently.
+
+## Compose Smoke Helpers
+
+The repo now includes explicit Compose smoke wrappers:
+
+```sh
+bun run smoke:compose
+bun run smoke:compose:browser-audit
+```
+
+- `smoke:compose` verifies the default Compose stack plus the browser-console flow.
+- `smoke:compose:browser-audit` enables the `browser-audit` profile, wires the API to the worker over the internal Compose network, and verifies a direct-run browser audit end-to-end.
 
 ## Optional Browser Audit Worker
 

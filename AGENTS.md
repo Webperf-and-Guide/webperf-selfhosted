@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-18
+Last updated: 2026-04-21
 
 ## Mission
 
@@ -119,6 +119,11 @@ Current repo state as of 2026-04-18:
 - the shared UI package now also owns a `LiveRunTargetCard` operator composite so both OSS and cloud overview streams render the same live regional target card shape
 - the regions surface now also uses a shared `RegionContinentCard` operator component so OSS and cloud keep the same region catalog structure
 - browser-audit history now surfaces direct-run policy, toolchain, artifact byte sizes, and saved summary context more clearly in the reports workspace
+- browser-audit history now also surfaces request headers/cookies/flow context plus normalized issue rows so self-host operators can inspect direct-run failures without needing managed orchestration views
+- the root `check` flow now also runs a checked-in OpenAPI regression script so the frozen public/control docs stay aligned with the real contract export paths
+- the repo now includes `smoke:compose` and `smoke:compose:browser-audit` helpers that boot the Compose stack with temporary secrets, verify API health, run the console smoke, and exercise direct-run browser-audit in the optional profile
+- the repo now also includes `capture:console:baselines` helpers that render `/`, `/resources`, `/checks`, `/reports`, and `/regions` at desktop and mobile sizes into `output/playwright/console-baselines`
+- the GHCR probe and browser-audit image workflows now auto-publish on pushes to `main` with `main`, `latest`, and `sha-*` tags, plus GitHub Actions cache and workflow-level concurrency so merge-to-main is enough to refresh the managed repo's source-of-truth runtime refs
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -130,6 +135,9 @@ Current local dev entrypoints:
 - `bun run dev:probe`
 - `bun run smoke:console`
 - `bun run smoke:console:parallel:cloud`
+- `bun run smoke:compose`
+- `bun run smoke:compose:browser-audit`
+- `bun run capture:console:baselines`
 
 Current local URLs:
 - console: `http://localhost:5173`

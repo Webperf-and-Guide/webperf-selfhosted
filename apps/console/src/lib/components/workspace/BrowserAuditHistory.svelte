@@ -125,6 +125,35 @@
       : []
   );
 
+  const requestContextRows = $derived.by(() =>
+    selectedAudit
+      ? [
+          {
+            label: 'Headers',
+            value:
+              selectedAudit.customHeaders.length > 0
+                ? selectedAudit.customHeaders.map((header: BrowserAuditResource['customHeaders'][number]) => header.name).join(', ')
+                : 'none'
+          },
+          {
+            label: 'Cookies',
+            value:
+              selectedAudit.cookies.length > 0
+                ? selectedAudit.cookies.map((cookie: BrowserAuditResource['cookies'][number]) => cookie.name).join(', ')
+                : 'none'
+          },
+          {
+            label: 'Flow',
+            value: selectedAudit.policy.flow.steps
+              .map((step: BrowserAuditResource['policy']['flow']['steps'][number]) => step.type)
+              .join(' -> ')
+          }
+        ]
+      : []
+  );
+
+  const issueRows = $derived.by(() => selectedAudit?.result?.issues ?? []);
+
   const formatByteSize = (value: number | null | undefined) => {
     if (value == null) {
       return 'n/a';
@@ -347,6 +376,68 @@
               {:else}
                 <TableRow>
                   <TableCell colspan={2}>Toolchain data was not recorded for this run.</TableCell>
+                </TableRow>
+              {/if}
+            </TableBody>
+          </Table>
+        </Card>
+
+        <Card class="border-line/55 bg-white/[0.025] p-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Request context</p>
+              <p class="text-sm text-muted">Direct-run headers, cookies, and flow shape stay visible for debugging and reruns.</p>
+            </div>
+            <Badge tone="muted">{requestContextRows.length} rows</Badge>
+          </div>
+
+          <Table class="mt-4">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Context</TableHead>
+                <TableHead>Value</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {#each requestContextRows as row (row.label)}
+                <TableRow>
+                  <TableCell>{row.label}</TableCell>
+                  <TableCell>{row.value}</TableCell>
+                </TableRow>
+              {/each}
+            </TableBody>
+          </Table>
+        </Card>
+
+        <Card class="border-line/55 bg-white/[0.025] p-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Issues</p>
+              <p class="text-sm text-muted">Worker-reported issues stay separate from the top-level failure message.</p>
+            </div>
+            <Badge tone="muted">{issueRows.length}</Badge>
+          </div>
+
+          <Table class="mt-4">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Severity</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead>Message</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {#if issueRows.length > 0}
+                {#each issueRows as issue (`${issue.severity}:${issue.code}:${issue.message}`)}
+                  <TableRow>
+                    <TableCell>{issue.severity}</TableCell>
+                    <TableCell>{issue.code}</TableCell>
+                    <TableCell>{issue.message}</TableCell>
+                  </TableRow>
+                {/each}
+              {:else}
+                <TableRow>
+                  <TableCell colspan={3}>No structured issues were recorded for this run.</TableCell>
                 </TableRow>
               {/if}
             </TableBody>

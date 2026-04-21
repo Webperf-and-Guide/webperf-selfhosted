@@ -33,6 +33,7 @@ Default local URLs:
 curl http://127.0.0.1:8788/health
 curl http://127.0.0.1:8080/healthz
 bun run smoke:console
+bun run capture:console:baselines
 ```
 
 Use the console to:
@@ -74,3 +75,4 @@ See [browser-audit-worker.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/do
 - This repo stays vendor-neutral. Platform-specific deployment walkthroughs live on `webperf.and.guide`.
 - If you want a Docker-first install, use [local-compose.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md).
 - If you want to run OSS and cloud locally side-by-side, use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md).
+- `bun run capture:console:baselines` captures desktop and mobile screenshots for `/`, `/resources`, `/checks`, `/reports`, and `/regions` against the currently running console.

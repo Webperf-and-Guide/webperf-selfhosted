@@ -7,6 +7,11 @@ on:
     paths:
       - 'apps/probe-rs/**'
       - 'infra/docker/**'
+      - '.github/workflows/publish-probe-image.yml'
+
+concurrency:
+  group: publish-probe-image-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   publish:
@@ -27,6 +32,8 @@ jobs:
         with:
           images: ghcr.io/webperf-and-guide/webperf-probe
           tags: |
+            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha
             type=ref,event=branch
       - uses: docker/build-push-action@v6
@@ -35,5 +42,7 @@ jobs:
           file: ./apps/probe-rs/Dockerfile
           platforms: linux/amd64
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -89,6 +89,9 @@ docker compose \
   up --build
 ```
 
+Set `BROWSER_AUDIT_SHARED_SECRET` in `infra/docker-compose/.env` when you want the API and worker to authenticate direct-run requests against each other.
+The default `.env.example` now leaves that secret empty so the default Compose stack does not advertise browser-audit direct-run until the optional profile is deliberately enabled.
+
 The profile publishes the worker on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
 The bundled Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled locally.
 

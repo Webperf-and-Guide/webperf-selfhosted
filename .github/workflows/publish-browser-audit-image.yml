@@ -7,10 +7,15 @@ on:
     paths:
       - 'apps/browser-audit-worker/**'
       - 'packages/contracts/**'
+      - 'packages/domain-core/**'
       - 'package.json'
       - 'bun.lock'
       - 'infra/docker/**'
       - '.github/workflows/publish-browser-audit-image.yml'
+
+concurrency:
+  group: publish-browser-audit-image-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   publish:
@@ -31,6 +36,8 @@ jobs:
         with:
           images: ghcr.io/webperf-and-guide/webperf-browser-audit-worker
           tags: |
+            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha
             type=ref,event=branch
       - uses: docker/build-push-action@v6
@@ -39,5 +46,7 @@ jobs:
           file: ./apps/browser-audit-worker/Dockerfile
           platforms: linux/amd64
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

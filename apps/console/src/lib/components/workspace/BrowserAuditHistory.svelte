@@ -152,6 +152,31 @@
       : []
   );
 
+  const headerRows = $derived.by(() => selectedAudit?.customHeaders ?? []);
+
+  const cookieRows = $derived.by(() => selectedAudit?.cookies ?? []);
+
+  const flowRows = $derived.by(() =>
+    selectedAudit
+      ? selectedAudit.policy.flow.steps.map((step: BrowserAuditResource['policy']['flow']['steps'][number], index: number) => ({
+          id: `${index + 1}-${step.type}`,
+          step: index + 1,
+          type: step.type,
+          detail: describeFlowStep(step)
+        }))
+      : []
+  );
+
+  const checkpointRows = $derived.by(() =>
+    selectedAudit?.result?.checkpoints.map((checkpoint: NonNullable<BrowserAuditResource['result']>['checkpoints'][number]) => ({
+      id: checkpoint.id,
+      mode: checkpoint.mode,
+      label: checkpoint.label ?? 'Untitled checkpoint',
+      performance: formatPercentScore(checkpoint.summary.performanceScore),
+      lcp: formatTiming(checkpoint.summary.lcpMs)
+    })) ?? []
+  );
+
   const issueRows = $derived.by(() => selectedAudit?.result?.issues ?? []);
 
   const formatByteSize = (value: number | null | undefined) => {
@@ -168,6 +193,67 @@
     }
 
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const pluralize = (value: number, label: string) => `${value} ${label}${value === 1 ? '' : 's'}`;
+
+  const summarizeRecentAudit = (audit: BrowserAuditResource) => {
+    if (audit.error) {
+      return audit.error;
+    }
+
+    const checkpointCount = audit.result?.checkpoints.length ?? 0;
+    const artifactCount = audit.result?.artifacts.length ?? 0;
+    const issueCount = audit.result?.issues.length ?? 0;
+
+    if (audit.status === 'failed' || issueCount > 0) {
+      return `${pluralize(issueCount, 'issue')} · ${pluralize(artifactCount, 'artifact')}`;
+    }
+
+    return `${pluralize(checkpointCount, 'checkpoint')} · ${pluralize(artifactCount, 'artifact')}`;
+  };
+
+  const formatPointerLabel = (value: string) => {
+    try {
+      const parsed = new URL(value);
+      const path = parsed.pathname === '/' ? '' : parsed.pathname;
+      return `${parsed.hostname}${path}`;
+    } catch {
+      return value.length > 64 ? `${value.slice(0, 64)}...` : value;
+    }
+  };
+
+  const describeFlowStep = (step: BrowserAuditResource['policy']['flow']['steps'][number]) => {
+    switch (step.type) {
+      case 'navigate':
+        return step.url ?? 'target URL';
+      case 'waitForSelector':
+        return `${step.selector} (${step.state ?? 'visible'})`;
+      case 'waitForUrl':
+        return `${step.match} ${step.url}`;
+      case 'click':
+        return step.selector;
+      case 'type':
+        return `${step.selector} (${pluralize(step.text.length, 'char')}${step.clear ? ', clears first' : ''})`;
+      case 'press':
+        return step.key;
+      case 'select':
+        return `${step.selector} -> ${step.values.join(', ')}`;
+      case 'waitForTimeout':
+        return `${step.ms}ms`;
+      case 'setViewport':
+        return `${step.width}x${step.height}${step.isMobile ? ' mobile' : ''}`;
+      case 'setCookie':
+        return step.cookie.domain ?? step.cookie.url ?? step.cookie.name;
+      case 'setExtraHeaders':
+        return step.headers.map((header) => header.name).join(', ');
+      case 'snapshot':
+        return step.label ?? 'snapshot';
+      case 'timespanStart':
+        return step.label ?? 'timespan start';
+      case 'timespanEnd':
+        return step.label ?? 'timespan end';
+    }
   };
 </script>
 
@@ -203,6 +289,9 @@
                 <p class="text-xs text-muted">
                   {audit.policy.preset} · Perf {formatPercentScore(audit.result?.summary.performanceScore)}
                 </p>
+                <p class={audit.error ? 'truncate text-[0.72rem] text-danger/85' : 'truncate text-[0.72rem] text-muted'}>
+                  {summarizeRecentAudit(audit)}
+                </p>
               </div>
               <Badge tone={toneForStatus(audit.status)}>{audit.status}</Badge>
             </Button>
@@ -227,12 +316,6 @@
               <CopyButton text={selectedAudit.id}>Copy id</CopyButton>
             </div>
           </div>
-
-          {#if selectedAudit.error}
-            <div class="mt-4">
-              <InlineStatusNotice message={selectedAudit.error} tone="danger" />
-            </div>
-          {/if}
 
           <div class="mt-4">
             <MetricGrid compact columns={3} items={auditSummaryItems} />
@@ -275,6 +358,22 @@
           </div>
         </Card>
 
+        {#if selectedAudit.error}
+          <Card class="border-line/55 bg-white/[0.025] p-4">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Failure summary</p>
+                <p class="text-sm text-muted">Keep the operator-visible failure reason separate from structured worker issues.</p>
+              </div>
+              <Badge tone="danger">{selectedAudit.status}</Badge>
+            </div>
+
+            <div class="mt-4">
+              <InlineStatusNotice message={selectedAudit.error} tone="danger" />
+            </div>
+          </Card>
+        {/if}
+
         <Card class="border-line/55 bg-white/[0.025] p-4">
           <div class="flex items-center justify-between gap-2">
             <div>
@@ -311,6 +410,43 @@
         <Card class="border-line/55 bg-white/[0.025] p-4">
           <div class="flex items-center justify-between gap-2">
             <div>
+              <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Checkpoints</p>
+              <p class="text-sm text-muted">Checkpoint summaries show where the worker captured navigation, snapshot, and timespan evidence.</p>
+            </div>
+            <Badge tone="muted">{checkpointRows.length}</Badge>
+          </div>
+
+          <Table class="mt-4">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Label</TableHead>
+                <TableHead>Mode</TableHead>
+                <TableHead>Performance</TableHead>
+                <TableHead>LCP</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {#if checkpointRows.length > 0}
+                {#each checkpointRows as checkpoint (checkpoint.id)}
+                  <TableRow>
+                    <TableCell>{checkpoint.label}</TableCell>
+                    <TableCell>{checkpoint.mode}</TableCell>
+                    <TableCell>{checkpoint.performance}</TableCell>
+                    <TableCell>{checkpoint.lcp}</TableCell>
+                  </TableRow>
+                {/each}
+              {:else}
+                <TableRow>
+                  <TableCell colspan={4}>No checkpoints were recorded for this run.</TableCell>
+                </TableRow>
+              {/if}
+            </TableBody>
+          </Table>
+        </Card>
+
+        <Card class="border-line/55 bg-white/[0.025] p-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Artifacts</p>
               <p class="text-sm text-muted">Binary download stays runtime-specific, but the metadata and pointers are persisted here.</p>
             </div>
@@ -335,8 +471,11 @@
                     <TableCell>{artifact.contentType}</TableCell>
                     <TableCell>{formatByteSize(artifact.byteSize)}</TableCell>
                     <TableCell>{formatDateTime(artifact.createdAt)}</TableCell>
-                    <TableCell class="text-right">
-                      <CopyButton text={artifact.url}>Copy pointer</CopyButton>
+                    <TableCell>
+                      <div class="flex items-center justify-end gap-2">
+                        <span class="max-w-[16rem] truncate text-xs text-muted">{formatPointerLabel(artifact.url)}</span>
+                        <CopyButton text={artifact.url}>Copy pointer</CopyButton>
+                      </div>
                     </TableCell>
                   </TableRow>
                 {/each}
@@ -407,6 +546,71 @@
               {/each}
             </TableBody>
           </Table>
+
+          <div class="mt-4 grid gap-4 xl:grid-cols-3">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Header</TableHead>
+                  <TableHead>Value</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {#if headerRows.length > 0}
+                  {#each headerRows as header (`${header.name}:${header.value}`)}
+                    <TableRow>
+                      <TableCell>{header.name}</TableCell>
+                      <TableCell class="max-w-[18rem] truncate">{header.value}</TableCell>
+                    </TableRow>
+                  {/each}
+                {:else}
+                  <TableRow>
+                    <TableCell colspan={2}>No custom headers.</TableCell>
+                  </TableRow>
+                {/if}
+              </TableBody>
+            </Table>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cookie</TableHead>
+                  <TableHead>Scope</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {#if cookieRows.length > 0}
+                  {#each cookieRows as cookie (`${cookie.name}:${cookie.domain ?? cookie.url ?? cookie.path ?? ''}`)}
+                    <TableRow>
+                      <TableCell>{cookie.name}</TableCell>
+                      <TableCell>{cookie.domain ?? cookie.url ?? cookie.path ?? 'session'}</TableCell>
+                    </TableRow>
+                  {/each}
+                {:else}
+                  <TableRow>
+                    <TableCell colspan={2}>No cookies were configured.</TableCell>
+                  </TableRow>
+                {/if}
+              </TableBody>
+            </Table>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Step</TableHead>
+                  <TableHead>Detail</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {#each flowRows as step (step.id)}
+                  <TableRow>
+                    <TableCell>{step.step}. {step.type}</TableCell>
+                    <TableCell>{step.detail}</TableCell>
+                  </TableRow>
+                {/each}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
 
         <Card class="border-line/55 bg-white/[0.025] p-4">

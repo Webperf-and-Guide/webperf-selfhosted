@@ -2,7 +2,11 @@
 
 This is the current v1 public resource surface for `webperf-selfhosted`.
 
-The intent is to stabilize this shape before adding new top-level resources.
+Treat this document as the current freeze line:
+
+- do not add new top-level resources without an explicit v1 boundary decision
+- do keep list/query behavior aligned across the existing list surfaces
+- do keep the compatibility aliases working, but treat them as compatibility-first surfaces instead of the preferred model
 
 ## Primary Resource-Oriented Surface
 
@@ -47,6 +51,11 @@ The older self-host aliases remain supported:
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
 Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
 
+`runs` are intentionally not a top-level list resource in v1:
+
+- list runs under `GET /v1/checks/:checkId/runs`
+- fetch a persisted run detail under `GET /v1/runs/:runId`
+
 ## List Contract
 
 List resources use a shared query model:
@@ -66,6 +75,7 @@ List responses return:
 Current stabilization focus is on keeping this list contract consistent across:
 
 - `checks`
+- `checks/:checkId/runs`
 - compatibility aliases for `properties`, `route-sets`, `region-packs`, and `check-profiles`
 - `comparisons`
 - `exports`

@@ -104,6 +104,11 @@ The current v1 resource-oriented surface is intentionally stabilized around:
 - `browserAudits`
 - `capabilities`
 
+`runs` stay intentionally split between:
+
+- nested run lists at `GET /v1/checks/:checkId/runs`
+- persisted run detail at `GET /v1/runs/:runId`
+
 Compatibility aliases remain available for:
 
 - `/v1/properties`

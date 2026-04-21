@@ -330,6 +330,39 @@ describe('api service monitoring expansion', () => {
       const latestRun = runs[0]!;
       const previousRun = runs[1]!;
 
+      const checkRunsPageResponse = await fetch(`${harness.baseUrl}/v1/checks/${thresholdProfile.id}/runs?pageSize=1`);
+      const checkRunsPagePayload = await checkRunsPageResponse.json() as {
+        runs: Array<{ id: string; trigger: string }>;
+        pageInfo: { totalCount: number; pageSize: number; nextPageToken: string | null; filter: string | null };
+      };
+      expect(checkRunsPageResponse.status).toBe(200);
+      expect(checkRunsPagePayload.pageInfo.totalCount).toBe(2);
+      expect(checkRunsPagePayload.pageInfo.pageSize).toBe(1);
+      expect(checkRunsPagePayload.pageInfo.nextPageToken).not.toBeNull();
+
+      const filteredCheckRunsResponse = await fetch(
+        `${harness.baseUrl}/v1/checks/${thresholdProfile.id}/runs?pageSize=5&filter=${latestRun.id}`
+      );
+      const filteredCheckRunsPayload = await filteredCheckRunsResponse.json() as {
+        runs: Array<{ id: string }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(filteredCheckRunsResponse.status).toBe(200);
+      expect(filteredCheckRunsPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredCheckRunsPayload.pageInfo.filter).toBe(latestRun.id);
+      expect(filteredCheckRunsPayload.runs[0]?.id).toBe(latestRun.id);
+
+      const runDetailResponse = await fetch(`${harness.baseUrl}/v1/runs/${latestRun.id}`);
+      const runDetailPayload = await runDetailResponse.json() as {
+        check: { id: string };
+        run: { id: string };
+        jobs: Array<{ id: string }>;
+      };
+      expect(runDetailResponse.status).toBe(200);
+      expect(runDetailPayload.check.id).toBe(thresholdProfile.id);
+      expect(runDetailPayload.run.id).toBe(latestRun.id);
+      expect(runDetailPayload.jobs.length).toBeGreaterThan(0);
+
       const comparisonResponse = await fetch(`${harness.baseUrl}/v1/comparisons`, {
         method: 'POST',
         headers: {

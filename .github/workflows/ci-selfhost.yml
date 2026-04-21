@@ -11,6 +11,7 @@ on:
       - 'packages/**'
       - 'infra/docker-compose/**'
       - 'infra/docker/**'
+      - '.github/workflows/ci-selfhost.yml'
       - 'package.json'
       - 'bun.lock'
   push:
@@ -24,6 +25,7 @@ on:
       - 'packages/**'
       - 'infra/docker-compose/**'
       - 'infra/docker/**'
+      - '.github/workflows/ci-selfhost.yml'
       - 'package.json'
       - 'bun.lock'
 

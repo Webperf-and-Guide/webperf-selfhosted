@@ -19,7 +19,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@webperf/contracts": "file:../contracts",
+    "@webperf/contracts": "workspace:*",
     "zod": "^4.1.12"
   }
 }

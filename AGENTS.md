@@ -126,6 +126,7 @@ Current repo state as of 2026-04-18:
 - the GHCR probe and browser-audit image workflows now auto-publish on pushes to `main` with `main`, `latest`, and `sha-*` tags, plus GitHub Actions cache and workflow-level concurrency so merge-to-main is enough to refresh the managed repo's source-of-truth runtime refs
 - the frozen public API docs now explicitly treat `runs` as nested check-run lists plus top-level persisted run detail resources, and the HTTP suite regression-tests `GET /v1/checks/:checkId/runs` paging/filtering alongside the other stabilized list surfaces
 - browser-audit history now also surfaces checkpoint summaries, per-header/per-cookie request context, flow-step detail, and clearer artifact pointer labels so direct-run operator debugging stays readable without managed orchestration tooling
+- internal workspace packages now consume `@webperf/contracts` through `workspace:*` consistently instead of mixing `file:` and workspace references, which keeps the Bun lockfile stable enough for `bun install --frozen-lockfile` in GitHub Actions
 
 Current local dev entrypoints:
 - `bun run dev`

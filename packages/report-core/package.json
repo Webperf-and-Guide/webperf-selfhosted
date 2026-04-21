@@ -19,6 +19,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@webperf/contracts": "file:../contracts"
+    "@webperf/contracts": "workspace:*"
   }
 }

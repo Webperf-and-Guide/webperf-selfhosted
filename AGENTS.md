@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-04-21
+Last updated: 2026-07-22
 
 ## Mission
 
@@ -128,6 +128,7 @@ Current repo state as of 2026-04-18:
 - browser-audit history now also surfaces checkpoint summaries, per-header/per-cookie request context, flow-step detail, and clearer artifact pointer labels so direct-run operator debugging stays readable without managed orchestration tooling
 - internal workspace packages now consume `@webperf/contracts` through `workspace:*` consistently instead of mixing `file:` and workspace references, which keeps the Bun lockfile stable enough for `bun install --frozen-lockfile` in GitHub Actions
 - `ci-selfhost` now validates Compose through the checked-in `compose:config` script, which uses `infra/docker-compose/.env.example` instead of assuming repository-local secrets during static config validation
+- public-beta hardening is now tracked in `docs/architecture/public-beta-hardening-plan.md`, covering durable execution, strict self-host security, engine-neutral browser audits, local artifacts, versioned Compose/release automation, and operator documentation
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -163,17 +164,14 @@ Current local URLs:
 
 ## Immediate Next Tasks
 
-1. verify `bun run dev` end-to-end in the renamed layout
-2. decide how far the public HTTP aliases should go beyond the current `sites/routeGroups/regionSets/checks/runs/comparisons/exports/analyses` surface
-3. keep refining install docs and compose ergonomics
-4. decide how package publishing should work once the repo is public
-5. decide whether public comparison/export resources should get richer server-side pagination and filtering
-6. keep refining the compact saved-check and report surfaces now that the main route/controller split is in place
-7. decide how much of the browser-audit reporting surface should become first-class in self-host APIs without pulling managed orchestration into OSS
-8. keep the optional browser-audit worker docs, image metadata, and Compose profile aligned with the OSS/cloud ownership split
-9. keep the shared token layer, shadcn component exports, setup/operator composite surface, app-level theme entrypoints, and jsrepo adoption path aligned across the OSS console and the managed cloud consumers
-10. keep tightening direct-run browser-audit history/detail UX without pulling managed orchestration concerns into OSS
-11. keep the frozen public API docs and compatibility alias regression coverage aligned as the v1 surface hardens
+1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
+2. move all network, browser-audit, and webhook execution into a durable leased executor
+3. enforce the single-organization admin/internal authentication and secret-redaction model
+4. ship engine-neutral browser-audit contracts and a renamed Lighthouse reference runner
+5. persist and serve local artifacts through authenticated, traversal-safe endpoints
+6. ship versioned production/development Compose bundles with internal-only services
+7. gate release images, SBOM, provenance, and digest metadata on complete CI
+8. complete the operator install, backup, upgrade, security, and troubleshooting documentation
 
 ## Update Protocol
 

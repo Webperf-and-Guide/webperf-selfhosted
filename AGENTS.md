@@ -138,7 +138,8 @@ Current repo state as of 2026-07-22:
 - the Rust probe now pins validated DNS addresses into reqwest across redirects, while the Lighthouse runner enforces public-network target/navigation/subresource checks plus download/new-window blocking and an explicit operator allowlist
 - `/v1/capabilities` now reports the implemented Fast Check metric surface, keeping TCP/TLS timing and TLS metadata disabled and null until they are actually measured
 - the durable execution foundation now defines public-safe execution job contracts and an encrypted SQLite `execution_jobs` state machine with atomic claim, lease renewal, expiry recovery, bounded retry, terminal failure, cancellation, and idempotent completion semantics
-- `apps/executor` now provides the internal-secret-authenticated claim/start/renew/complete/fail transport, a single-concurrency lease heartbeat, safe failure logging, and graceful stop-claiming behavior; execution handlers still move out of the API in the next hardening slice
+- `apps/executor` now provides the internal-secret-authenticated claim/start/renew/complete/fail transport, a single-concurrency lease heartbeat, safe failure logging, and graceful stop-claiming behavior
+- Fast Check network measurement, deterministic Check evaluation, and signed idempotent webhook delivery now run through leased executor handlers with atomic domain-resource creation/result persistence; the API no longer starts those operations in-process
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -176,7 +177,7 @@ Current local URLs:
 ## Immediate Next Tasks
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. move all network, browser-audit, and webhook execution into a durable leased executor
+2. move Browser Audit execution into the durable leased executor now that network measurement, evaluation, and webhook delivery use it
 3. keep the single-organization admin/internal authentication, encrypted persistence, rotation, and secret-redaction model covered as execution moves into the durable executor
 4. ship engine-neutral browser-audit contracts and a renamed Lighthouse reference runner
 5. persist and serve local artifacts through authenticated, traversal-safe endpoints

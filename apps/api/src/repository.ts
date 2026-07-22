@@ -82,6 +82,10 @@ export type JobRepository = {
   getBrowserAudit(id: string): BrowserAuditResource | null;
   listBrowserAudits(): BrowserAuditResource[];
   saveBrowserAudit(browserAudit: BrowserAuditResource): void;
+  createExecutionResource(input: {
+    executionJob: EnqueueExecutionJob;
+    result: ExecutionResourceResult;
+  }, now?: Date): ExecutionJob;
   saveExecutionResourceResult(input: {
     executionJobId: string;
     leaseOwner: string;
@@ -720,6 +724,28 @@ export const createSqliteJobRepository = ({
     );
   };
 
+  const persistExecutionResource = (result: ExecutionResourceResult) => {
+    switch (result.kind) {
+      case 'network_probe':
+        for (const job of result.jobs) {
+          persistJob(job);
+        }
+
+        if (result.run) {
+          persistCheckProfileRun(result.run);
+        }
+        break;
+      case 'browser_audit':
+        persistBrowserAudit(result.audit);
+        break;
+      case 'webhook_delivery':
+        persistCheckProfileRun(result.run);
+        break;
+      default:
+        assertNever(result);
+    }
+  };
+
   return {
     getJob(id) {
       const row = getStatement.get(id);
@@ -866,31 +892,24 @@ export const createSqliteJobRepository = ({
     saveBrowserAudit(browserAudit) {
       persistBrowserAudit(browserAudit);
     },
+    createExecutionResource(input, now = new Date()) {
+      if (input.executionJob.kind !== input.result.kind) {
+        throw new Error('Execution resource kind does not match its queue job');
+      }
+
+      const create = db.transaction(() => {
+        persistExecutionResource(input.result);
+        return enqueueExecution(input.executionJob, now);
+      });
+      return create();
+    },
     saveExecutionResourceResult(input, now = new Date()) {
       const save = db.transaction(() => {
         if (!ownsRunningExecutionLease(input.executionJobId, input.leaseOwner, now.toISOString())) {
           return false;
         }
 
-        switch (input.result.kind) {
-          case 'network_probe':
-            for (const job of input.result.jobs) {
-              persistJob(job);
-            }
-
-            if (input.result.run) {
-              persistCheckProfileRun(input.result.run);
-            }
-            break;
-          case 'browser_audit':
-            persistBrowserAudit(input.result.audit);
-            break;
-          case 'webhook_delivery':
-            persistCheckProfileRun(input.result.run);
-            break;
-          default:
-            assertNever(input.result);
-        }
+        persistExecutionResource(input.result);
 
         return true;
       });

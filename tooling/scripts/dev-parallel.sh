@@ -26,11 +26,13 @@ else
   export SELFHOST_PROBE_BASE_URLS_JSON
 fi
 export SELFHOST_CONTROL_BASE_URL="$api_base_url"
+export SELFHOST_EXECUTOR_API_BASE_URL="$api_base_url"
 export SELFHOST_CONSOLE_PORT="$console_port"
 export SELFHOST_PROBE_PORT="$probe_port"
 
-bunx concurrently -n console,api,probe,scheduler \
+bunx concurrently -n console,api,probe,scheduler,executor \
   "bun run dev:console" \
   "bun run dev:api" \
   "bun run dev:probe" \
-  "bun run dev:scheduler"
+  "bun run dev:scheduler" \
+  "bun run dev:executor"

@@ -4,12 +4,16 @@ import { parseSelfhostExecutorVars } from '@webperf/config/selfhost-executor';
 import { createExecutorApiClient } from './client';
 import { describeSafeError } from './diagnostics';
 import { createDefaultLeaseOwner } from './identity';
+import { createNetworkExecutionHandler, parseProbeBaseUrls } from './network-handler';
 import { ExecutionFailure, runExecutor } from './runner';
+import { createWebhookExecutionHandler } from './webhook-handler';
 
 const main = async () => {
   const runtime = parseSelfhostExecutorVars({
     SELFHOST_EXECUTOR_API_BASE_URL: process.env.SELFHOST_EXECUTOR_API_BASE_URL,
     SELFHOST_INTERNAL_SECRET: process.env.SELFHOST_INTERNAL_SECRET,
+    PROBE_SHARED_SECRET: process.env.PROBE_SHARED_SECRET,
+    SELFHOST_PROBE_BASE_URLS_JSON: process.env.SELFHOST_PROBE_BASE_URLS_JSON,
     SELFHOST_EXECUTOR_ID: process.env.SELFHOST_EXECUTOR_ID,
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: process.env.SELFHOST_EXECUTOR_POLL_INTERVAL_MS,
     SELFHOST_EXECUTOR_LEASE_DURATION_MS: process.env.SELFHOST_EXECUTOR_LEASE_DURATION_MS,
@@ -49,13 +53,32 @@ const main = async () => {
     })
   );
 
+  const client = createExecutorApiClient({
+    baseUrl: runtime.SELFHOST_EXECUTOR_API_BASE_URL,
+    internalSecret: runtime.SELFHOST_INTERNAL_SECRET
+  });
+  const networkHandler = createNetworkExecutionHandler({
+    client,
+    leaseOwner,
+    probeSharedSecret: runtime.PROBE_SHARED_SECRET,
+    probeBaseUrls: parseProbeBaseUrls(runtime.SELFHOST_PROBE_BASE_URLS_JSON)
+  });
+  const webhookHandler = createWebhookExecutionHandler({ client, leaseOwner });
+
   try {
     await runExecutor({
-      client: createExecutorApiClient({
-        baseUrl: runtime.SELFHOST_EXECUTOR_API_BASE_URL,
-        internalSecret: runtime.SELFHOST_INTERNAL_SECRET
-      }),
-      handler: async (executionJob) => {
+      client,
+      handler: async (executionJob, signal) => {
+        if (executionJob.kind === 'network_probe') {
+          await networkHandler(executionJob, signal);
+          return;
+        }
+
+        if (executionJob.kind === 'webhook_delivery') {
+          await webhookHandler(executionJob, signal);
+          return;
+        }
+
         throw new ExecutionFailure(
           'handler_unavailable',
           `No executor handler is registered for ${executionJob.kind}`,

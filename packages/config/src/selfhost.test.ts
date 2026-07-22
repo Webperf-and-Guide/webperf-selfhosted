@@ -32,7 +32,8 @@ describe('strict self-host configuration', () => {
     ).toBe('http://127.0.0.1:8788');
     expect(
       parseSelfhostExecutorVars({
-        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET
+        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET
       })
     ).toMatchObject({
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
@@ -41,6 +42,7 @@ describe('strict self-host configuration', () => {
     expect(() =>
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET,
         SELFHOST_EXECUTOR_LEASE_DURATION_MS: 10_000,
         SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: 5_000
       })
@@ -48,6 +50,7 @@ describe('strict self-host configuration', () => {
     expect(() =>
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET,
         SELFHOST_EXECUTOR_API_BASE_URL: 'https://operator:secret@api.example.test?token=secret'
       })
     ).toThrow('without path');

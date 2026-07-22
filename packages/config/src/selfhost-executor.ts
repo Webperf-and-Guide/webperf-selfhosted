@@ -1,10 +1,12 @@
 import { z } from 'zod';
-import { emptyStringToUndefined } from './shared';
+import { defaultSelfhostProbeBaseUrlsJson, emptyStringToUndefined } from './shared';
 
 export const selfhostExecutorEnvSchema = z
   .object({
     SELFHOST_EXECUTOR_API_BASE_URL: z.string().url().default('http://127.0.0.1:8788'),
     SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
+    PROBE_SHARED_SECRET: z.string().trim().min(16),
+    SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
     SELFHOST_EXECUTOR_ID: emptyStringToUndefined(z.string().trim().min(1).max(120)),
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: z.preprocess(
       (value) => value ?? '1000',

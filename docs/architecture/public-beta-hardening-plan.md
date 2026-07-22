@@ -149,7 +149,8 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 - [x] Rename the legacy browser-audit worker app to
   `apps/browser-audit-lighthouse` and update package/image identifiers.
-- [ ] Add `apps/executor` and keep execution out of the API and scheduler.
+- [x] Add `apps/executor` and keep implemented execution handlers out of the API
+  and scheduler.
 - [x] Make canonical terms/routes primary in UI, docs, contracts, and tests.
 - [x] Add deprecation headers and successor links to compatibility routes.
 - [x] Remove provider-specific cloud config, health contracts, smoke scripts,
@@ -174,12 +175,15 @@ The exact diff will stay small within each phase, but the expected surface is:
   single-concurrency heartbeat and graceful claim shutdown in `apps/executor`.
 - [x] Add lease-bound context/result/follow-up transport so handlers can persist
   domain results atomically without opening SQLite from the executor.
-- [ ] Move network probe, Browser Audit, evaluation, and webhook handlers into
+- [x] Move network probe, run evaluation, and webhook handlers into
   `apps/executor` with retry and idempotent result persistence.
+- [ ] Move Browser Audit execution into `apps/executor` and make API creation
+  asynchronous.
 - [ ] Keep scheduler limited to authenticated due-check dispatch.
 - [ ] Add init/migrate/backup/restore/doctor/maintenance commands.
 - [ ] Add restart-recovery and scheduler-dispatch integration tests.
-- [ ] Add a Sampo changeset for durable execution and database operations.
+- [x] Add a Sampo changeset for durable execution; extend it with database
+  operations before this phase closes.
 
 ### 4. Browser Audit Protocol
 

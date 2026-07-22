@@ -30,8 +30,8 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
   SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
   SELFHOST_MAX_TARGET_ATTEMPTS: z.preprocess(
-    (value) => value ?? '1',
-    z.coerce.number().int().positive()
+    (value) => value ?? '3',
+    z.coerce.number().int().positive().max(20)
   )
 });
 

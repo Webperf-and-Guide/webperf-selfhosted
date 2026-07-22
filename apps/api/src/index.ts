@@ -6,7 +6,6 @@ import type {
   BrowserAuditResource,
   BrowserAuditWorkerRequest,
   BrowserAuditWorkerResponse,
-  CheckProfileAlertDelivery,
   CheckProfileBaselineResponse,
   CheckProfileComparisonResponse,
   CheckProfile,
@@ -36,7 +35,6 @@ import type {
   ListQuery,
   Property,
   PropertyListResponse,
-  ProbeMeasurementResponse,
   RegionCode,
   RegionPack,
   RegionPackListResponse,
@@ -49,7 +47,6 @@ import type {
   RouteSetListResponse,
   SchedulerDispatchResponse,
   SetCheckProfileBaselineInput,
-  SignedProbeMeasurementRequest,
   UpdateCheckProfileInput,
   UpdatePropertyInput,
   UpdateRegionPackInput,
@@ -95,12 +92,10 @@ import {
   listQuerySchema,
   propertyListResponseSchema,
   comparisonResourceSchema,
-  probeMeasurementResponseSchema,
   regionPackListResponseSchema,
   reportExportFormatSchema,
   routeSetListResponseSchema,
   setCheckProfileBaselineSchema,
-  signedProbeMeasurementRequestSchema,
   opsContract,
   publicContract,
   updateCheckProfileSchema,
@@ -116,7 +111,6 @@ import {
   applyListQuery,
   buildRegionAvailabilityList,
   createBrowserAuditSignature,
-  createProbeSignature,
   dedupeRegions,
   parseListQueryFromSearchParams,
   resolveRequestedRegions,
@@ -126,8 +120,6 @@ import { parseSelfhostApiVars } from '@webperf/config/selfhost';
 import {
   buildCheckProfileComparison,
   buildCheckProfileReportCsv,
-  deriveJobStatus,
-  evaluateMonitorTargets,
   summarizeCheckProfileRunReport,
   summarizeTargets
 } from '@webperf/report-core';
@@ -1446,6 +1438,7 @@ async function handleCreateJob(request: Request) {
       monitorPolicy: normalizeMonitorPolicy(parsed.data.monitorPolicy),
       requesterIp: request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? null
     });
+    createNetworkExecutionResource([job], null, null);
   } catch (error) {
     return json(
       {
@@ -1454,8 +1447,6 @@ async function handleCreateJob(request: Request) {
       { status: 400 }
     );
   }
-
-  void processJob(job.id);
 
   return json(
     {
@@ -2401,7 +2392,11 @@ async function handleRunCheckProfile(profileId: string, request: Request) {
   }
 
   const run = createCheckProfileRunRecord(profile, 'manual', createdJobs);
-  void processCheckProfileRun(profile, run, createdJobs);
+  createNetworkExecutionResource(
+    createdJobs.map((item) => item.job),
+    run,
+    profile.id
+  );
 
   const response: CheckProfileRunResponse = {
     profile,
@@ -2438,7 +2433,11 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
     }
 
     const run = createCheckProfileRunRecord(profile, 'schedule', createdJobs);
-    void processCheckProfileRun(profile, run, createdJobs);
+    createNetworkExecutionResource(
+      createdJobs.map((item) => item.job),
+      run,
+      profile.id
+    );
 
     const updatedProfile: CheckProfile = {
       ...profile,
@@ -2827,168 +2826,6 @@ function buildCheckProfileReport(profile: CheckProfile): CheckProfileReportRespo
   };
 }
 
-async function processJob(jobId: string) {
-  const job = repository.getJob(jobId);
-
-  if (!job) {
-    return;
-  }
-
-  if (!runtime.probeSharedSecret) {
-    for (const target of job.targets) {
-      markTargetFailed(target, 'missing_probe_shared_secret', 'Probe shared secret is not configured');
-    }
-    finalizeJob(job);
-    return;
-  }
-
-  for (const target of job.targets) {
-    job.startedAt ??= new Date().toISOString();
-    target.attemptNo = 1;
-    target.status = 'measuring';
-    target.startedAt ??= new Date().toISOString();
-    target.updatedAt = new Date().toISOString();
-    recomputeJob(job);
-
-    const probeBaseUrl = runtime.probeBaseUrls[target.region];
-
-    if (!probeBaseUrl) {
-      markTargetFailed(target, 'missing_probe_region', `No probe base URL is configured for ${target.region}`);
-      recomputeJob(job);
-      continue;
-    }
-
-    try {
-      const payload = signedProbeMeasurementRequestSchema.parse({
-        jobId: job.id,
-        targetId: `${job.id}:${target.region}`,
-        region: target.region,
-        url: job.url,
-        request: job.request,
-        timestamp: new Date().toISOString(),
-        signature: 'placeholder-signature',
-        keyVersion: 'current'
-      });
-      payload.signature = await createProbeSignature(runtime.probeSharedSecret, payload);
-
-      const response = await fetch(new URL('/measure', probeBaseUrl).toString(), {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify(payload satisfies SignedProbeMeasurementRequest)
-      });
-
-      if (!response.ok) {
-        markTargetFailed(target, `probe_http_${response.status}`, `Probe call failed with ${response.status}`);
-        recomputeJob(job);
-        continue;
-      }
-
-      const parsed = probeMeasurementResponseSchema.safeParse(
-        (await response.json()) as ProbeMeasurementResponse
-      );
-
-      if (!parsed.success) {
-        markTargetFailed(target, 'probe_invalid_payload', 'Probe returned an invalid payload');
-        recomputeJob(job);
-        continue;
-      }
-
-      target.status = parsed.data.measurement.success ? 'succeeded' : 'failed';
-      target.latencyMs = parsed.data.measurement.latencyMs;
-      target.statusCode = parsed.data.measurement.statusCode;
-      target.success = evaluateTargetSuccess(parsed.data.measurement);
-      target.status = target.success ? 'succeeded' : 'failed';
-      target.probeImpl = parsed.data.measurement.probeImpl;
-      target.measurement = parsed.data.measurement;
-      target.errorCode = parsed.data.measurement.error
-        ? 'probe_measurement_failed'
-        : target.success
-          ? null
-          : 'status_rule_failed';
-      target.errorClass = parsed.data.measurement.error || !target.success ? 'terminal' : null;
-      target.errorMessage = parsed.data.measurement.error
-        ?? (target.success ? null : buildStatusFailureMessage(parsed.data.measurement.statusCode));
-      target.finishedAt = parsed.data.measurement.measuredAt;
-      target.updatedAt = new Date().toISOString();
-      recomputeJob(job);
-    } catch (error) {
-      markTargetFailed(
-        target,
-        'probe_runtime_error',
-        error instanceof Error ? error.message : 'Unknown probe error'
-      );
-      recomputeJob(job);
-    }
-  }
-
-  finalizeJob(job);
-}
-
-async function processCheckProfileRun(
-  profile: CheckProfile,
-  run: CheckProfileRun,
-  createdJobs: CreatedProfileJob[]
-) {
-  await Promise.all(createdJobs.map((item) => processJob(item.job.id)));
-
-  const refreshedRun = repository.getCheckProfileRun(run.id) ?? run;
-  const comparison = resolveComparisonForRun(profile, refreshedRun);
-  const jobs = getJobsForRun(refreshedRun);
-  const evaluation = evaluateMonitorTargets({
-    monitorPolicy: profile.monitorPolicy,
-    targets: jobs.flatMap((job) => job.targets),
-    regressedCount: comparison?.summary.regressed ?? 0
-  });
-  const nextRun: CheckProfileRun = {
-    ...refreshedRun,
-    evaluation,
-    alertDeliveries: await dispatchProfileAlerts({
-      profile,
-      run: refreshedRun,
-      jobs,
-      evaluation,
-      comparison
-    })
-  };
-
-  repository.saveCheckProfileRun(nextRun);
-}
-
-function markTargetFailed(target: MutableTarget, errorCode: string, errorMessage: string) {
-  target.status = 'failed';
-  target.latencyMs = null;
-  target.statusCode = null;
-  target.success = false;
-  target.probeImpl = null;
-  target.measurement = null;
-  target.slotId = null;
-  target.errorCode = errorCode;
-  target.errorClass = 'terminal';
-  target.errorMessage = errorMessage;
-  target.finishedAt = new Date().toISOString();
-  target.updatedAt = new Date().toISOString();
-}
-
-function finalizeJob(job: MutableJob) {
-  recomputeJob(job);
-  if (job.summary.inflight === 0) {
-    job.completedAt = new Date().toISOString();
-  }
-  repository.saveJob(job);
-}
-
-function recomputeJob(job: MutableJob) {
-  job.summary = summarizeTargets(job.targets);
-  job.status = deriveJobStatus(job.targets);
-  job.evaluation = evaluateMonitorTargets({
-    monitorPolicy: job.monitorPolicy,
-    targets: job.targets
-  });
-  repository.saveJob(job);
-}
-
 function createJobRecord({
   url,
   regions: requestedRegions,
@@ -3060,9 +2897,46 @@ function createJobRecord({
   };
 
   repository.pruneJobsOlderThan(runtime.retentionDays);
-  repository.saveJob(job);
 
   return job;
+}
+
+function createNetworkExecutionResource(
+  jobs: LatencyJobDetail[],
+  run: CheckProfileRun | null,
+  checkId: string | null
+) {
+  const firstJob = jobs[0];
+
+  if (!firstJob) {
+    throw new Error('Network execution requires at least one job');
+  }
+
+  const resourceId = run?.id ?? firstJob.id;
+  const maxAttempts = Math.max(...jobs.flatMap((job) =>
+    job.targets.map((target) => target.maxAttempts)
+  ));
+  const payload = networkProbeExecutionPayloadSchema.parse({
+    version: 'v1',
+    jobIds: jobs.map((job) => job.id),
+    checkId,
+    runId: run?.id ?? null
+  });
+
+  return repository.createExecutionResource({
+    executionJob: {
+      id: `exec_${resourceId}`,
+      kind: 'network_probe',
+      resourceId,
+      maxAttempts,
+      payload
+    },
+    result: {
+      kind: 'network_probe',
+      jobs,
+      run
+    }
+  });
 }
 
 function createJobsForProfile(profile: CheckProfile, requesterIp: string | null): CreatedProfileJob[] {
@@ -3116,7 +2990,6 @@ function createCheckProfileRunRecord(
     }))
   };
 
-  repository.saveCheckProfileRun(run);
   return run;
 }
 
@@ -3176,26 +3049,6 @@ function findPreviousRun(profileId: string, runId: string) {
   }
 
   return runs[runIndex + 1] ?? null;
-}
-
-function evaluateTargetSuccess(measurement: ProbeMeasurementResponse['measurement']) {
-  if (measurement.error) {
-    return false;
-  }
-
-  if (measurement.statusCode == null) {
-    return false;
-  }
-
-  return measurement.statusCode >= 200 && measurement.statusCode < 400;
-}
-
-function buildStatusFailureMessage(statusCode: number | null | undefined) {
-  if (statusCode == null) {
-    return null;
-  }
-
-  return `Status ${statusCode} did not satisfy status_2xx_3xx`;
 }
 
 function normalizeCustomRequestConfig(
@@ -3277,111 +3130,6 @@ function normalizeAlertConfig(
       onRegression: alerts?.triggers?.onRegression ?? existing?.triggers?.onRegression ?? false
     }
   } satisfies NonNullable<CheckProfile['alerts']>;
-}
-
-async function dispatchProfileAlerts({
-  profile,
-  run,
-  jobs,
-  evaluation,
-  comparison
-}: {
-  profile: CheckProfile;
-  run: CheckProfileRun;
-  jobs: LatencyJobDetail[];
-  evaluation: CheckProfileRun['evaluation'];
-  comparison: CheckProfileComparisonResponse | null;
-}): Promise<CheckProfileAlertDelivery[]> {
-  if (!profile.alerts?.enabled || (profile.alerts.webhookTargets?.length ?? 0) === 0 || !evaluation) {
-    return [];
-  }
-
-  const shouldAlert =
-    (profile.alerts.triggers.onFailure && evaluation.failedChecks > 0) ||
-    (profile.alerts.triggers.onLatencyThresholdBreach && evaluation.thresholdBreached) ||
-    (profile.alerts.triggers.onRegression && evaluation.regressionDetected);
-
-  if (!shouldAlert) {
-    return [];
-  }
-
-  const payload = {
-    type: 'check_profile.alert',
-    profile: {
-      id: profile.id,
-      name: profile.name
-    },
-    run: {
-      id: run.id,
-      createdAt: run.createdAt,
-      trigger: run.trigger
-    },
-    evaluation,
-    jobs: jobs.map((job) => ({
-      id: job.id,
-      url: job.url,
-      status: job.status,
-      evaluation: job.evaluation ?? null,
-      summary: job.summary
-    })),
-    comparison: comparison
-      ? {
-          mode: comparison.mode,
-          summary: comparison.summary
-        }
-      : null
-  };
-
-  return Promise.all(
-    profile.alerts.webhookTargets
-      .filter((target) => target.enabled)
-      .map(async (target) => {
-        const deliveredAt = new Date().toISOString();
-
-        try {
-          const response = await fetch(target.url, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              ...(target.secret ? { 'x-webperf-signature': target.secret } : {})
-            },
-            body: JSON.stringify(payload)
-          });
-
-          if (!response.ok) {
-            return {
-              targetId: target.id,
-              targetName: target.name,
-              url: target.url,
-              deliveredAt,
-              status: 'failed',
-              responseStatus: response.status,
-              error: `Webhook responded with ${response.status}`
-            } satisfies CheckProfileAlertDelivery;
-          }
-
-          return {
-            targetId: target.id,
-            targetName: target.name,
-            url: target.url,
-            deliveredAt,
-            status: 'sent',
-            responseStatus: response.status,
-            error: null
-          } satisfies CheckProfileAlertDelivery;
-        } catch (error) {
-          return {
-            targetId: target.id,
-            targetName: target.name,
-            url: target.url,
-            deliveredAt,
-            status: 'failed',
-            responseStatus: null,
-            error: error instanceof Error ? error.message : 'Webhook delivery failed'
-          } satisfies CheckProfileAlertDelivery;
-        }
-      })
-  );
 }
 
 function safeLatestComparison(profile: CheckProfile, currentRun: CheckProfileRun) {

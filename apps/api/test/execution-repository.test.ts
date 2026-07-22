@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import type { CheckProfileRun } from '@webperf/contracts';
+import type { CheckProfileRun, LatencyJobDetail } from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,53 @@ const createRun = (alertDeliveries: CheckProfileRun['alertDeliveries'] = []): Ch
   alertDeliveries
 });
 
+const createLatencyJob = (id: string): LatencyJobDetail => ({
+  id,
+  url: 'https://example.com/',
+  status: 'queued',
+  note: null,
+  request: { method: 'GET', headers: [], body: null },
+  monitorPolicy: {
+    monitorType: 'latency',
+    successRule: 'status_2xx_3xx',
+    latencyThresholdMs: 500
+  },
+  requestedAt: '2026-07-22T00:00:00.000Z',
+  startedAt: null,
+  completedAt: null,
+  requesterIp: null,
+  selectedRegions: ['tokyo'],
+  targets: [{
+    jobId: id,
+    region: 'tokyo',
+    status: 'queued',
+    attemptNo: 0,
+    maxAttempts: 3,
+    latencyMs: null,
+    statusCode: null,
+    success: null,
+    probeImpl: null,
+    measurement: null,
+    execution: {
+      runnerType: 'network_probe',
+      provider: 'selfhost',
+      locationMode: 'best_effort',
+      region: 'tokyo',
+      city: null,
+      runnerVersion: 'probe-rs'
+    },
+    slotId: null,
+    errorCode: null,
+    errorClass: null,
+    errorMessage: null,
+    startedAt: null,
+    finishedAt: null,
+    updatedAt: '2026-07-22T00:00:00.000Z'
+  }],
+  evaluation: null,
+  summary: { total: 1, succeeded: 0, failed: 0, inflight: 1 }
+});
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     const directory = tempDirs.pop();
@@ -47,6 +94,44 @@ afterEach(() => {
 });
 
 describe('durable execution repository', () => {
+  test('creates the domain resource and queue row in one transaction', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    const job = createLatencyJob('job_atomic_create');
+
+    const execution = repository.createExecutionResource({
+      executionJob: {
+        id: 'exec_atomic_create',
+        kind: 'network_probe',
+        resourceId: job.id,
+        maxAttempts: 3,
+        payload: { jobIds: [job.id] }
+      },
+      result: { kind: 'network_probe', jobs: [job], run: null }
+    });
+
+    expect(execution.status).toBe('queued');
+    expect(repository.getJob(job.id)?.id).toBe(job.id);
+
+    expect(() => repository.createExecutionResource({
+      executionJob: {
+        id: 'exec_atomic_create',
+        kind: 'network_probe',
+        resourceId: 'job_conflicting_resource',
+        maxAttempts: 3,
+        payload: { jobIds: ['job_rolled_back'] }
+      },
+      result: {
+        kind: 'network_probe',
+        jobs: [createLatencyJob('job_rolled_back')],
+        run: null
+      }
+    })).toThrow('Execution job id already belongs to a different resource');
+    expect(repository.getJob('job_rolled_back')).toBeNull();
+
+    repository.close();
+  });
+
   test('encrypts queue payloads and atomically owns a lease through completion', () => {
     const databasePath = createTempDatabasePath();
     const first = createRepository(databasePath);

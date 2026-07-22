@@ -7,6 +7,10 @@ import { appContract, opsContract, publicContract } from '@webperf/contracts';
 import { controlContract } from '@webperf/contracts/control-contract';
 import type { CheckProfileReportResponse } from '@webperf/contracts';
 import { createBrowserAuditSignature } from '@webperf/domain-core';
+import { createExecutorApiClient } from '../../executor/src/client';
+import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
+import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
+import { createWebhookExecutionHandler } from '../../executor/src/webhook-handler';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -326,6 +330,7 @@ describe('api service monitoring expansion', () => {
         }
       );
       expect(dispatchResponse.ok).toBe(true);
+      await drainExecutions(harness.baseUrl, probe.port);
 
       const thresholdReport = await waitForReport(
         harness.baseUrl,
@@ -374,6 +379,7 @@ describe('api service monitoring expansion', () => {
         body: '{}'
       });
       expect(runResponse.ok).toBe(true);
+      await drainExecutions(harness.baseUrl, probe.port);
 
       const uptimeReport = await waitForReport(
         harness.baseUrl,
@@ -511,6 +517,7 @@ describe('api service monitoring expansion', () => {
       expect(filteredChecksPayload.checks[0]?.name).toBe('Profile uptime');
 
       await runCheckProfile(harness.baseUrl, thresholdProfile.id);
+      await drainExecutions(harness.baseUrl, probe.port);
       const runs = await waitForRuns(harness.baseUrl, thresholdProfile.id, 2);
       const latestRun = runs[0]!;
       const previousRun = runs[1]!;
@@ -1161,6 +1168,59 @@ const waitForHealth = async (baseUrl: string) => {
   }
 
   throw new Error(`Timed out waiting for ${baseUrl}/health`);
+};
+
+const drainExecutions = async (baseUrl: string, probePort: number) => {
+  const leaseOwner = `executor-http-${crypto.randomUUID()}`;
+  const client = createExecutorApiClient({
+    baseUrl,
+    internalSecret: testInternalSecret
+  });
+  const networkHandler = createNetworkExecutionHandler({
+    client,
+    leaseOwner,
+    probeSharedSecret: testProbeSecret,
+    probeBaseUrls: { tokyo: `http://127.0.0.1:${probePort}` }
+  });
+  const webhookHandler = createWebhookExecutionHandler({
+    client,
+    leaseOwner,
+    validateUrl: () => {}
+  });
+  const logger: ExecutorLogger = {
+    info: () => {},
+    error: () => {}
+  };
+
+  while (true) {
+    const executionJob = await client.claim({ leaseOwner, leaseDurationMs: 60_000 });
+
+    if (!executionJob) {
+      return;
+    }
+
+    await processExecutionJob({
+      client,
+      handler: async (job, signal) => {
+        if (job.kind === 'network_probe') {
+          await networkHandler(job, signal);
+          return;
+        }
+
+        if (job.kind === 'webhook_delivery') {
+          await webhookHandler(job, signal);
+          return;
+        }
+
+        throw new Error('Unexpected execution kind in network test drain');
+      },
+      executionJob,
+      lease: { leaseOwner, leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 20_000,
+      maxExecutionMs: 60_000,
+      logger
+    });
+  }
 };
 
 const waitForReport = async (

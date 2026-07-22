@@ -13,7 +13,7 @@ import type { Browser, Page } from 'puppeteer-core';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
 import {
-  redactBrowserAuditBytes,
+  redactBrowserAuditBytesInPlace,
   redactBrowserAuditText,
   redactBrowserAuditUrl
 } from './redaction';
@@ -206,7 +206,7 @@ export const runBrowserAudit = async ({
           'trace',
           'trace.json',
           'application/json',
-          redactBrowserAuditBytes(traceBuffer, input)
+          redactBrowserAuditBytesInPlace(traceBuffer, input)
         ))
       );
     }

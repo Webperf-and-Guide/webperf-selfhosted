@@ -58,10 +58,6 @@ if (!publicDoc.components?.securitySchemes.selfhostAdminToken) {
   throw new Error('public OpenAPI document is missing the self-host admin bearer scheme');
 }
 
-if (publicDoc.paths['/v1/capabilities']?.get?.security) {
-  throw new Error('public capabilities must remain unauthenticated in OpenAPI');
-}
-
 for (const [path, methods] of Object.entries(publicDoc.paths)) {
   for (const operation of Object.values(methods)) {
     const shouldBePublic = path === '/v1/capabilities';

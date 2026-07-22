@@ -1,18 +1,28 @@
 import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
 
 const redactedValue = '[REDACTED]';
+const ascii = {
+  at: '@'.charCodeAt(0),
+  fragment: '#'.charCodeAt(0),
+  path: '/'.charCodeAt(0),
+  query: '?'.charCodeAt(0)
+} as const;
+// Keep this byte set aligned with the URL matcher in redactBrowserAuditText.
+const urlDelimiters = new Set(Buffer.from(`\t\r\n "'<>`, 'ascii'));
 
 export const redactBrowserAuditText = (value: string, input: BrowserAuditWorkerRequest) => {
   const redacted = redactKnownValues(value, input);
 
-  return redacted.replace(/https?:\/\/[^\s"'<>]+/gi, (candidate) => redactBrowserAuditUrl(candidate, input));
+  return redacted.replace(/https?:\/\/[^\s"'<>]+/gi, redactUrlComponents);
 };
 
 export const redactBrowserAuditUrl = (value: string, input: BrowserAuditWorkerRequest) => {
-  const redacted = redactKnownValues(value, input);
+  return redactUrlComponents(redactKnownValues(value, input));
+};
 
+const redactUrlComponents = (value: string) => {
   try {
-    const url = new URL(redacted);
+    const url = new URL(value);
     url.username = '';
     url.password = '';
     if (url.search.length > 0) {
@@ -21,11 +31,16 @@ export const redactBrowserAuditUrl = (value: string, input: BrowserAuditWorkerRe
     url.hash = '';
     return url.toString();
   } catch {
-    return redacted;
+    return value;
   }
 };
 
-export const redactBrowserAuditBytes = (payload: Uint8Array, input: BrowserAuditWorkerRequest) => {
+export const redactBrowserAuditBytesInPlace = (
+  payload: Uint8Array,
+  input: BrowserAuditWorkerRequest
+) => {
+  // This Buffer must remain an alias of payload so a large trace can be
+  // redacted without allocating another full-size artifact.
   const bytes = Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
 
   for (const sensitiveValue of getSensitiveValues(input)) {
@@ -80,7 +95,11 @@ const redactUrlSectionsInPlace = (bytes: Buffer) => {
 
     let authorityEnd = urlEnd;
     for (let cursor = authorityStart; cursor < urlEnd; cursor += 1) {
-      if (bytes[cursor] === 47 || bytes[cursor] === 63 || bytes[cursor] === 35) {
+      if (
+        bytes[cursor] === ascii.path
+        || bytes[cursor] === ascii.query
+        || bytes[cursor] === ascii.fragment
+      ) {
         authorityEnd = cursor;
         break;
       }
@@ -88,7 +107,7 @@ const redactUrlSectionsInPlace = (bytes: Buffer) => {
 
     let atIndex = -1;
     for (let cursor = authorityStart; cursor < authorityEnd; cursor += 1) {
-      if (bytes[cursor] === 64) {
+      if (bytes[cursor] === ascii.at) {
         atIndex = cursor;
       }
     }
@@ -100,11 +119,11 @@ const redactUrlSectionsInPlace = (bytes: Buffer) => {
     let queryStart = -1;
     let fragmentStart = -1;
     for (let cursor = authorityEnd; cursor < urlEnd; cursor += 1) {
-      if (bytes[cursor] === 35) {
+      if (bytes[cursor] === ascii.fragment) {
         fragmentStart = cursor;
         break;
       }
-      if (bytes[cursor] === 63 && queryStart < 0) {
+      if (bytes[cursor] === ascii.query && queryStart < 0) {
         queryStart = cursor;
       }
     }
@@ -118,6 +137,7 @@ const redactUrlSectionsInPlace = (bytes: Buffer) => {
       bytes.fill('*', fragmentStart + 1, urlEnd);
     }
 
+    // The loop increment advances once more, to the first byte after this URL.
     index = urlEnd;
   }
 };
@@ -142,5 +162,4 @@ const startsWithAscii = (bytes: Buffer, index: number, value: string) => {
   return true;
 };
 
-const isUrlDelimiter = (value: number) =>
-  value === 9 || value === 10 || value === 13 || value === 32 || value === 34 || value === 39 || value === 60 || value === 62;
+const isUrlDelimiter = (value: number) => urlDelimiters.has(value);

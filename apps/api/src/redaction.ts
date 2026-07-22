@@ -111,13 +111,7 @@ export const redactJsonResponse = async (response: Response) => {
   }
 
   try {
-    const headers = new Headers(response.headers);
-    headers.delete('content-length');
-    return new Response(JSON.stringify(redactSensitiveData(JSON.parse(body))), {
-      status: response.status,
-      statusText: response.statusText,
-      headers
-    });
+    return rebuildResponse(JSON.stringify(redactSensitiveData(JSON.parse(body))), response);
   } catch {
     return rebuildResponse(body, response);
   }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
 import {
-  redactBrowserAuditBytes,
+  redactBrowserAuditBytesInPlace,
   redactBrowserAuditText,
   redactBrowserAuditUrl
 } from './redaction';
@@ -38,7 +38,7 @@ describe('browser audit redaction', () => {
     const bytes = new TextEncoder().encode(
       '{"url":"HTTPS://user:pass@example.com/path?token=secret#private-fragment","header":"Bearer private-token"}'
     );
-    const redactedBytes = redactBrowserAuditBytes(bytes, input);
+    const redactedBytes = redactBrowserAuditBytesInPlace(bytes, input);
     const text = new TextDecoder().decode(redactedBytes);
     expect(redactedBytes).toBe(bytes);
     expect(text).not.toContain('user:pass');

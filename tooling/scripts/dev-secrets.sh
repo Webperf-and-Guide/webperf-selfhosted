@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 random_secret() {
   bun -e 'console.log(crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", ""))'

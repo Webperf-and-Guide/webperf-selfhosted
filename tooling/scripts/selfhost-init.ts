@@ -16,6 +16,10 @@ if (existsSync(outputPath)) {
   throw new Error(`Refusing to overwrite existing configuration: ${outputPath}`);
 }
 
+if (!existsSync(examplePath)) {
+  throw new Error(`Required self-host environment template not found: ${examplePath}`);
+}
+
 const secretKeys = [
   'SELFHOST_ADMIN_TOKEN',
   'SELFHOST_INTERNAL_SECRET',
@@ -24,10 +28,6 @@ const secretKeys = [
 ];
 const nextSecretKeys = secretKeys.map((key) => `${key}_NEXT`);
 const generated = new Map(secretKeys.map((key) => [key, randomBytes(32).toString('base64url')]));
-
-if (!existsSync(examplePath)) {
-  throw new Error(`Required self-host environment template not found: ${examplePath}`);
-}
 
 const content = readFileSync(examplePath, 'utf8')
   .split('\n')

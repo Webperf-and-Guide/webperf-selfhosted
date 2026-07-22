@@ -1602,7 +1602,16 @@ async function handleExecutionResourceOperation(
       );
     }
 
-    persistExecutionResourceResult(executionJob, body.data.result);
+    const persisted = persistExecutionResourceResult(
+      executionJob,
+      body.data.leaseOwner,
+      body.data.result
+    );
+
+    if (!persisted) {
+      return executionLeaseConflict();
+    }
+
     return new Response(null, {
       status: 204,
       headers: { 'cache-control': 'no-store' }
@@ -1646,7 +1655,16 @@ async function handleExecutionResourceOperation(
     );
   }
 
-  const followups = repository.enqueueExecutionJobs(body.data.jobs);
+  const followups = repository.enqueueExecutionJobs({
+    executionJobId: executionJob.id,
+    leaseOwner: body.data.leaseOwner,
+    jobs: body.data.jobs
+  });
+
+  if (!followups) {
+    return executionLeaseConflict();
+  }
+
   return json(
     executionFollowupsResponseSchema.parse({ jobs: followups }),
     { status: 201, headers: { 'cache-control': 'no-store' } }
@@ -1695,16 +1713,18 @@ function buildExecutionResourceContext(
     }
 
     const baselineRun = check && run ? resolveBaselineRun(check) : null;
-    const comparedRun = check && run
-      ? baselineRun && baselineRun.id !== run.id
-        ? baselineRun
-        : findPreviousRun(check.id, run.id)
-      : null;
-    const comparisonMode = comparedRun
-      ? baselineRun?.id === comparedRun.id
-        ? 'baseline' as const
-        : 'latest_previous' as const
-      : null;
+    let comparedRun: CheckProfileRun | null = null;
+    let comparisonMode: 'baseline' | 'latest_previous' | null = null;
+
+    if (check && run) {
+      if (baselineRun && baselineRun.id !== run.id) {
+        comparedRun = baselineRun;
+        comparisonMode = 'baseline';
+      } else {
+        comparedRun = findPreviousRun(check.id, run.id);
+        comparisonMode = comparedRun ? 'latest_previous' : null;
+      }
+    }
 
     return executionResourceContextSchema.parse({
       kind: 'network_probe',
@@ -1752,6 +1772,7 @@ function buildExecutionResourceContext(
 
 function persistExecutionResourceResult(
   executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  leaseOwner: string,
   result: ExecutionResourceResult
 ) {
   if (result.kind === 'network_probe') {
@@ -1767,8 +1788,11 @@ function persistExecutionResourceResult(
       throw new Error('Network execution result does not match its payload');
     }
 
-    repository.saveExecutionResourceResult(result);
-    return;
+    return repository.saveExecutionResourceResult({
+      executionJobId: executionJob.id,
+      leaseOwner,
+      result
+    });
   }
 
   if (result.kind === 'browser_audit') {
@@ -1778,8 +1802,11 @@ function persistExecutionResourceResult(
       throw new Error('Browser audit result does not match its payload');
     }
 
-    repository.saveExecutionResourceResult(result);
-    return;
+    return repository.saveExecutionResourceResult({
+      executionJobId: executionJob.id,
+      leaseOwner,
+      result
+    });
   }
 
   const payload = webhookDeliveryExecutionPayloadSchema.parse(executionJob.payload);
@@ -1788,7 +1815,11 @@ function persistExecutionResourceResult(
     throw new Error('Webhook result does not match its payload');
   }
 
-  repository.saveExecutionResourceResult(result);
+  return repository.saveExecutionResourceResult({
+    executionJobId: executionJob.id,
+    leaseOwner,
+    result
+  });
 }
 
 const executionLeaseConflict = () =>

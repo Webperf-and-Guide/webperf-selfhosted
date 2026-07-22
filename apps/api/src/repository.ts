@@ -82,9 +82,17 @@ export type JobRepository = {
   getBrowserAudit(id: string): BrowserAuditResource | null;
   listBrowserAudits(): BrowserAuditResource[];
   saveBrowserAudit(browserAudit: BrowserAuditResource): void;
-  saveExecutionResourceResult(result: ExecutionResourceResult): void;
+  saveExecutionResourceResult(input: {
+    executionJobId: string;
+    leaseOwner: string;
+    result: ExecutionResourceResult;
+  }, now?: Date): boolean;
   enqueueExecutionJob(input: EnqueueExecutionJob, now?: Date): ExecutionJob;
-  enqueueExecutionJobs(inputs: EnqueueExecutionJob[], now?: Date): ExecutionJob[];
+  enqueueExecutionJobs(input: {
+    executionJobId: string;
+    leaseOwner: string;
+    jobs: EnqueueExecutionJob[];
+  }, now?: Date): ExecutionJob[] | null;
   getExecutionJob(id: string): ExecutionJob | null;
   listExecutionJobs(): ExecutionJob[];
   claimExecutionJob(input: ExecutionJobLeaseInput, now?: Date): ExecutionJob | null;
@@ -696,6 +704,22 @@ export const createSqliteJobRepository = ({
     return executionJob;
   };
 
+  const ownsRunningExecutionLease = (
+    executionJobId: string,
+    leaseOwner: string,
+    nowIso: string
+  ) => {
+    const row = getExecutionJobStatement.get(executionJobId);
+    const executionJob = row ? parseExecutionJob(row) : null;
+    return Boolean(
+      executionJob
+      && executionJob.status === 'running'
+      && executionJob.leaseOwner === leaseOwner
+      && executionJob.leaseExpiresAt
+      && executionJob.leaseExpiresAt > nowIso
+    );
+  };
+
   return {
     getJob(id) {
       const row = getStatement.get(id);
@@ -842,33 +866,47 @@ export const createSqliteJobRepository = ({
     saveBrowserAudit(browserAudit) {
       persistBrowserAudit(browserAudit);
     },
-    saveExecutionResourceResult(result) {
+    saveExecutionResourceResult(input, now = new Date()) {
       const save = db.transaction(() => {
-        if (result.kind === 'network_probe') {
-          for (const job of result.jobs) {
-            persistJob(job);
-          }
-
-          if (result.run) {
-            persistCheckProfileRun(result.run);
-          }
-          return;
+        if (!ownsRunningExecutionLease(input.executionJobId, input.leaseOwner, now.toISOString())) {
+          return false;
         }
 
-        if (result.kind === 'browser_audit') {
-          persistBrowserAudit(result.audit);
-          return;
+        switch (input.result.kind) {
+          case 'network_probe':
+            for (const job of input.result.jobs) {
+              persistJob(job);
+            }
+
+            if (input.result.run) {
+              persistCheckProfileRun(input.result.run);
+            }
+            break;
+          case 'browser_audit':
+            persistBrowserAudit(input.result.audit);
+            break;
+          case 'webhook_delivery':
+            persistCheckProfileRun(input.result.run);
+            break;
+          default:
+            assertNever(input.result);
         }
 
-        persistCheckProfileRun(result.run);
+        return true;
       });
-      save();
+      return save();
     },
     enqueueExecutionJob(input, now = new Date()) {
       return enqueueExecution(input, now);
     },
-    enqueueExecutionJobs(inputs, now = new Date()) {
-      const enqueue = db.transaction(() => inputs.map((input) => enqueueExecution(input, now)));
+    enqueueExecutionJobs(input, now = new Date()) {
+      const enqueue = db.transaction(() => {
+        if (!ownsRunningExecutionLease(input.executionJobId, input.leaseOwner, now.toISOString())) {
+          return null;
+        }
+
+        return input.jobs.map((job) => enqueueExecution(job, now));
+      });
       return enqueue();
     },
     getExecutionJob(id) {
@@ -1024,6 +1062,11 @@ export const createSqliteJobRepository = ({
       db.close();
     }
   };
+};
+
+const assertNever = (value: never): never => {
+  void value;
+  throw new Error('Unsupported execution resource result kind');
 };
 
 const assertLeaseOwner = (leaseOwner: string) => {

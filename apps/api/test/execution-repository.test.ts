@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import type { CheckProfileRun } from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,24 @@ const createTempDatabasePath = () => {
 
 const createRepository = (databasePath: string) =>
   createSqliteJobRepository({ databasePath, encryptionSecret });
+
+const createRun = (alertDeliveries: CheckProfileRun['alertDeliveries'] = []): CheckProfileRun => ({
+  id: 'run_lease_result',
+  profileId: 'check_lease_result',
+  trigger: 'manual',
+  createdAt: '2026-07-22T00:00:00.000Z',
+  routeCount: 1,
+  routes: [{
+    routeId: 'route_lease_result',
+    routeLabel: 'Home',
+    url: 'https://example.com/',
+    jobId: 'job_lease_result',
+    browserAudit: null
+  }],
+  browserAuditSummary: null,
+  evaluation: null,
+  alertDeliveries
+});
 
 afterEach(() => {
   while (tempDirs.length > 0) {
@@ -260,6 +279,82 @@ describe('durable execution repository', () => {
         payload: { auditId: 'audit_2' }
       })
     ).toThrow('Execution job id already belongs to a different resource');
+
+    repository.close();
+  });
+
+  test('rechecks lease ownership inside result and follow-up transactions', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    const queuedAt = new Date('2026-07-22T00:00:00.000Z');
+    repository.saveCheckProfileRun(createRun());
+    repository.enqueueExecutionJob({
+      id: 'exec_lease_result',
+      kind: 'webhook_delivery',
+      resourceId: 'run_lease_result',
+      maxAttempts: 3,
+      payload: { runId: 'run_lease_result' }
+    }, queuedAt);
+    repository.claimExecutionJob(
+      { leaseOwner: 'executor-a', leaseDurationMs: 1_000 },
+      queuedAt
+    );
+    repository.markExecutionJobRunning(
+      {
+        id: 'exec_lease_result',
+        leaseOwner: 'executor-a',
+        leaseDurationMs: 1_000
+      },
+      queuedAt
+    );
+
+    const deliveredRun = createRun([{
+      targetId: 'webhook_lease_result',
+      targetName: 'Lease result hook',
+      url: 'https://hooks.example.com/',
+      deliveredAt: '2026-07-22T00:00:02.000Z',
+      status: 'sent',
+      responseStatus: 204,
+      error: null
+    }]);
+    expect(repository.saveExecutionResourceResult({
+      executionJobId: 'exec_lease_result',
+      leaseOwner: 'executor-a',
+      result: { kind: 'webhook_delivery', run: deliveredRun }
+    }, new Date('2026-07-22T00:00:02.000Z'))).toBe(false);
+    expect(repository.getCheckProfileRun('run_lease_result')?.alertDeliveries).toEqual([]);
+
+    repository.claimExecutionJob(
+      { leaseOwner: 'executor-b', leaseDurationMs: 10_000 },
+      new Date('2026-07-22T00:00:02.000Z')
+    );
+    repository.markExecutionJobRunning(
+      {
+        id: 'exec_lease_result',
+        leaseOwner: 'executor-b',
+        leaseDurationMs: 10_000
+      },
+      new Date('2026-07-22T00:00:02.000Z')
+    );
+    expect(repository.saveExecutionResourceResult({
+      executionJobId: 'exec_lease_result',
+      leaseOwner: 'executor-b',
+      result: { kind: 'webhook_delivery', run: deliveredRun }
+    }, new Date('2026-07-22T00:00:03.000Z'))).toBe(true);
+    expect(repository.getCheckProfileRun('run_lease_result')?.alertDeliveries).toHaveLength(1);
+
+    expect(repository.enqueueExecutionJobs({
+      executionJobId: 'exec_lease_result',
+      leaseOwner: 'executor-a',
+      jobs: [{
+        id: 'exec_stale_followup',
+        kind: 'webhook_delivery',
+        resourceId: 'run_lease_result',
+        maxAttempts: 3,
+        payload: { runId: 'run_lease_result' }
+      }]
+    }, new Date('2026-07-22T00:00:03.000Z'))).toBeNull();
+    expect(repository.getExecutionJob('exec_stale_followup')).toBeNull();
 
     repository.close();
   });

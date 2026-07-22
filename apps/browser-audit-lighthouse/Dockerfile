@@ -1,6 +1,6 @@
 FROM oven/bun:1.3.13-slim
 
-ARG CHROME_VERSION=stable
+ARG CHROME_VERSION
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -52,7 +52,9 @@ RUN bun install --frozen-lockfile --no-save --filter=webperf-browser-audit-light
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox && rm -rf /var/lib/apt/lists/*; \
   else \
-    bun x @puppeteer/browsers install chrome@${CHROME_VERSION} --path /opt/chrome; \
+    resolved_chrome_version="${CHROME_VERSION:-$(bun -e 'import { PUPPETEER_REVISIONS } from "puppeteer-core"; process.stdout.write(PUPPETEER_REVISIONS.chrome)')}" \
+    && test -n "$resolved_chrome_version" \
+    && bun x @puppeteer/browsers install "chrome@${resolved_chrome_version}" --path /opt/chrome; \
   fi
 RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox \) -print -quit 2>/dev/null)" \
   && test -n "$sandbox_path" \

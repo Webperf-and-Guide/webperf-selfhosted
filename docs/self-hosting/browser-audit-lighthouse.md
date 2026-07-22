@@ -17,9 +17,10 @@ What it does not include:
 
 Current tested quartet:
 
-- Bun: `1.3.11`
-- amd64 browser: `Google Chrome 147.0.7727.56 (Chrome for Testing)`
-- arm64 browser: `Chromium 147.0.7727.55 (Debian package)`
+- Bun: `1.3.13`
+- amd64 browser: the Chrome for Testing revision declared by the locked
+  `puppeteer-core` package (`146.0.7680.153` for `24.40.0`)
+- arm64 browser: the Debian Chromium package for the image base
 - Puppeteer: `24.40.0`
 - Lighthouse: `13.1.0`
 

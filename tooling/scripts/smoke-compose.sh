@@ -120,6 +120,11 @@ if [[ "$profile" == "browser-audit" ]]; then
     sleep 2
   done
   if [[ "$browser_health" != "healthy" ]]; then
+    docker exec "$browser_container_id" bun -e '
+      const response = await fetch("http://127.0.0.1:8080/healthz");
+      const body = await response.text();
+      console.error(body.slice(0, 4096));
+    ' >&2 || true
     compose "${profile_args[@]}" logs --no-color browser-audit-lighthouse >&2
     echo "Browser Audit runner did not become healthy (status: ${browser_health:-unknown})" >&2
     exit 1

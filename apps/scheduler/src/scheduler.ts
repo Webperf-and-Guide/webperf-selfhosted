@@ -18,6 +18,23 @@ export type SchedulerDispatchResult = {
   createdJobCount: number;
 };
 
+export const defaultSchedulerRequestTimeoutMs = 30_000;
+
+const buildDispatchErrorMessage = (
+  code: 'request_failed' | 'response_invalid',
+  status: number | null
+) => {
+  if (code === 'response_invalid') {
+    return 'Scheduler dispatch response was invalid';
+  }
+
+  if (status == null) {
+    return 'Scheduler dispatch request failed';
+  }
+
+  return `Scheduler dispatch request failed with HTTP ${status}`;
+};
+
 export class SchedulerDispatchError extends Error {
   override readonly name = 'SchedulerDispatchError';
 
@@ -25,13 +42,7 @@ export class SchedulerDispatchError extends Error {
     readonly code: 'request_failed' | 'response_invalid',
     readonly status: number | null
   ) {
-    super(
-      code === 'response_invalid'
-        ? 'Scheduler dispatch response was invalid'
-        : status == null
-          ? 'Scheduler dispatch request failed'
-          : `Scheduler dispatch request failed with HTTP ${status}`
-    );
+    super(buildDispatchErrorMessage(code, status));
   }
 }
 
@@ -39,17 +50,27 @@ export const dispatchScheduledChecks = async ({
   apiBaseUrl,
   internalSecret,
   signal,
+  requestTimeoutMs = defaultSchedulerRequestTimeoutMs,
   fetchImpl = globalThis.fetch
 }: {
   apiBaseUrl: string;
   internalSecret: string;
   signal?: AbortSignal;
+  requestTimeoutMs?: number;
   fetchImpl?: SchedulerFetch;
 }): Promise<SchedulerDispatchResult> => {
   const normalizedInternalSecret = internalSecret.trim();
 
   if (normalizedInternalSecret.length < 16) {
     throw new Error('Scheduler internal secret must contain at least 16 characters');
+  }
+
+  if (
+    !Number.isSafeInteger(requestTimeoutMs)
+    || requestTimeoutMs < 1
+    || requestTimeoutMs > 300_000
+  ) {
+    throw new Error('Scheduler request timeout must be an integer between 1 and 300000ms');
   }
 
   let apiUrl: URL;
@@ -72,52 +93,74 @@ export const dispatchScheduledChecks = async ({
   }
 
   const dispatchUrl = new URL('/v1/scheduler/dispatch', apiUrl);
-  let response: Response;
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), requestTimeoutMs);
+  const requestSignal = signal
+    ? AbortSignal.any([signal, timeoutController.signal])
+    : timeoutController.signal;
 
   try {
-    response = await fetchImpl(dispatchUrl, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${normalizedInternalSecret}`
-      },
-      cache: 'no-store',
-      redirect: 'error',
-      signal
-    });
-  } catch (error) {
-    if (signal?.aborted) {
-      throw signal.reason ?? error;
+    let response: Response;
+
+    try {
+      response = await fetchImpl(dispatchUrl, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${normalizedInternalSecret}`
+        },
+        cache: 'no-store',
+        redirect: 'error',
+        signal: requestSignal
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
+
+      throw new SchedulerDispatchError('request_failed', null);
     }
 
-    throw new SchedulerDispatchError('request_failed', null);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new SchedulerDispatchError('request_failed', response.status);
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
+
+      if (timeoutController.signal.aborted) {
+        throw new SchedulerDispatchError('request_failed', null);
+      }
+
+      throw new SchedulerDispatchError('response_invalid', response.status);
+    }
+
+    if (timeoutController.signal.aborted) {
+      throw new SchedulerDispatchError('request_failed', null);
+    }
+
+    const parsed = schedulerDispatchResponseSchema.safeParse(payload);
+
+    if (!parsed.success) {
+      throw new SchedulerDispatchError('response_invalid', response.status);
+    }
+
+    return {
+      payload: parsed.data,
+      createdJobCount: parsed.data.triggeredProfiles.reduce(
+        (count, profile) => count + profile.jobIds.length,
+        0
+      )
+    };
+  } finally {
+    clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
-    throw new SchedulerDispatchError('request_failed', response.status);
-  }
-
-  let payload: unknown;
-
-  try {
-    payload = await response.json();
-  } catch {
-    throw new SchedulerDispatchError('response_invalid', response.status);
-  }
-
-  const parsed = schedulerDispatchResponseSchema.safeParse(payload);
-
-  if (!parsed.success) {
-    throw new SchedulerDispatchError('response_invalid', response.status);
-  }
-
-  return {
-    payload: parsed.data,
-    createdJobCount: parsed.data.triggeredProfiles.reduce(
-      (count, profile) => count + profile.jobIds.length,
-      0
-    )
-  };
 };
 
 export const runScheduler = async ({
@@ -125,13 +168,17 @@ export const runScheduler = async ({
   pollIntervalMs,
   signal,
   logger,
-  now = () => new Date()
+  now = () => new Date(),
+  maxBackoffMs = Math.max(pollIntervalMs, 15 * 60_000),
+  wait = waitForNextPoll
 }: {
   dispatch: (signal: AbortSignal) => Promise<SchedulerDispatchResult>;
   pollIntervalMs: number;
   signal: AbortSignal;
   logger: SchedulerLogger;
   now?: () => Date;
+  maxBackoffMs?: number;
+  wait?: (durationMs: number, signal: AbortSignal) => Promise<void>;
 }) => {
   if (
     !Number.isSafeInteger(pollIntervalMs)
@@ -140,6 +187,16 @@ export const runScheduler = async ({
   ) {
     throw new Error('Scheduler poll interval must be an integer between 1 and 86400000ms');
   }
+
+  if (
+    !Number.isSafeInteger(maxBackoffMs)
+    || maxBackoffMs < pollIntervalMs
+    || maxBackoffMs > 86_400_000
+  ) {
+    throw new Error('Scheduler maximum backoff must be an integer between the poll interval and 86400000ms');
+  }
+
+  let consecutiveFailures = 0;
 
   while (!signal.aborted) {
     const startedAt = now().toISOString();
@@ -150,6 +207,8 @@ export const runScheduler = async ({
       if (signal.aborted) {
         break;
       }
+
+      consecutiveFailures = 0;
 
       logger.info({
         event: 'dispatch_succeeded',
@@ -163,6 +222,8 @@ export const runScheduler = async ({
         break;
       }
 
+      consecutiveFailures += 1;
+
       logger.error({
         event: 'dispatch_failed',
         startedAt,
@@ -170,8 +231,25 @@ export const runScheduler = async ({
       });
     }
 
-    await waitForNextPoll(pollIntervalMs, signal);
+    await wait(
+      calculateSchedulerPollDelay(pollIntervalMs, consecutiveFailures, maxBackoffMs),
+      signal
+    );
   }
+};
+
+export const calculateSchedulerPollDelay = (
+  pollIntervalMs: number,
+  consecutiveFailures: number,
+  maxBackoffMs: number
+) => {
+  if (consecutiveFailures < 1) {
+    return pollIntervalMs;
+  }
+
+  const maximumExponent = Math.ceil(Math.log2(maxBackoffMs / pollIntervalMs));
+  const exponent = Math.min(consecutiveFailures, maximumExponent);
+  return Math.min(maxBackoffMs, pollIntervalMs * 2 ** exponent);
 };
 
 export const describeSchedulerError = (error: unknown) => {

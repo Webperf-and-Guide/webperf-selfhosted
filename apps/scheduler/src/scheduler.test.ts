@@ -61,6 +61,42 @@ describe('self-host scheduler boundary', () => {
     expect(String(caught)).not.toContain('raw API error');
   });
 
+  test('bounds a dispatch when the API never responds', async () => {
+    const observed: { requestSignal?: AbortSignal } = {};
+    let caught: unknown;
+
+    try {
+      await dispatchScheduledChecks({
+        apiBaseUrl: 'https://api.example.test',
+        internalSecret: 'scheduler-internal-secret',
+        requestTimeoutMs: 10,
+        fetchImpl: async (_input, init) => {
+          const requestSignal = init?.signal;
+
+          if (!requestSignal) {
+            throw new Error('Expected the scheduler request signal');
+          }
+
+          observed.requestSignal = requestSignal;
+
+          return await new Promise<Response>((_resolve, reject) => {
+            requestSignal.addEventListener(
+              'abort',
+              () => reject(requestSignal.reason),
+              { once: true }
+            );
+          });
+        }
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(observed.requestSignal?.aborted).toBe(true);
+    expect(caught).toBeInstanceOf(SchedulerDispatchError);
+    expect(caught).toMatchObject({ code: 'request_failed', status: null });
+  });
+
   test('rejects a credential-bearing or pathful API base URL before fetch', async () => {
     let fetchCalled = false;
 
@@ -97,5 +133,38 @@ describe('self-host scheduler boundary', () => {
 
     expect(dispatchCount).toBe(1);
     expect(events).toEqual([]);
+  });
+
+  test('backs off consecutive failures and resets after success', async () => {
+    const controller = new AbortController();
+    const delays: number[] = [];
+    const logger: SchedulerLogger = { info: () => {}, error: () => {} };
+    let dispatchCount = 0;
+
+    await runScheduler({
+      dispatch: async () => {
+        dispatchCount += 1;
+
+        if (dispatchCount <= 2) {
+          throw new SchedulerDispatchError('request_failed', 503);
+        }
+
+        if (dispatchCount === 4) {
+          controller.abort();
+        }
+
+        return { payload: dispatchPayload, createdJobCount: 2 };
+      },
+      pollIntervalMs: 1_000,
+      maxBackoffMs: 3_000,
+      signal: controller.signal,
+      logger,
+      wait: async (durationMs) => {
+        delays.push(durationMs);
+      }
+    });
+
+    expect(dispatchCount).toBe(4);
+    expect(delays).toEqual([2_000, 3_000, 1_000]);
   });
 });

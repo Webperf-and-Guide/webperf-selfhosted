@@ -12,7 +12,7 @@ Today the default execution path is:
 - `packages/contracts` and `packages/report-core` shape the stored results
 
 Optional runtimes may live alongside that path without becoming a default dependency.
-Today that includes `apps/browser-audit-worker`, which remains a standalone runtime surface.
+Today that includes `apps/browser-audit-lighthouse`, which remains a standalone runtime surface.
 
 ## Design Rule
 

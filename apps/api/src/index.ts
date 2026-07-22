@@ -701,10 +701,7 @@ const createJobSnapshotStream = (jobId: string) => {
   });
 };
 
-export const server = Bun.serve({
-  hostname: runtime.host,
-  port: runtime.port,
-  async fetch(request) {
+const routeRequest = async (request: Request) => {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
@@ -1295,10 +1292,17 @@ export const server = Bun.serve({
       {
         ok: false,
         message:
-          'Use /health, /v1/regions, /v1/jobs, /v1/properties, /v1/route-sets, /v1/region-packs, /v1/check-profiles, /v1/browser-audits, or their detail routes'
+          'Use /health, /v1/capabilities, /v1/sites, /v1/route-groups, /v1/region-sets, /v1/checks, /v1/runs, /v1/comparisons, /v1/exports, /v1/analyses, /v1/browser-audits, or their detail routes'
       },
       { status: 404 }
     );
+};
+
+export const server = Bun.serve({
+  hostname: runtime.host,
+  port: runtime.port,
+  async fetch(request) {
+    return addCompatibilityDeprecationHeaders(request, await routeRequest(request));
   }
 });
 
@@ -3170,6 +3174,44 @@ function json(data: unknown, init: ResponseInit = {}) {
       'content-type': 'application/json; charset=utf-8',
       ...(init.headers ?? {})
     }
+  });
+}
+
+const compatibilityRouteMappings = [
+  { legacy: '/v1/properties', canonical: '/v1/sites' },
+  { legacy: '/v1/route-sets', canonical: '/v1/route-groups' },
+  { legacy: '/v1/region-packs', canonical: '/v1/region-sets' },
+  { legacy: '/v1/check-profiles', canonical: '/v1/checks' }
+] as const;
+
+function addCompatibilityDeprecationHeaders(request: Request, response: Response) {
+  const requestUrl = new URL(request.url);
+  const mapping = compatibilityRouteMappings.find(
+    ({ legacy }) => requestUrl.pathname === legacy || requestUrl.pathname.startsWith(`${legacy}/`)
+  );
+
+  if (!mapping) {
+    return response;
+  }
+
+  const successorUrl = new URL(
+    `${mapping.canonical}${requestUrl.pathname.slice(mapping.legacy.length)}`,
+    requestUrl.origin
+  );
+  successorUrl.search = requestUrl.search;
+
+  const headers = new Headers(response.headers);
+  headers.set('deprecation', 'true');
+  headers.append('link', `<${successorUrl.toString()}>; rel="successor-version"`);
+  headers.set(
+    'warning',
+    `299 WebPerf "Deprecated API path; migrate to ${successorUrl.pathname}"`
+  );
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
   });
 }
 

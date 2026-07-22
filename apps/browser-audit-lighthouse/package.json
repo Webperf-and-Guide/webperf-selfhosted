@@ -1,5 +1,5 @@
 {
-  "name": "browser-audit-worker",
+  "name": "webperf-browser-audit-lighthouse",
   "private": true,
   "type": "module",
   "scripts": {

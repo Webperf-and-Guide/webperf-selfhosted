@@ -8,8 +8,6 @@ services:
       - api
     environment:
       CONTROL_BASE_URL: "${CONTROL_BASE_URL:-http://api:8788}"
-      DEPLOY_TARGET: "${DEPLOY_TARGET:-pages}"
-      TURNSTILE_SITE_KEY: "${TURNSTILE_SITE_KEY:-}"
       ORIGIN: "${CONSOLE_ORIGIN:-http://localhost:5173}"
       HOST: "${CONSOLE_HOST:-0.0.0.0}"
       PORT: "${CONSOLE_PORT:-3000}"
@@ -44,7 +42,7 @@ services:
       SELFHOST_ACTIVE_REGION_CODES_JSON: '${SELFHOST_ACTIVE_REGION_CODES_JSON:-["tokyo"]}'
       SELFHOST_REGION_IDS_JSON: '${SELFHOST_REGION_IDS_JSON:-{"tokyo":"JP"}}'
       SELFHOST_PROBE_BASE_URLS_JSON: '${SELFHOST_PROBE_BASE_URLS_JSON:-{"tokyo":"http://probe:8080"}}'
-      SELFHOST_BROWSER_AUDIT_BASE_URL: "${SELFHOST_BROWSER_AUDIT_BASE_URL:-http://browser-audit-worker:8080}"
+      SELFHOST_BROWSER_AUDIT_BASE_URL: "${SELFHOST_BROWSER_AUDIT_BASE_URL:-http://browser-audit-lighthouse:8080}"
       SELFHOST_MAX_TARGET_ATTEMPTS: "${SELFHOST_MAX_TARGET_ATTEMPTS:-1}"
     ports:
       - "${SELFHOST_API_PUBLIC_PORT:-8788}:${SELFHOST_API_PORT:-8788}"
@@ -62,13 +60,13 @@ services:
       SELFHOST_SCHEDULER_API_BASE_URL: "${SELFHOST_SCHEDULER_API_BASE_URL:-http://api:8788}"
       SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
 
-  browser-audit-worker:
+  browser-audit-lighthouse:
     profiles:
       - browser-audit
     build:
       context: ../..
-      dockerfile: apps/browser-audit-worker/Dockerfile
-    image: webperf-browser-audit-worker:local
+      dockerfile: apps/browser-audit-lighthouse/Dockerfile
+    image: webperf-browser-audit-lighthouse:local
     cap_add:
       - SYS_ADMIN
     environment:

@@ -6,7 +6,7 @@ on:
       - 'apps/console/**'
       - 'apps/api/**'
       - 'apps/scheduler/**'
-      - 'apps/browser-audit-worker/**'
+      - 'apps/browser-audit-lighthouse/**'
       - 'apps/probe-rs/**'
       - 'packages/**'
       - 'infra/docker-compose/**'
@@ -20,7 +20,7 @@ on:
       - 'apps/console/**'
       - 'apps/api/**'
       - 'apps/scheduler/**'
-      - 'apps/browser-audit-worker/**'
+      - 'apps/browser-audit-lighthouse/**'
       - 'apps/probe-rs/**'
       - 'packages/**'
       - 'infra/docker-compose/**'
@@ -44,8 +44,8 @@ jobs:
       - run: bun run --cwd apps/api check
       - run: bun run --cwd apps/api test
       - run: bun run --cwd apps/scheduler check
-      - run: bun run --cwd apps/browser-audit-worker check
+      - run: bun run --cwd apps/browser-audit-lighthouse check
       - run: bun run compose:config
       - run: docker buildx build --platform linux/amd64 --load -t webperf-console:selfhost -f apps/console/Dockerfile .
       - run: docker buildx build --platform linux/amd64 --load -t webperf-api:ci -f apps/api/Dockerfile .
-      - run: docker buildx build --platform linux/amd64 --load -t webperf-browser-audit-worker:ci -f apps/browser-audit-worker/Dockerfile .
+      - run: docker buildx build --platform linux/amd64 --load -t webperf-browser-audit-lighthouse:ci -f apps/browser-audit-lighthouse/Dockerfile .

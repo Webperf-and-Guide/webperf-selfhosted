@@ -15,7 +15,7 @@ This repository is the self-hosted source of truth for:
 - `apps/api`: Bun + SQLite API service for saved config, run dispatch, history, comparisons, and reports
 - `apps/scheduler`: polling worker for scheduled check dispatch
 - `apps/probe-rs`: Rust probe runtime
-- `apps/browser-audit-worker`: optional Bun-first browser audit runtime
+- `apps/browser-audit-lighthouse`: optional Lighthouse reference implementation of the public Browser Audit Protocol
 - `packages/contracts`, `packages/domain-core`, `packages/config`, `packages/report-core`, `packages/ui`
 - `infra/docker-compose`: Docker Compose bundle
 - `infra/docker`: runtime image metadata consumed by the managed cloud repo
@@ -44,7 +44,7 @@ but the install and runtime docs in this repo should stay vendor-neutral.
 
 - runs network-probe checks across representative cities instead of relying on a single URL or a single region
 - stores saved sites, route groups, region sets, checks, runs, baselines, comparisons, and exports in SQLite
-- includes a self-host console, API, scheduler, Rust probe runtime, and an optional Bun browser-audit worker
+- includes a self-host console, API, scheduler, Rust probe runtime, and an optional Lighthouse Browser Audit reference runner
 - focuses on release verification questions like "did this deploy get worse?" rather than general-purpose observability
 
 ## Quick Start
@@ -61,13 +61,13 @@ Default local URLs:
 - console: `http://localhost:5173`
 - api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
-- browser-audit worker when run separately: `http://127.0.0.1:8081`
+- Lighthouse Browser Audit runner when run separately: `http://127.0.0.1:8081`
 
 Launch-ready docs are grouped into five operator paths:
 
 - [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
 - [docker compose install](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md)
-- [optional browser-audit worker](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-worker.md)
+- [optional Lighthouse Browser Audit runner](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md)
 - [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
 - [GHCR runtime images](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md)
 
@@ -77,8 +77,8 @@ Provider-specific deployment walkthroughs belong on `webperf.and.guide`, not in 
 
 ```bash
 bun run check
-bun run dev:browser-audit-worker
-bun run dev:parallel:cloud
+bun run dev:browser-audit-lighthouse
+bun run dev:parallel
 bun run smoke:console
 bun run smoke:compose
 bun run smoke:compose:browser-audit
@@ -116,15 +116,19 @@ Compatibility aliases remain available for:
 - `/v1/region-packs`
 - `/v1/check-profiles`
 
+Compatibility responses are marked deprecated and link to their canonical
+successor. They are migration-only surfaces that may be removed at public v1.0;
+new integrations should use the canonical paths above.
+
 See [public-api-surface.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/architecture/public-api-surface.md) for the current freeze line and list-query contract.
 
 ## Parallel Local Dev
 
-Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md) when `webperf-selfhosted` and `webperf.and.guide` need to run side-by-side.
+Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md) when the default development ports are already occupied or two self-host configurations need to run side-by-side.
 
 ## Optional Browser Audit Direct-Run
 
-`apps/browser-audit-worker` remains an optional runtime, but the self-host API can call it directly when you configure:
+`apps/browser-audit-lighthouse` is the optional Lighthouse reference runner for the engine-neutral Browser Audit Protocol. The self-host API can call it directly when you configure:
 
 - `SELFHOST_BROWSER_AUDIT_BASE_URL`
 - `BROWSER_AUDIT_SHARED_SECRET`
@@ -140,7 +144,7 @@ Install and scheduling notes live in:
 
 - [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md)
 - [docs/architecture/execution-model.md](docs/architecture/execution-model.md)
-- [docs/self-hosting/browser-audit-worker.md](docs/self-hosting/browser-audit-worker.md)
+- [docs/self-hosting/browser-audit-lighthouse.md](docs/self-hosting/browser-audit-lighthouse.md)
 - [examples/github-actions/scheduler-dispatch.yml](examples/github-actions/scheduler-dispatch.yml)
 
 ## Release Tooling

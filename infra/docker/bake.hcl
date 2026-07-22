@@ -9,9 +9,9 @@ target "probe" {
   tags = ["ghcr.io/webperf-and-guide/webperf-probe:dev"]
 }
 
-target "browser-audit-worker" {
+target "browser-audit-lighthouse" {
   context = "."
-  dockerfile = "./apps/browser-audit-worker/Dockerfile"
+  dockerfile = "./apps/browser-audit-lighthouse/Dockerfile"
   platforms = ["linux/amd64"]
-  tags = ["ghcr.io/webperf-and-guide/webperf-browser-audit-worker:dev"]
+  tags = ["ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse:dev"]
 }

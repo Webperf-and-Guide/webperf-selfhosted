@@ -7,8 +7,8 @@ dev-console:
 dev-api:
   bun run --cwd apps/api dev
 
-dev-browser-audit-worker:
-  PORT=8081 bun run --cwd apps/browser-audit-worker dev
+dev-browser-audit-lighthouse:
+  PORT=8081 bun run --cwd apps/browser-audit-lighthouse dev
 
 dev-scheduler:
   bun run --cwd apps/scheduler dev

@@ -48,10 +48,14 @@ const banned = [
   {
     pattern: 'infra/compose',
     message: 'use infra/docker-compose instead of the retired infra/compose path'
+  },
+  {
+    pattern: 'apps/browser-audit-worker',
+    message: 'use apps/browser-audit-lighthouse for the reference runner'
   }
 ];
 
-const targets = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'package.json', 'apps', 'packages', 'docs', 'infra', 'tooling'];
+const targets = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'package.json', '.github', 'apps', 'packages', 'docs', 'infra', 'tooling'];
 
 const collectFiles = (target: string): string[] => {
   const absoluteTarget = join(root, target);

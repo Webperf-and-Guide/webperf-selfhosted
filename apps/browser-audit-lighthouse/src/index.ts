@@ -135,7 +135,7 @@ Bun.serve({
 
 console.log(
   JSON.stringify({
-    service: 'browser-audit-worker',
+    service: 'webperf-browser-audit-lighthouse',
     host: config.host,
     port: config.port,
     chromeExecutablePath: config.chromeExecutablePath,

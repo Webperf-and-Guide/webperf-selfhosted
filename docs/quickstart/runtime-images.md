@@ -5,7 +5,7 @@
 ## Published Image Families
 
 - `ghcr.io/webperf-and-guide/webperf-probe`
-- `ghcr.io/webperf-and-guide/webperf-browser-audit-worker`
+- `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`
 
 ## Publish Trigger
 
@@ -18,7 +18,7 @@ Both image families publish through GitHub Actions in this repo.
 Checked-in image refs live in:
 
 - [probe.json](/Users/imjlk/repos/and-guide/webperf-selfhosted/infra/docker/metadata/probe.json)
-- [browser-audit-worker.json](/Users/imjlk/repos/and-guide/webperf-selfhosted/infra/docker/metadata/browser-audit-worker.json)
+- [browser-audit-lighthouse.json](/Users/imjlk/repos/and-guide/webperf-selfhosted/infra/docker/metadata/browser-audit-lighthouse.json)
 
 The managed repo consumes these metadata files when it renders Bunny and Cloudflare runtime config.
 
@@ -31,7 +31,7 @@ Relevant workflows:
 
 ```bash
 docker pull ghcr.io/webperf-and-guide/webperf-probe:main
-docker pull ghcr.io/webperf-and-guide/webperf-browser-audit-worker:main
+docker pull ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse:main
 ```
 
 ## Local Build
@@ -45,7 +45,7 @@ docker build -f apps/probe-rs/Dockerfile -t webperf-probe:dev .
 Browser audit worker:
 
 ```bash
-docker build -f apps/browser-audit-worker/Dockerfile -t webperf-browser-audit-worker:dev .
+docker build -f apps/browser-audit-lighthouse/Dockerfile -t webperf-browser-audit-lighthouse:dev .
 ```
 
 ## Policy

@@ -73,11 +73,9 @@ const proxyResponse = (response: Response) => {
   });
 };
 
-const resolveRuntime = (platform: Platform) =>
+const resolveRuntime = (_platform: Platform) =>
   parseWebEnv({
-    CONTROL_BASE_URL: platform?.env?.CONTROL_BASE_URL ?? privateEnv.CONTROL_BASE_URL,
-    DEPLOY_TARGET: platform?.env?.DEPLOY_TARGET ?? privateEnv.DEPLOY_TARGET,
-    TURNSTILE_SITE_KEY: platform?.env?.TURNSTILE_SITE_KEY ?? privateEnv.TURNSTILE_SITE_KEY
+    CONTROL_BASE_URL: privateEnv.CONTROL_BASE_URL
   });
 
 const buildHeaders = (requesterIp?: string | null, initial?: HeadersInit) => {

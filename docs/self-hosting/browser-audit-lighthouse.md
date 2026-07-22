@@ -1,6 +1,6 @@
 # Browser Audit Worker
 
-`apps/browser-audit-worker` is an optional self-host runtime.
+`apps/browser-audit-lighthouse` is an optional self-host runtime.
 
 It is the OSS source of truth for the Bun-first browser-audit container used by both:
 
@@ -28,7 +28,7 @@ The worker exposes the active runtime versions through `GET /capabilities`.
 ## Local Run
 
 ```bash
-bun run dev:browser-audit-worker
+bun run dev:browser-audit-lighthouse
 ```
 
 Default address:
@@ -101,8 +101,8 @@ Build from the `webperf-selfhosted` repo root:
 
 ```bash
 docker build \
-  -f apps/browser-audit-worker/Dockerfile \
-  -t webperf-browser-audit-worker:dev \
+  -f apps/browser-audit-lighthouse/Dockerfile \
+  -t webperf-browser-audit-lighthouse:dev \
   .
 ```
 

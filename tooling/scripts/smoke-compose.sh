@@ -36,7 +36,7 @@ for raw in env_path.read_text().splitlines():
 
 values['PROBE_SHARED_SECRET'] = 'dev-shared-secret'
 values['BROWSER_AUDIT_SHARED_SECRET_NEXT'] = ''
-values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-worker:8080'
+values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'
 
 if profile == 'browser-audit':
     values['BROWSER_AUDIT_SHARED_SECRET'] = 'dev-browser-audit-shared-secret'

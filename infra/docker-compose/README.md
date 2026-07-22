@@ -8,7 +8,7 @@ This folder contains the local Compose bundle for the self-hosted stack.
 - `probe`: the Rust probe runtime
 - `api`: the Bun-based API service with SQLite persistence
 - `scheduler`: the Bun polling worker for scheduled checks
-- `browser-audit-worker`: optional Bun browser-audit runtime behind the `browser-audit` profile
+- `browser-audit-lighthouse`: optional Bun browser-audit runtime behind the `browser-audit` profile
 
 ## Start With Docker Compose
 
@@ -25,7 +25,7 @@ docker compose --env-file infra/docker-compose/.env -f infra/docker-compose/dock
 
 The probe stays on the internal Compose network by default.
 Only the console and API are published to the host unless you add an explicit probe port mapping.
-The browser-audit worker is excluded by default and only starts when you enable the `browser-audit` profile.
+The browser-audit Lighthouse runner is excluded by default and only starts when you enable the `browser-audit` profile.
 
 Console:
 

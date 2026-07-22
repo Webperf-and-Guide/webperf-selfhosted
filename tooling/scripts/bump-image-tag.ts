@@ -2,7 +2,7 @@ const tag = Bun.argv[2];
 const target = Bun.argv[3] ?? 'all';
 
 if (!tag) {
-  throw new Error('Usage: bun tooling/scripts/bump-image-tag.ts <tag> [probe|browser-audit-worker|all]');
+  throw new Error('Usage: bun tooling/scripts/bump-image-tag.ts <tag> [probe|browser-audit-lighthouse|all]');
 }
 
 const metadataFiles = [
@@ -12,9 +12,9 @@ const metadataFiles = [
     image: `ghcr.io/webperf-and-guide/webperf-probe:${tag}`
   },
   {
-    name: 'browser-audit-worker',
-    path: new URL('../../infra/docker/metadata/browser-audit-worker.json', import.meta.url),
-    image: `ghcr.io/webperf-and-guide/webperf-browser-audit-worker:${tag}`
+    name: 'browser-audit-lighthouse',
+    path: new URL('../../infra/docker/metadata/browser-audit-lighthouse.json', import.meta.url),
+    image: `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse:${tag}`
   }
 ] as const;
 

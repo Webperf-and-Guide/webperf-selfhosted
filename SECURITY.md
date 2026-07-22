@@ -6,7 +6,7 @@ This repository contains the self-hosted/open-core `WebPerf` product:
 
 - self-host console, API, scheduler, and probe runtime
 - public contracts and deterministic reporting logic
-- optional browser-audit worker runtime
+- optional Lighthouse Browser Audit reference runner
 
 Managed cloud orchestration and hosted operations live in the separate `webperf.and.guide` repo.
 

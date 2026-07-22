@@ -45,9 +45,9 @@ WORKDIR /workspace/webperf-selfhosted
 
 COPY . /workspace/webperf-selfhosted
 
-WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-worker
+WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
-RUN bun install --no-save --filter=browser-audit-worker --omit=dev
+RUN bun install --no-save --filter=webperf-browser-audit-lighthouse --omit=dev
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox && rm -rf /var/lib/apt/lists/*; \

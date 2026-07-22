@@ -1,20 +1,15 @@
-import adapterCloudflare from '@sveltejs/adapter-cloudflare';
 import adapterNode from '@sveltejs/adapter-node';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
-const targetAdapter = process.env.WEBPERF_CONSOLE_ADAPTER === 'cloudflare' ? 'cloudflare' : 'node';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   kit: {
-    adapter:
-      targetAdapter === 'node'
-        ? adapterNode({
-            out: 'build'
-          })
-        : adapterCloudflare(),
+    adapter: adapterNode({
+      out: 'build'
+    }),
     alias: {
       '@webperf/contracts': path.resolve(projectDir, '../../packages/contracts/src/index.ts'),
       '@webperf/contracts/*': path.resolve(projectDir, '../../packages/contracts/src/*'),

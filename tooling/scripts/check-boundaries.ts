@@ -31,7 +31,7 @@ const rules: Rule[] = [
       'apps/console/src',
       'apps/api/src',
       'apps/scheduler/src',
-      'apps/browser-audit-worker/src',
+      'apps/browser-audit-lighthouse/src',
       'packages/contracts/src',
       'packages/domain-core/src',
       'packages/report-core/src',
@@ -130,6 +130,10 @@ const rules: Rule[] = [
       {
         pattern: /infra\/compose\//,
         message: 'use infra/docker-compose instead of the retired infra/compose path'
+      },
+      {
+        pattern: /apps\/browser-audit-worker\//,
+        message: 'use apps/browser-audit-lighthouse for the reference runner'
       }
     ]
   }

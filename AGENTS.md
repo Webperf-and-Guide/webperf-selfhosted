@@ -52,7 +52,7 @@ Included here:
 - `apps/api`
 - `apps/scheduler`
 - `apps/probe-rs`
-- `apps/browser-audit-worker`
+- `apps/browser-audit-lighthouse`
 - `packages/contracts`
 - `packages/domain-core`
 - `packages/config`
@@ -66,7 +66,7 @@ Included here:
 
 Current repo state as of 2026-04-18:
 - the console, API service, scheduler, and Rust probe run together locally
-- the optional Bun browser-audit worker now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
+- the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
 - local compose packaging lives under `infra/docker-compose`
 - the Rust probe Dockerfile now builds for the requested target platform instead of accidentally pinning builds to the host architecture; both native and `linux/amd64` images have been smoke-tested with `/healthz` and signed `/measure` requests
@@ -86,8 +86,8 @@ Current repo state as of 2026-04-18:
 - `packages/ui` now also exposes a shadcn-compatible shared surface under `src/lib/components/ui/*`, with root-level `jsrepo.config.ts` routing `@ieedan/shadcn-svelte-extras` into the shared package instead of app-local copies
 - docs now explicitly treat this repo as the public source of truth for self-hosted contracts, schemas, and deterministic reporting behavior
 - `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
-- `apps/browser-audit-worker` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
-- `infra/docker/metadata/probe.json` and `infra/docker/metadata/browser-audit-worker.json` are now the canonical checked-in image refs that the managed cloud repo consumes when it renders Cloudflare/Bunny runtime config
+- `apps/browser-audit-lighthouse` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
+- `infra/docker/metadata/probe.json` and `infra/docker/metadata/browser-audit-lighthouse.json` are now the canonical checked-in image refs that the managed cloud repo consumes when it renders Cloudflare/Bunny runtime config
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 - root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
 - the browser-audit image publish workflow now also watches workspace dependency inputs like `packages/contracts`, the root `package.json`, and `bun.lock` so GHCR refreshes do not miss compatible runtime changes
@@ -114,7 +114,7 @@ Current repo state as of 2026-04-18:
 - shared field-set spacing and number-field chrome now keep editor section titles and `+ / -` page-size controls inset from card borders instead of rendering as double-bordered or border-hugging blocks
 - segmented nav pills, inner metric cards, guide rows, and region tiles now use softer shared borders and clearer typography hierarchy so the operator console reads less like stacked outlined boxes
 - shared `Tabs` and `UnderlineTabs` now use darker operator-friendly tracks, clearer active/inactive contrast, and stronger underline emphasis so report and derived-resource tab groups no longer wash out against the surrounding cards
-- launch docs are now grouped around single-machine quickstart, compose install, optional browser-audit worker enablement, parallel local dev, runtime images, and a frozen public API surface note
+- launch docs are now grouped around single-machine quickstart, compose install, optional browser-audit Lighthouse runner enablement, parallel local dev, runtime images, and a frozen public API surface note
 - the frozen public API surface note now matches the real v1 shape more closely by treating `runs` as detail resources plus nested check-run lists, and the HTTP integration suite now regression-tests compatibility alias pagination/filtering alongside the primary list resources
 - the shared UI package now also owns a `LiveRunTargetCard` operator composite so both OSS and cloud overview streams render the same live regional target card shape
 - the regions surface now also uses a shared `RegionContinentCard` operator component so OSS and cloud keep the same region catalog structure
@@ -129,17 +129,19 @@ Current repo state as of 2026-04-18:
 - internal workspace packages now consume `@webperf/contracts` through `workspace:*` consistently instead of mixing `file:` and workspace references, which keeps the Bun lockfile stable enough for `bun install --frozen-lockfile` in GitHub Actions
 - `ci-selfhost` now validates Compose through the checked-in `compose:config` script, which uses `infra/docker-compose/.env.example` instead of assuming repository-local secrets during static config validation
 - public-beta hardening is now tracked in `docs/architecture/public-beta-hardening-plan.md`, covering durable execution, strict self-host security, engine-neutral browser audits, local artifacts, versioned Compose/release automation, and operator documentation
+- the optional browser runtime is now named `apps/browser-audit-lighthouse` and documented as a Lighthouse reference implementation, while provider-specific cloud config, health schemas, Turnstile/Cloudflare console adapters, and managed smoke/migration scripts have been removed from the self-host boundary
+- legacy REST prefixes now emit deprecation, successor-link, and warning headers while canonical Site, Route Group, Region Set, and Check paths remain unmarked
 
 Current local dev entrypoints:
 - `bun run dev`
-- `bun run dev:browser-audit-worker`
-- `bun run dev:parallel:cloud`
+- `bun run dev:browser-audit-lighthouse`
+- `bun run dev:parallel`
 - `bun run dev:console`
 - `bun run dev:api`
 - `bun run dev:scheduler`
 - `bun run dev:probe`
 - `bun run smoke:console`
-- `bun run smoke:console:parallel:cloud`
+- `bun run smoke:console:parallel`
 - `bun run smoke:compose`
 - `bun run smoke:compose:browser-audit`
 - `bun run capture:console:baselines`
@@ -148,9 +150,9 @@ Current local URLs:
 - console: `http://localhost:5173`
 - api: `http://127.0.0.1:8788`
 - probe: `http://127.0.0.1:8080`
-- browser-audit worker when run separately: `http://127.0.0.1:8081`
-- parallel-with-cloud console: `http://localhost:4174`
-- parallel-with-cloud probe: `http://127.0.0.1:8082`
+- browser-audit Lighthouse runner when run separately: `http://127.0.0.1:8081`
+- parallel console: `http://localhost:4174`
+- parallel probe: `http://127.0.0.1:8082`
 
 ## Working Rules
 

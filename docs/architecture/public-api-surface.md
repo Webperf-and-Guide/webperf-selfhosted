@@ -51,6 +51,17 @@ The older self-host aliases remain supported:
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
 Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
 
+Every response below a compatibility prefix includes:
+
+- `Deprecation: true`
+- a `Link` header with `rel="successor-version"` pointing to the canonical path
+- an HTTP `Warning` identifying the successor path
+
+The aliases receive compatibility fixes only. New capabilities land on canonical
+resources first. They are migration candidates for removal at public v1.0 after
+managed consumers and existing self-host installations have moved to the
+canonical paths.
+
 `runs` are intentionally not a top-level list resource in v1:
 
 - list runs under `GET /v1/checks/:checkId/runs`

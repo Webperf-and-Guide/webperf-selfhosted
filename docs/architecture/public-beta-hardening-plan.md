@@ -147,12 +147,14 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 1. Boundary and naming
 
-- [ ] Rename `apps/browser-audit-worker` to
+- [x] Rename the legacy browser-audit worker app to
   `apps/browser-audit-lighthouse` and update package/image identifiers.
 - [ ] Add `apps/executor` and keep execution out of the API and scheduler.
-- [ ] Make canonical terms/routes primary in UI, docs, contracts, and tests.
-- [ ] Add deprecation headers and successor links to compatibility routes.
-- [ ] Add a Sampo changeset for public naming/package changes.
+- [x] Make canonical terms/routes primary in UI, docs, contracts, and tests.
+- [x] Add deprecation headers and successor links to compatibility routes.
+- [x] Remove provider-specific cloud config, health contracts, smoke scripts,
+  and console deployment adapters from the self-hosted tree.
+- [x] Add a Sampo changeset for public naming/package changes.
 
 ### 2. Security defaults
 

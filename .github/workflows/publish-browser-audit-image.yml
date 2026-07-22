@@ -5,7 +5,7 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'apps/browser-audit-worker/**'
+      - 'apps/browser-audit-lighthouse/**'
       - 'packages/contracts/**'
       - 'packages/domain-core/**'
       - 'package.json'
@@ -34,7 +34,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/webperf-and-guide/webperf-browser-audit-worker
+          images: ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse
           tags: |
             type=raw,value=main,enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
@@ -43,7 +43,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./apps/browser-audit-worker/Dockerfile
+          file: ./apps/browser-audit-lighthouse/Dockerfile
           platforms: linux/amd64
           push: true
           cache-from: type=gha

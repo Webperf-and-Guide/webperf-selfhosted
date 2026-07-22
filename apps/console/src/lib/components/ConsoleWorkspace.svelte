@@ -76,7 +76,6 @@
   };
   const overview = createOverviewController({
     getRegions: () => regions,
-    getTurnstileSiteKey: () => data.turnstileSiteKey ?? null,
     getSavedChecksEnabled: () => Boolean(savedChecks),
     getCheckProfileCount: () => checkProfiles.length
   });
@@ -114,7 +113,6 @@
   });
 
   const maxSelectableRegions = overview.maxSelectableRegions;
-  const turnstileSiteKey = $derived.by(() => overview.turnstileSiteKey);
   const selectableCount = $derived.by(() => overview.selectableCount);
   const selectedRegions = $derived.by(() => overview.selectedRegions);
   const activeRegionPreview = $derived.by(() => overview.activeRegionPreview);
@@ -133,12 +131,6 @@
     overview.destroy();
   });
 </script>
-
-<svelte:head>
-  {#if turnstileSiteKey}
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-  {/if}
-</svelte:head>
 
 {#if showOverview}
   <ManualRunPanel
@@ -242,14 +234,6 @@
           </FieldSetContent>
         </FieldSet>
       </details>
-
-    {#if turnstileSiteKey}
-      <div class="turnstile-shell">
-        <div class="cf-turnstile" data-sitekey={turnstileSiteKey}></div>
-      </div>
-    {:else}
-      <p class="hint">Turnstile is optional in local dev and enforced when the site key is configured.</p>
-    {/if}
 
     {#if overviewState.submitError}
       <p class="error">{overviewState.submitError}</p>

@@ -1,6 +1,6 @@
 # Browser Audit Worker
 
-Bun-first optional browser audit worker for `webperf-selfhosted`.
+Bun-first optional browser audit Lighthouse runner for `webperf-selfhosted`.
 
 It runs:
 
@@ -18,7 +18,7 @@ The worker exposes:
 ## Local
 
 ```bash
-bun run dev:browser-audit-worker
+bun run dev:browser-audit-lighthouse
 ```
 
 Useful environment variables:
@@ -35,8 +35,8 @@ Useful environment variables:
 
 ```bash
 docker build \
-  -f apps/browser-audit-worker/Dockerfile \
-  -t webperf-browser-audit-worker:dev \
+  -f apps/browser-audit-lighthouse/Dockerfile \
+  -t webperf-browser-audit-lighthouse:dev \
   .
 ```
 

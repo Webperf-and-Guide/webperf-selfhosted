@@ -15,10 +15,6 @@
       "types": "./src/public.ts",
       "import": "./src/public.ts"
     },
-    "./cloud": {
-      "types": "./src/cloud.ts",
-      "import": "./src/cloud.ts"
-    },
     "./selfhost": {
       "types": "./src/selfhost.ts",
       "import": "./src/selfhost.ts"

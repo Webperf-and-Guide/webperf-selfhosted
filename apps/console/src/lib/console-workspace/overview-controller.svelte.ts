@@ -10,7 +10,6 @@ import {
 
 type OverviewAccessors = {
   getRegions: () => RegionAvailability[];
-  getTurnstileSiteKey: () => string | null;
   getSavedChecksEnabled: () => boolean;
   getCheckProfileCount: () => number;
 };
@@ -46,10 +45,6 @@ export class OverviewController {
 
   get regions() {
     return this.accessors.getRegions();
-  }
-
-  get turnstileSiteKey() {
-    return this.accessors.getTurnstileSiteKey();
   }
 
   get selectableCount() {
@@ -187,9 +182,6 @@ export class OverviewController {
 
     this.state.isSubmitting = true;
 
-    const form = event.currentTarget as HTMLFormElement;
-    const turnstileToken = form.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]')?.value;
-
     try {
       const response = await fetch('/api/control/jobs', {
         method: 'POST',
@@ -213,8 +205,7 @@ export class OverviewController {
               this.state.jobMonitorType === 'latency' && this.state.jobLatencyThresholdMs
                 ? Number(this.state.jobLatencyThresholdMs)
                 : null
-          },
-          turnstileToken: turnstileToken || undefined
+          }
         })
       });
 

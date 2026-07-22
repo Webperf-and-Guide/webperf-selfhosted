@@ -661,6 +661,23 @@ describe('api service monitoring expansion', () => {
       expect(compatibilityChecksPayload.pageInfo.filter).toBe('uptime');
       expect(compatibilityChecksPayload.checkProfiles[0]?.name).toBe('Profile uptime');
 
+      for (const [legacyPath, canonicalPath] of [
+        ['/v1/properties', '/v1/sites'],
+        ['/v1/route-sets', '/v1/route-groups'],
+        ['/v1/region-packs', '/v1/region-sets'],
+        ['/v1/check-profiles', '/v1/checks']
+      ] as const) {
+        const compatibilityResponse = await fetch(`${harness.baseUrl}${legacyPath}`);
+        expect(compatibilityResponse.status).toBe(200);
+        expect(compatibilityResponse.headers.get('deprecation')).toBe('true');
+        expect(compatibilityResponse.headers.get('link')).toContain(canonicalPath);
+        expect(compatibilityResponse.headers.get('warning')).toContain('Deprecated API path');
+      }
+
+      const canonicalSitesResponse = await fetch(`${harness.baseUrl}/v1/sites`);
+      expect(canonicalSitesResponse.status).toBe(200);
+      expect(canonicalSitesResponse.headers.get('deprecation')).toBeNull();
+
       const stabilizedPublicOpenApiResponse = await fetch(`${harness.baseUrl}/openapi/public.json`);
       const stabilizedPublicOpenApi = await stabilizedPublicOpenApiResponse.json() as {
         paths?: Record<string, unknown>;

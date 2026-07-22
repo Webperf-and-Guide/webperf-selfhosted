@@ -43,6 +43,6 @@ Add the Sampo changeset file under `.sampo/changesets/` in the same PR as the us
 When a change affects reusable runtimes, update the canonical metadata in:
 
 - `infra/docker/metadata/probe.json`
-- `infra/docker/metadata/browser-audit-worker.json`
+- `infra/docker/metadata/browser-audit-lighthouse.json`
 
 Those checked-in image refs are consumed by the managed cloud repo when it renders Cloudflare/Bunny deployment config.

@@ -17,19 +17,14 @@ import type { ConsolePageData, SavedChecksData } from '$lib/console-data';
 import { CONSOLE_COLLECTION_PAGE_SIZE, CONSOLE_RECENT_RUN_COUNT, CONSOLE_RUN_PAGE_SIZE } from '$lib/console-workspace/formatters';
 
 type LoaderFetch = typeof fetch;
-type Platform = App.Platform | undefined;
-
 export const loadConsolePage = async ({
-  fetch,
-  platform
+  fetch
 }: {
   fetch: LoaderFetch;
-  platform: Platform;
+  platform?: App.Platform;
 }): Promise<ConsolePageData> => {
   const runtime = parseWebEnv({
-    CONTROL_BASE_URL: platform?.env?.CONTROL_BASE_URL ?? privateEnv.CONTROL_BASE_URL,
-    DEPLOY_TARGET: platform?.env?.DEPLOY_TARGET ?? privateEnv.DEPLOY_TARGET,
-    TURNSTILE_SITE_KEY: platform?.env?.TURNSTILE_SITE_KEY ?? privateEnv.TURNSTILE_SITE_KEY
+    CONTROL_BASE_URL: privateEnv.CONTROL_BASE_URL
   });
 
   const regionsPayload = await fetchOptionalJson<RegionsResponse>(fetch, '/api/control/regions');
@@ -46,7 +41,6 @@ export const loadConsolePage = async ({
 
   return {
     regions: regionsPayload?.regions ?? [],
-    turnstileSiteKey: runtime.TURNSTILE_SITE_KEY ?? null,
     capabilities: {
       browserAuditDirectRun: Boolean(capabilitiesPayload?.features?.browserAuditDirectRun)
     },

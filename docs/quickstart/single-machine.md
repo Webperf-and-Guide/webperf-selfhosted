@@ -45,7 +45,7 @@ Use the console to:
 
 ## Optional Browser Audit Direct-Run
 
-The browser-audit worker is optional and not part of the default `bun run dev` path.
+The browser-audit Lighthouse runner is optional and not part of the default `bun run dev` path.
 
 Run the API with browser-audit wiring:
 
@@ -59,7 +59,7 @@ Run the worker in a second shell:
 
 ```bash
 BROWSER_AUDIT_SHARED_SECRET=dev-browser-audit-shared-secret \
-bun run dev:browser-audit-worker
+bun run dev:browser-audit-lighthouse
 ```
 
 That enables:
@@ -68,11 +68,11 @@ That enables:
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
 
-See [browser-audit-worker.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-worker.md) for the runtime profile and current direct-run limits.
+See [browser-audit-lighthouse.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md) for the runtime profile and current direct-run limits.
 
 ## Notes
 
 - This repo stays vendor-neutral. Platform-specific deployment walkthroughs live on `webperf.and.guide`.
 - If you want a Docker-first install, use [local-compose.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md).
-- If you want to run OSS and cloud locally side-by-side, use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md).
+- If you need alternate development ports, use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md).
 - `bun run capture:console:baselines` captures desktop and mobile screenshots for `/`, `/resources`, `/checks`, `/reports`, and `/regions` against the currently running console.

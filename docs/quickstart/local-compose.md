@@ -46,7 +46,7 @@ bun run capture:console:baselines
 - `api`: Bun-based API service with SQLite persistence
 - `scheduler`: Bun polling worker for scheduled dispatch
 - `probe`: Rust measurement runtime on the internal Compose network
-- `browser-audit-worker`: optional Bun browser-audit runtime when you enable the `browser-audit` profile
+- `browser-audit-lighthouse`: optional Bun browser-audit runtime when you enable the `browser-audit` profile
 
 ## Useful Env Vars
 
@@ -78,7 +78,7 @@ bun run smoke:compose:browser-audit
 
 ## Optional Browser Audit Worker
 
-The browser-audit worker is intentionally not part of the default stack.
+The browser-audit Lighthouse runner is intentionally not part of the default stack.
 
 Enable it only when you want to run the optional Bun + Chrome + Puppeteer + Lighthouse runtime:
 
@@ -127,4 +127,4 @@ An example GitHub Actions workflow lives in [examples/github-actions/scheduler-d
 
 - [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
 - [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
-- [browser-audit worker](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-worker.md)
+- [browser-audit Lighthouse runner](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md)

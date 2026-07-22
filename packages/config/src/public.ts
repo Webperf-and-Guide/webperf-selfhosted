@@ -1,28 +1,15 @@
 import { z } from 'zod';
-import { emptyStringToUndefined } from './shared';
-
 export const webEnvSchema = z
   .object({
-    CONTROL_BASE_URL: emptyStringToUndefined(z.string().url()),
-    DEPLOY_TARGET: z.enum(['pages', 'workers']).default('pages'),
-    TURNSTILE_SITE_KEY: emptyStringToUndefined(z.string().min(1))
+    CONTROL_BASE_URL: z.string().url().optional()
   })
   .transform((input) => ({
-    CONTROL_BASE_URL: input.CONTROL_BASE_URL ?? 'http://127.0.0.1:8788',
-    DEPLOY_TARGET: input.DEPLOY_TARGET,
-    TURNSTILE_SITE_KEY: input.TURNSTILE_SITE_KEY
+    CONTROL_BASE_URL: input.CONTROL_BASE_URL ?? 'http://127.0.0.1:8788'
   }));
 
 export const parseWebEnv = (
-  input: Partial<
-    Record<
-      'CONTROL_BASE_URL' | 'DEPLOY_TARGET' | 'TURNSTILE_SITE_KEY',
-      string | undefined
-    >
-  >
+  input: Partial<Record<'CONTROL_BASE_URL', string | undefined>>
 ) =>
   webEnvSchema.parse({
-    CONTROL_BASE_URL: input.CONTROL_BASE_URL,
-    DEPLOY_TARGET: input.DEPLOY_TARGET,
-    TURNSTILE_SITE_KEY: input.TURNSTILE_SITE_KEY
+    CONTROL_BASE_URL: input.CONTROL_BASE_URL
   });

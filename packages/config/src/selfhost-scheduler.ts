@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const selfhostSchedulerEnvSchema = z.object({
   SELFHOST_SCHEDULER_API_BASE_URL: z.string().url().default('http://127.0.0.1:8788'),
+  SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
   SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: z.preprocess(
     (value) => value ?? '60',
     z.coerce.number().int().positive()
@@ -15,5 +16,6 @@ export const parseSelfhostSchedulerVars = (
 ) =>
   selfhostSchedulerEnvSchema.parse({
     SELFHOST_SCHEDULER_API_BASE_URL: input.SELFHOST_SCHEDULER_API_BASE_URL,
+    SELFHOST_INTERNAL_SECRET: input.SELFHOST_INTERNAL_SECRET,
     SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: input.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   });

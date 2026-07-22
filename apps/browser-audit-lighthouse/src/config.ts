@@ -4,11 +4,12 @@ import { join } from 'node:path';
 export type BrowserAuditWorkerConfig = {
   host: string;
   port: number;
-  sharedSecret?: string;
+  sharedSecret: string;
   sharedSecretNext?: string;
   allowNoSandbox: boolean;
   chromeInstallDir: string;
   chromeExecutablePath: string | null;
+  hostAllowlist: string[];
 };
 
 const defaultChromeRoots = [
@@ -25,17 +26,41 @@ export const getConfig = (): BrowserAuditWorkerConfig => {
   return {
     host: process.env.HOST?.trim() || '0.0.0.0',
     port: Number(process.env.PORT ?? '8080'),
-    sharedSecret: normalizeSecret(process.env.BROWSER_AUDIT_SHARED_SECRET),
-    sharedSecretNext: normalizeSecret(process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT),
+    sharedSecret: requireSecret('BROWSER_AUDIT_SHARED_SECRET'),
+    sharedSecretNext: optionalSecret('BROWSER_AUDIT_SHARED_SECRET_NEXT'),
     allowNoSandbox: process.env.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'true',
     chromeInstallDir: process.env.CHROME_INSTALL_DIR?.trim() || '/opt/chrome',
-    chromeExecutablePath
+    chromeExecutablePath,
+    hostAllowlist: (process.env.BROWSER_AUDIT_HOST_ALLOWLIST ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
   };
 };
 
 const normalizeSecret = (value: string | undefined) => {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
+};
+
+const requireSecret = (name: string) => {
+  const value = normalizeSecret(process.env[name]);
+
+  if (!value || value.length < 16) {
+    throw new Error(`${name} is required and must contain at least 16 characters`);
+  }
+
+  return value;
+};
+
+const optionalSecret = (name: string) => {
+  const value = normalizeSecret(process.env[name]);
+
+  if (value && value.length < 16) {
+    throw new Error(`${name} must contain at least 16 characters when configured`);
+  }
+
+  return value;
 };
 
 const findChromeExecutable = (preferredRoot?: string) => {

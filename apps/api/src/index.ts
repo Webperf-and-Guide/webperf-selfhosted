@@ -118,15 +118,27 @@ import {
   summarizeTargets
 } from '@webperf/report-core';
 import { createSqliteJobRepository } from './repository';
+import { authorizeApiRequest } from './auth';
+import {
+  isSensitiveHeaderName,
+  redactJsonResponse,
+  redactSecretValues,
+  redactSensitiveData,
+  redactedValue
+} from './redaction';
 
 type SelfhostRuntime = {
   host: string;
   port: number;
   databasePath: string;
   retentionDays: number;
-  probeSharedSecret?: string;
+  adminToken: string;
+  adminTokenNext?: string;
+  internalSecret: string;
+  internalSecretNext?: string;
+  probeSharedSecret: string;
   probeSharedSecretNext?: string;
-  browserAuditSharedSecret?: string;
+  browserAuditSharedSecret: string;
   browserAuditSharedSecretNext?: string;
   browserAuditBaseUrl?: string;
   activeRegionCodes: RegionCode[];
@@ -190,7 +202,9 @@ const regionCodeSet = new Set<string>([
 
 export const runtime = parseRuntime(process.env);
 export const repository = createSqliteJobRepository({
-  databasePath: runtime.databasePath
+  databasePath: runtime.databasePath,
+  encryptionSecret: runtime.internalSecret,
+  encryptionSecretNext: runtime.internalSecretNext
 });
 
 repository.pruneJobsOlderThan(runtime.retentionDays);
@@ -234,11 +248,22 @@ const buildPublicCapabilitiesPayload = () => ({
     baselineCompare: true,
     reportExports: true,
     webhookAlerts: true,
-    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl && runtime.browserAuditSharedSecret),
+    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl),
     aiAnalyses: false,
     openApi: true,
     appRpc: true,
     opsRpc: true
+  },
+  metrics: {
+    networkProbe: {
+      version: 'v1' as const,
+      dnsTiming: true,
+      tcpTiming: false,
+      tlsTiming: false,
+      responseHeaderTiming: true,
+      bodySampleTiming: false,
+      tlsMetadata: false
+    }
   }
 });
 
@@ -581,7 +606,7 @@ const buildExportResource = (input: CreateExportInput): ExportResource => {
           profile,
           runs: report.recentRuns
         })
-      : JSON.stringify(report, null, 2);
+      : JSON.stringify(redactSensitiveData(report), null, 2);
 
   const exportResource = exportResourceSchema.parse({
     id: `exp_${crypto.randomUUID()}`,
@@ -684,7 +709,7 @@ const createJobSnapshotStream = (jobId: string) => {
             type: 'job.snapshot',
             job
           };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(redactSensitiveData(payload))}\n\n`));
 
           if (job.summary.inflight === 0) {
             break;
@@ -740,7 +765,11 @@ const routeRequest = async (request: Request) => {
       }
     }
 
-    if (pathname === '/health' || pathname === '/v1/health') {
+    if (pathname === '/health') {
+      return json({ service: 'webperf-api', ok: true });
+    }
+
+    if (pathname === '/v1/health') {
       return json(buildHealthPayload());
     }
 
@@ -1302,7 +1331,14 @@ export const server = Bun.serve({
   hostname: runtime.host,
   port: runtime.port,
   async fetch(request) {
-    return addCompatibilityDeprecationHeaders(request, await routeRequest(request));
+    const unauthorized = authorizeApiRequest(request, runtime);
+
+    if (unauthorized) {
+      return unauthorized;
+    }
+
+    const response = await redactJsonResponse(await routeRequest(request));
+    return addCompatibilityDeprecationHeaders(request, response);
   }
 });
 
@@ -1806,7 +1842,7 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     const now = new Date().toISOString();
     const name = requireTrimmedText(parsed.data.name, 'Check profile name');
     const note = normalizeOptionalText(parsed.data.note);
-    const requestConfig = normalizeCustomRequestConfig(parsed.data.request);
+    const requestConfig = normalizeCustomRequestConfig(parsed.data.request, existing?.request);
     const monitorPolicy = normalizeMonitorPolicy(parsed.data.monitorPolicy);
     const alerts = normalizeAlertConfig(parsed.data.alerts, existing?.alerts);
     ensureUniqueCheckProfile({
@@ -2125,7 +2161,7 @@ async function handleCreateBrowserAudit(request: Request) {
     );
   }
 
-  if (!runtime.browserAuditBaseUrl || !runtime.browserAuditSharedSecret) {
+  if (!runtime.browserAuditBaseUrl) {
     return json(
       {
         error: 'Browser audit direct-run is not configured'
@@ -2177,7 +2213,7 @@ async function handleCreateBrowserAudit(request: Request) {
         customHeaders: input.customHeaders,
         cookies: input.cookies,
         result: parsedWorkerResponse.data.result,
-        error: parsedWorkerResponse.data.error
+        error: sanitizeBrowserAuditError(parsedWorkerResponse.data.error, input)
       });
     } else {
       const message =
@@ -2196,7 +2232,7 @@ async function handleCreateBrowserAudit(request: Request) {
         customHeaders: input.customHeaders,
         cookies: input.cookies,
         result: null,
-        error: message
+        error: sanitizeBrowserAuditError(message, input)
       });
     }
   } catch (error) {
@@ -2212,12 +2248,26 @@ async function handleCreateBrowserAudit(request: Request) {
       customHeaders: input.customHeaders,
       cookies: input.cookies,
       result: null,
-      error: error instanceof Error ? error.message : 'Browser audit request failed'
+      error: sanitizeBrowserAuditError(
+        error instanceof Error ? error.message : 'Browser audit request failed',
+        input
+      )
     });
   }
 
   repository.saveBrowserAudit(browserAudit);
   return json(browserAudit, { status: 201 });
+}
+
+function sanitizeBrowserAuditError(message: string | null, input: CreateBrowserAuditInput) {
+  if (message === null) {
+    return null;
+  }
+
+  return redactSecretValues(message, [
+    ...input.customHeaders.map((header) => header.value),
+    ...input.cookies.map((cookie) => cookie.value)
+  ]);
 }
 
 function handleGetBrowserAudit(auditId: string) {
@@ -2649,12 +2699,15 @@ function buildStatusFailureMessage(statusCode: number | null | undefined) {
   return `Status ${statusCode} did not satisfy status_2xx_3xx`;
 }
 
-function normalizeCustomRequestConfig(request: CreateLatencyJobInput['request'] | CreateCheckProfileInput['request']) {
+function normalizeCustomRequestConfig(
+  request: CreateLatencyJobInput['request'] | CreateCheckProfileInput['request'],
+  existing?: CheckProfile['request']
+) {
   return {
     method: request?.method ?? 'GET',
     headers: (request?.headers ?? []).map((header) => ({
       name: requireTrimmedText(header.name, 'Header name'),
-      value: header.value.trim()
+      value: resolveMaskedHeaderValue(header.name, header.value.trim(), existing)
     })),
     body:
       request?.body == null
@@ -2665,6 +2718,26 @@ function normalizeCustomRequestConfig(request: CreateLatencyJobInput['request'] 
             value: request.body.value
           }
   } satisfies NonNullable<CreateLatencyJobInput['request']>;
+}
+
+function resolveMaskedHeaderValue(
+  name: string,
+  value: string,
+  existing: CheckProfile['request'] | undefined
+) {
+  if (value !== redactedValue || !isSensitiveHeaderName(name)) {
+    return value;
+  }
+
+  const previous = existing?.headers.find(
+    (header) => header.name.trim().toLowerCase() === name.trim().toLowerCase()
+  );
+
+  if (!previous) {
+    throw new Error(`A new sensitive header cannot use ${redactedValue} as its value`);
+  }
+
+  return previous.value;
 }
 
 function normalizeMonitorPolicy(
@@ -2688,7 +2761,10 @@ function normalizeAlertConfig(
       name: requireTrimmedText(target.name, 'Webhook target name'),
       url: target.url.trim(),
       enabled: target.enabled ?? true,
-      secret: normalizeOptionalText(target.secret)
+      secret:
+        target.secret === redactedValue && previousTarget?.secret
+          ? previousTarget.secret
+          : normalizeOptionalText(target.secret)
     };
   }) ?? existing?.webhookTargets ?? [];
 
@@ -3044,6 +3120,10 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     port: parsed.SELFHOST_API_PORT,
     databasePath: parsed.SELFHOST_DATABASE_PATH,
     retentionDays: parsed.SELFHOST_RETENTION_DAYS,
+    adminToken: parsed.SELFHOST_ADMIN_TOKEN,
+    adminTokenNext: parsed.SELFHOST_ADMIN_TOKEN_NEXT,
+    internalSecret: parsed.SELFHOST_INTERNAL_SECRET,
+    internalSecretNext: parsed.SELFHOST_INTERNAL_SECRET_NEXT,
     probeSharedSecret: parsed.PROBE_SHARED_SECRET,
     probeSharedSecretNext: parsed.PROBE_SHARED_SECRET_NEXT,
     browserAuditSharedSecret: parsed.BROWSER_AUDIT_SHARED_SECRET,

@@ -11,6 +11,8 @@ import {
 import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
 import type { BrowserAuditWorkerConfig } from './config';
+import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
+import { redactBrowserAuditText } from './redaction';
 
 const presetViewport = {
   mobile: {
@@ -44,8 +46,17 @@ export const runBrowserAudit = async ({
     throw new Error('Chrome executable is not configured');
   }
 
+  await validateBrowserRequestUrl(input.targetUrl, { allowlist: config.hostAllowlist });
+
+  for (const step of input.policy.flow.steps) {
+    if (step.type === 'navigate' && step.url) {
+      await validateBrowserRequestUrl(step.url, { allowlist: config.hostAllowlist });
+    }
+  }
+
   const browser = await launchBrowser(config);
   const page = await browser.newPage();
+  const networkGuard = await installBrowserNetworkGuard(page, config.hostAllowlist);
   const startedAt = new Date().toISOString();
   const issues: Array<{ code: string; severity: 'info' | 'warning' | 'error'; message: string }> = [];
   const artifacts: BrowserAuditArtifactRef[] = [];
@@ -66,7 +77,7 @@ export const runBrowserAudit = async ({
         issues.push({
           code: 'trace_start_failed',
           severity: 'warning',
-          message: error instanceof Error ? error.message : 'Failed to start tracing'
+          message: redactBrowserAuditText(error instanceof Error ? error.message : 'Failed to start tracing', input)
         });
       }
     }
@@ -95,18 +106,26 @@ export const runBrowserAudit = async ({
 
       if (step.type === 'navigate') {
         const url = step.url ?? input.targetUrl;
-        await flow.navigate(
-          async () => {
-            const response = await page.goto(url, {
-              waitUntil: 'networkidle0',
-              timeout: input.policy.timeouts.stepTimeoutMs
-            } as any);
-            responseStatusCode = response?.status() ?? responseStatusCode;
-          },
-          {
-            name: step.label ?? `navigate-${index + 1}`
-          }
-        );
+        await validateBrowserRequestUrl(url, { allowlist: config.hostAllowlist });
+
+        try {
+          await flow.navigate(
+            async () => {
+              const response = await page.goto(url, {
+                waitUntil: 'networkidle0',
+                timeout: input.policy.timeouts.stepTimeoutMs
+              } as any);
+              responseStatusCode = response?.status() ?? responseStatusCode;
+            },
+            {
+              name: step.label ?? `navigate-${index + 1}`
+            }
+          );
+        } catch (error) {
+          networkGuard.throwIfBlocked();
+          throw error;
+        }
+        networkGuard.throwIfBlocked();
         finalUrl = page.url();
         navigationSeen = true;
         continue;
@@ -117,6 +136,7 @@ export const runBrowserAudit = async ({
       }
 
       await runStep(page, flow, step, input.policy.timeouts.stepTimeoutMs);
+      networkGuard.throwIfBlocked();
     }
 
     if (input.policy.artifacts.screenshot) {
@@ -130,7 +150,7 @@ export const runBrowserAudit = async ({
         issues.push({
           code: 'screenshot_failed',
           severity: 'warning',
-          message: error instanceof Error ? error.message : 'Failed to capture screenshot'
+          message: redactBrowserAuditText(error instanceof Error ? error.message : 'Failed to capture screenshot', input)
         });
       }
     }
@@ -142,12 +162,13 @@ export const runBrowserAudit = async ({
         issues.push({
           code: 'trace_stop_failed',
           severity: 'warning',
-          message: error instanceof Error ? error.message : 'Failed to finish tracing'
+          message: redactBrowserAuditText(error instanceof Error ? error.message : 'Failed to finish tracing', input)
         });
       }
     }
 
     const rawFlowResult = (await flow.createFlowResult()) as any;
+    networkGuard.throwIfBlocked();
     const reportHtml = typeof flow.generateReport === 'function' ? ((await flow.generateReport()) as string) : null;
 
     if (input.policy.artifacts.json) {
@@ -157,7 +178,7 @@ export const runBrowserAudit = async ({
           'json',
           'flow-result.json',
           'application/json',
-          new TextEncoder().encode(JSON.stringify(rawFlowResult, null, 2))
+          new TextEncoder().encode(redactBrowserAuditText(JSON.stringify(rawFlowResult, null, 2), input))
         ))
       );
     }
@@ -169,13 +190,21 @@ export const runBrowserAudit = async ({
           'html',
           'report.html',
           'text/html; charset=utf-8',
-          new TextEncoder().encode(reportHtml)
+          new TextEncoder().encode(redactBrowserAuditText(reportHtml, input))
         ))
       );
     }
 
     if (traceBuffer && input.policy.artifacts.trace) {
-      artifacts.push(...(await uploadArtifact(input, 'trace', 'trace.json', 'application/json', traceBuffer)));
+      artifacts.push(
+        ...(await uploadArtifact(
+          input,
+          'trace',
+          'trace.json',
+          'application/json',
+          new TextEncoder().encode(redactBrowserAuditText(new TextDecoder().decode(traceBuffer), input))
+        ))
+      );
     }
 
     const completedAt = new Date().toISOString();

@@ -54,6 +54,18 @@ const requiredControlPaths = [
 assertPaths('public', publicDoc.paths, requiredPublicPaths);
 assertPaths('control', controlDoc.paths, requiredControlPaths);
 
+if (!publicDoc.components?.securitySchemes.selfhostAdminToken) {
+  throw new Error('public OpenAPI document is missing the self-host admin bearer scheme');
+}
+
+if (publicDoc.paths['/v1/capabilities']?.get?.security) {
+  throw new Error('public capabilities must remain unauthenticated in OpenAPI');
+}
+
+if (!publicDoc.paths['/v1/sites']?.get?.security) {
+  throw new Error('protected public API operations must declare bearer authentication');
+}
+
 console.log(
   JSON.stringify(
     {

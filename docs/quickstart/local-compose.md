@@ -4,10 +4,10 @@ Use this path when you want the default stack in Docker rather than local proces
 
 ## Quick Start
 
-1. Copy the Compose env example:
+1. Generate a Compose env file with random secrets:
 
 ```sh
-cp infra/docker-compose/.env.example infra/docker-compose/.env
+bun run selfhost:init
 ```
 
 2. Start the stack:
@@ -51,6 +51,8 @@ bun run capture:console:baselines
 ## Useful Env Vars
 
 - `CONTROL_BASE_URL`: where the console proxies API requests
+- `SELFHOST_ADMIN_TOKEN`: server-only console and operator API token
+- `SELFHOST_INTERNAL_SECRET`: scheduler/executor credential and encrypted-payload key source
 - `PROBE_SHARED_SECRET`: shared secret used between the API and probe; replace the example value before you boot the stack
 - `BROWSER_AUDIT_SHARED_SECRET`: shared secret used for signed browser-audit requests when the optional worker is enabled
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT`: optional rollover secret accepted alongside the current browser-audit key

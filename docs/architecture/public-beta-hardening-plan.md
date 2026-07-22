@@ -158,12 +158,12 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 2. Security defaults
 
-- [ ] Add admin/internal/current-next secret schemas and strict startup checks.
-- [ ] Add API authentication and server-only console token forwarding.
-- [ ] Encrypt or reference sensitive execution inputs and mask all reads.
-- [ ] Add shared redaction for logs, errors, exports, and URL queries.
-- [ ] Complete network and browser SSRF enforcement with fixtures.
-- [ ] Add a Sampo changeset for authentication and security behavior.
+- [x] Add admin/internal/current-next secret schemas and strict startup checks.
+- [x] Add API authentication and server-only console token forwarding.
+- [x] Encrypt or reference sensitive execution inputs and mask all reads.
+- [x] Add shared redaction for logs, errors, exports, and URL queries.
+- [x] Complete network and browser SSRF enforcement with fixtures.
+- [x] Add a Sampo changeset for authentication and security behavior.
 
 ### 3. Executor and SQLite leases
 
@@ -185,7 +185,7 @@ The exact diff will stay small within each phase, but the expected surface is:
   artifacts, toolchain, and timestamps.
 - [ ] Make artifact kinds extensible while registering standard kinds.
 - [ ] Preserve Lighthouse user-flow support and add engine-neutral fixtures.
-- [ ] Report Fast Check capabilities truthfully; unsupported TCP/TLS fields stay
+- [x] Report Fast Check capabilities truthfully; unsupported TCP/TLS fields stay
   null with capability flags false.
 - [ ] Add a Sampo changeset for the public contract version.
 

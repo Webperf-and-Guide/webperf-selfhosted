@@ -7,6 +7,7 @@ import { launchBrowser, runBrowserAudit } from './audit';
 import { buildCapabilities, buildStartupCheck } from './capabilities';
 import { getConfig } from './config';
 import { verifyBrowserAuditSignature } from './signatures';
+import { redactBrowserAuditText } from './redaction';
 
 const json = (payload: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(payload, null, 2), {
@@ -120,7 +121,10 @@ Bun.serve({
             executionId: parsed.data.executionId,
             status: 'failed',
             result: null,
-            error: error instanceof Error ? error.message : 'Browser audit failed'
+            error: redactBrowserAuditText(
+              error instanceof Error ? error.message : 'Browser audit failed',
+              parsed.data
+            )
           }),
           { status: 500 }
         );

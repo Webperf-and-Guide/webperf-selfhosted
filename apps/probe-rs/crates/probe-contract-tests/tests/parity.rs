@@ -1,5 +1,8 @@
 use anyhow::Result;
-use probe_core::{Config, MeasureRequest, ProbeMeasurementResponse, RequestBody, RequestConfig, RequestHeader, sign_request};
+use probe_core::{
+    Config, MeasureRequest, ProbeMeasurementResponse, RequestBody, RequestConfig, RequestHeader,
+    sign_request,
+};
 use probe_server::{AppState, serve};
 use reqwest::{Client, StatusCode};
 use std::{net::TcpListener, sync::OnceLock, time::Duration};
@@ -148,7 +151,7 @@ impl Harness {
         };
 
         let listener = TokioTcpListener::bind(&config.listen_addr).await?;
-        let state = AppState::new(config)?;
+        let state = AppState::new(config);
         let rust_task = tokio::spawn(async move {
             let _ = serve(listener, state).await;
         });

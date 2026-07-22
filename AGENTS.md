@@ -64,7 +64,7 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-04-18:
+Current repo state as of 2026-07-22:
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
@@ -131,6 +131,10 @@ Current repo state as of 2026-04-18:
 - public-beta hardening is now tracked in `docs/architecture/public-beta-hardening-plan.md`, covering durable execution, strict self-host security, engine-neutral browser audits, local artifacts, versioned Compose/release automation, and operator documentation
 - the optional browser runtime is now named `apps/browser-audit-lighthouse` and documented as a Lighthouse reference implementation, while provider-specific cloud config, health schemas, Turnstile/Cloudflare console adapters, and managed smoke/migration scripts have been removed from the self-host boundary
 - legacy REST prefixes now emit deprecation, successor-link, and warning headers while canonical Site, Route Group, Region Set, and Check paths remain unmarked
+- self-host production startup now requires explicit admin, internal, probe, and browser-audit secrets with optional next-key rotation; the console forwards the admin credential server-side and the scheduler uses the internal credential
+- persisted JSON payloads are now AES-256-GCM encrypted, sensitive headers/cookies/webhook secrets are masked across API/RPC/SSE/export paths, and `selfhost:init` generates a non-overwriting random Compose env file
+- the Rust probe now pins validated DNS addresses into reqwest across redirects, while the Lighthouse runner enforces public-network target/navigation/subresource checks plus download/new-window blocking and an explicit operator allowlist
+- `/v1/capabilities` now reports the implemented Fast Check metric surface, keeping TCP/TLS timing and TLS metadata disabled and null until they are actually measured
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -168,7 +172,7 @@ Current local URLs:
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
 2. move all network, browser-audit, and webhook execution into a durable leased executor
-3. enforce the single-organization admin/internal authentication and secret-redaction model
+3. keep the single-organization admin/internal authentication, encrypted persistence, rotation, and secret-redaction model covered as execution moves into the durable executor
 4. ship engine-neutral browser-audit contracts and a renamed Lighthouse reference runner
 5. persist and serve local artifacts through authenticated, traversal-safe endpoints
 6. ship versioned production/development Compose bundles with internal-only services

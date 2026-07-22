@@ -16,12 +16,15 @@ This folder contains the local Compose bundle for the self-hosted stack.
 docker compose -f infra/docker-compose/docker-compose.yml up --build
 ```
 
-To customize ports, secrets, or active regions:
+Generate random secrets and then customize ports or active regions if needed:
 
 ```sh
-cp infra/docker-compose/.env.example infra/docker-compose/.env
+bun run selfhost:init
 docker compose --env-file infra/docker-compose/.env -f infra/docker-compose/docker-compose.yml up --build
 ```
+
+See [self-host authentication and secrets](../../docs/security/auth-and-secrets.md)
+for the token boundary, rotation, encryption, redaction, and network policy.
 
 The probe stays on the internal Compose network by default.
 Only the console and API are published to the host unless you add an explicit probe port mapping.

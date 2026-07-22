@@ -15,7 +15,14 @@ type HmacSha256 = Hmac<Sha256>;
 
 const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_REGION_CODE: &str = "tokyo";
-const DEFAULT_SHARED_SECRET: &str = "dev-shared-secret";
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("PROBE_SHARED_SECRET is required and must contain at least 16 characters")]
+    InvalidSharedSecret,
+    #[error("PROBE_SHARED_SECRET_NEXT must contain at least 16 characters when configured")]
+    InvalidSharedSecretNext,
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -26,18 +33,27 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env() -> Self {
-        Self {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let shared_secret = env::var("PROBE_SHARED_SECRET")
+            .ok()
+            .filter(|value| value.trim().len() >= 16)
+            .ok_or(ConfigError::InvalidSharedSecret)?;
+
+        let shared_secret_next = match env::var("PROBE_SHARED_SECRET_NEXT") {
+            Ok(value) if value.trim().is_empty() => None,
+            Ok(value) if value.trim().len() >= 16 => Some(value),
+            Ok(_) => return Err(ConfigError::InvalidSharedSecretNext),
+            Err(_) => None,
+        };
+
+        Ok(Self {
             listen_addr: env::var("PROBE_LISTEN_ADDR")
                 .unwrap_or_else(|_| DEFAULT_LISTEN_ADDR.to_string()),
             region_code: env::var("REGION_CODE")
                 .unwrap_or_else(|_| DEFAULT_REGION_CODE.to_string()),
-            shared_secret: env::var("PROBE_SHARED_SECRET")
-                .unwrap_or_else(|_| DEFAULT_SHARED_SECRET.to_string()),
-            shared_secret_next: env::var("PROBE_SHARED_SECRET_NEXT")
-                .ok()
-                .filter(|value| !value.is_empty()),
-        }
+            shared_secret,
+            shared_secret_next,
+        })
     }
 }
 
@@ -236,13 +252,18 @@ pub fn signature_payload(request: &MeasureRequest) -> String {
     let mut headers = normalized_request
         .headers
         .into_iter()
-        .map(|header| json!({
-            "name": header.name.trim().to_ascii_lowercase(),
-            "value": header.value.trim(),
-        }))
+        .map(|header| {
+            json!({
+                "name": header.name.trim().to_ascii_lowercase(),
+                "value": header.value.trim(),
+            })
+        })
         .collect::<Vec<_>>();
     headers.sort_by(|left, right| {
-        let left_name = left.get("name").and_then(|value| value.as_str()).unwrap_or_default();
+        let left_name = left
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
         let right_name = right
             .get("name")
             .and_then(|value| value.as_str())

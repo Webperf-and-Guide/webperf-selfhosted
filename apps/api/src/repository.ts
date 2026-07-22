@@ -26,6 +26,8 @@ import {
 } from '@webperf/contracts';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createStorageCrypto } from './storage-crypto';
+import { redactUrlQuery } from './redaction';
 
 type JobRow = {
   id: string;
@@ -95,9 +97,13 @@ type JsonSchema<T> = {
 };
 
 export const createSqliteJobRepository = ({
-  databasePath
+  databasePath,
+  encryptionSecret,
+  encryptionSecretNext
 }: {
   databasePath: string;
+  encryptionSecret: string;
+  encryptionSecretNext?: string;
 }): JobRepository => {
   if (databasePath !== ':memory:') {
     mkdirSync(dirname(databasePath), { recursive: true });
@@ -106,6 +112,10 @@ export const createSqliteJobRepository = ({
   const db = new Database(databasePath, {
     create: true,
     strict: true
+  });
+  const storageCrypto = createStorageCrypto({
+    currentSecret: encryptionSecret,
+    nextSecret: encryptionSecretNext
   });
 
   db.exec(`
@@ -226,14 +236,14 @@ export const createSqliteJobRepository = ({
 
   const parseJob = (row: JobRow) => {
     try {
-      return latencyJobDetailSchema.parse(JSON.parse(row.payload_json));
-    } catch (error) {
+      return latencyJobDetailSchema.parse(storageCrypto.parse(row.payload_json));
+    } catch {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'job_row_invalid',
           jobId: row.id,
-          error: error instanceof Error ? error.message : 'Invalid job payload'
+          error: 'Persisted job payload could not be decoded'
         })
       );
       return null;
@@ -242,14 +252,14 @@ export const createSqliteJobRepository = ({
 
   const parseEntity = <T>(kind: EntityKind, row: SavedEntityRow, schema: JsonSchema<T>) => {
     try {
-      return schema.parse(JSON.parse(row.payload_json));
-    } catch (error) {
+      return schema.parse(storageCrypto.parse(row.payload_json));
+    } catch {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'saved_entity_invalid',
           kind,
-          error: error instanceof Error ? error.message : 'Invalid saved entity payload'
+          error: 'Persisted entity payload could not be decoded'
         })
       );
       return null;
@@ -258,13 +268,13 @@ export const createSqliteJobRepository = ({
 
   const parseCheckProfileRun = (row: CheckProfileRunRow) => {
     try {
-      return checkProfileRunSchema.parse(JSON.parse(row.payload_json));
-    } catch (error) {
+      return checkProfileRunSchema.parse(storageCrypto.parse(row.payload_json));
+    } catch {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'check_profile_run_invalid',
-          error: error instanceof Error ? error.message : 'Invalid check profile run payload'
+          error: 'Persisted check run payload could not be decoded'
         })
       );
       return null;
@@ -295,7 +305,7 @@ export const createSqliteJobRepository = ({
       entity.id,
       entity.createdAt,
       entity.updatedAt,
-      JSON.stringify(entity)
+      storageCrypto.stringify(entity)
     );
   };
 
@@ -329,11 +339,11 @@ export const createSqliteJobRepository = ({
     saveJob(job) {
       saveStatement.run(
         job.id,
-        job.url,
+        redactUrlQuery(job.url),
         job.status,
         job.requestedAt,
         new Date().toISOString(),
-        JSON.stringify(job)
+        storageCrypto.stringify(job)
       );
     },
     pruneJobsOlderThan(retentionDays, now = new Date()) {
@@ -414,7 +424,7 @@ export const createSqliteJobRepository = ({
         run.id,
         run.profileId,
         run.createdAt,
-        JSON.stringify(run)
+        storageCrypto.stringify(run)
       );
     },
     getComparison(id) {

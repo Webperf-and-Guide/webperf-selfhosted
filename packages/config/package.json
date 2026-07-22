@@ -19,6 +19,10 @@
       "types": "./src/selfhost.ts",
       "import": "./src/selfhost.ts"
     },
+    "./selfhost-console": {
+      "types": "./src/selfhost-console.ts",
+      "import": "./src/selfhost-console.ts"
+    },
     "./selfhost-scheduler": {
       "types": "./src/selfhost-scheduler.ts",
       "import": "./src/selfhost-scheduler.ts"

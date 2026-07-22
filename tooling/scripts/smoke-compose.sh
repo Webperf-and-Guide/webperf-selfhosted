@@ -34,14 +34,16 @@ for raw in env_path.read_text().splitlines():
     key, value = raw.split('=', 1)
     values[key] = value
 
-values['PROBE_SHARED_SECRET'] = 'dev-shared-secret'
+values['SELFHOST_ADMIN_TOKEN'] = 'smoke-admin-token-value'
+values['SELFHOST_INTERNAL_SECRET'] = 'smoke-internal-secret-value'
+values['PROBE_SHARED_SECRET'] = 'smoke-probe-shared-secret'
 values['BROWSER_AUDIT_SHARED_SECRET_NEXT'] = ''
-values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'
+values['BROWSER_AUDIT_SHARED_SECRET'] = 'smoke-browser-audit-shared-secret'
 
 if profile == 'browser-audit':
-    values['BROWSER_AUDIT_SHARED_SECRET'] = 'dev-browser-audit-shared-secret'
+    values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'
 else:
-    values['BROWSER_AUDIT_SHARED_SECRET'] = ''
+    values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = ''
 
 env_path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
 PY
@@ -67,6 +69,7 @@ if [[ "$profile" == "browser-audit" ]]; then
   curl -fsS http://127.0.0.1:8081/healthz >/dev/null
   audit_response="$(
     curl -fsS -X POST http://127.0.0.1:8788/v1/browser-audits \
+      -H 'authorization: Bearer smoke-admin-token-value' \
       -H 'content-type: application/json' \
       -d '{
         "targetUrl": "https://example.com",

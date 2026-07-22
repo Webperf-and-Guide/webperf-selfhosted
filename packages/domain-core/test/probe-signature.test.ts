@@ -17,7 +17,7 @@ test('probe signature payload matches rust canonical ordering', async () => {
     '{"jobId":"smoke","region":"tokyo","request":{"body":null,"headers":[],"method":"GET"},"targetId":"smoke:tokyo","timestamp":"2026-04-15T00:00:00.000Z","url":"https://example.com"}'
   );
 
-  await expect(createProbeSignature('dev-shared-secret', request)).resolves.toBe(
-    'f8ba59af93e360cba2e72ef9fd653e0a1f675b64110b336ac4b14de77e756448'
+  await expect(createProbeSignature('test-probe-signature-secret', request)).resolves.toBe(
+    'db0454ef72753b1169b35dc35f6eb219214d4a99372f806269a15a771311c5f5'
   );
 });

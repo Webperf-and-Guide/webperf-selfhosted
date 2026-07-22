@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use probe_client::{build_client, measure_url};
+use probe_client::measure_url;
 use probe_core::{
     Config, MeasureRequest, ProbeImplementation, ProbeMeasurementResponse, timestamp_is_valid,
     verify_request_signature,
@@ -22,15 +22,13 @@ const MAX_BODY_SIZE_BYTES: usize = 32 * 1024;
 #[derive(Clone)]
 pub struct AppState {
     config: Arc<Config>,
-    client: reqwest::Client,
 }
 
 impl AppState {
-    pub fn new(config: Config) -> Result<Self> {
-        Ok(Self {
+    pub fn new(config: Config) -> Self {
+        Self {
             config: Arc::new(config),
-            client: build_client()?,
-        })
+        }
     }
 }
 
@@ -99,13 +97,8 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
         return plain_text_response(StatusCode::UNAUTHORIZED, "invalid signature");
     }
 
-    let measurement = measure_url(
-        &state.client,
-        &state.config.region_code,
-        &body.url,
-        body.request.as_ref(),
-    )
-    .await;
+    let measurement =
+        measure_url(&state.config.region_code, &body.url, body.request.as_ref()).await;
     info!(
         probe_impl = "rust",
         region = %state.config.region_code,

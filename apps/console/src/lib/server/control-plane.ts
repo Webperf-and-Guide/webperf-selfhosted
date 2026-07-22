@@ -3,7 +3,7 @@ import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
 import type { ExportResource, JobSnapshotEvent, ListQuery } from '@webperf/contracts';
 import { appContract, opsContract, publicContract } from '@webperf/contracts';
-import { parseWebEnv } from '@webperf/config/public';
+import { parseSelfhostConsoleVars } from '@webperf/config/selfhost-console';
 import { env as privateEnv } from '$env/dynamic/private';
 
 type Platform = App.Platform | undefined;
@@ -74,12 +74,14 @@ const proxyResponse = (response: Response) => {
 };
 
 const resolveRuntime = (_platform: Platform) =>
-  parseWebEnv({
-    CONTROL_BASE_URL: privateEnv.CONTROL_BASE_URL
+  parseSelfhostConsoleVars({
+    CONTROL_BASE_URL: privateEnv.CONTROL_BASE_URL,
+    SELFHOST_ADMIN_TOKEN: privateEnv.SELFHOST_ADMIN_TOKEN
   });
 
-const buildHeaders = (requesterIp?: string | null, initial?: HeadersInit) => {
+const buildHeaders = (adminToken: string, requesterIp?: string | null, initial?: HeadersInit) => {
   const headers = new Headers(initial);
+  headers.set('authorization', `Bearer ${adminToken}`);
 
   if (requesterIp) {
     headers.set('cf-connecting-ip', requesterIp);
@@ -137,7 +139,7 @@ const createRpcLink = (
     url: new URL(path, runtime.CONTROL_BASE_URL).toString(),
     fetch: (input, init) => {
       const request = new Request(input, init);
-      const headers = buildHeaders(requesterIp, request.headers);
+      const headers = buildHeaders(runtime.SELFHOST_ADMIN_TOKEN, requesterIp, request.headers);
       return fetch(new Request(request, { headers, redirect: 'manual' }));
     }
   });

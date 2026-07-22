@@ -48,7 +48,17 @@ Useful defaults:
 - `SELFHOST_RETENTION_DAYS=30`
 - `SELFHOST_ACTIVE_REGION_CODES_JSON=["tokyo"]`
 - `SELFHOST_PROBE_BASE_URLS_JSON={"tokyo":"http://127.0.0.1:8080"}`
-- `PROBE_SHARED_SECRET=dev-shared-secret`
+
+Required secrets have no defaults:
+
+- `SELFHOST_ADMIN_TOKEN`
+- `SELFHOST_INTERNAL_SECRET`
+- `PROBE_SHARED_SECRET`
+- `BROWSER_AUDIT_SHARED_SECRET`
+
+Use `bun run selfhost:init` for a generated Compose environment or provide
+explicit values for local process mode. See
+[self-host authentication and secrets](../../docs/security/auth-and-secrets.md).
 
 ## Compose
 

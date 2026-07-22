@@ -9,8 +9,8 @@ use tracing_subscriber::{EnvFilter, fmt};
 async fn main() -> Result<()> {
     init_tracing();
 
-    let config = Config::from_env();
-    let state = AppState::new(config.clone())?;
+    let config = Config::from_env()?;
+    let state = AppState::new(config.clone());
     let listener = TcpListener::bind(&config.listen_addr).await?;
 
     info!(

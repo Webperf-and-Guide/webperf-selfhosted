@@ -28,7 +28,12 @@ const selfhostEnvKeys = [
   'SELFHOST_API_HOST',
   'SELFHOST_API_PORT',
   'SELFHOST_DATABASE_PATH',
+  'SELFHOST_ADMIN_TOKEN',
+  'SELFHOST_ADMIN_TOKEN_NEXT',
+  'SELFHOST_INTERNAL_SECRET',
+  'SELFHOST_INTERNAL_SECRET_NEXT',
   'PROBE_SHARED_SECRET',
+  'PROBE_SHARED_SECRET_NEXT',
   'SELFHOST_ACTIVE_REGION_CODES_JSON',
   'SELFHOST_REGION_IDS_JSON',
   'SELFHOST_PROBE_BASE_URLS_JSON',
@@ -38,10 +43,37 @@ const selfhostEnvKeys = [
   'SELFHOST_BROWSER_AUDIT_BASE_URL'
 ] as const;
 
+const testAdminToken = 'test-admin-token-keep-server-side';
+const testInternalSecret = 'test-internal-secret-for-services';
+const testProbeSecret = 'test-probe-shared-secret';
+const defaultBrowserAuditSecret = 'test-browser-audit-shared-secret';
+const nativeFetch = globalThis.fetch;
+const apiCredentialsByOrigin = new Map<string, { adminToken: string; internalSecret: string }>();
+const fetch = Object.assign((
+  input: Parameters<typeof globalThis.fetch>[0],
+  init?: Parameters<typeof globalThis.fetch>[1]
+) => {
+  const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
+  const url = new URL(request.url);
+  const credentials = apiCredentialsByOrigin.get(url.origin);
+
+  if (!credentials) {
+    return nativeFetch(request);
+  }
+
+  const headers = new Headers(request.headers);
+  const token = url.pathname === '/v1/scheduler/dispatch'
+    ? credentials.internalSecret
+    : credentials.adminToken;
+  headers.set('authorization', `Bearer ${token}`);
+  return nativeFetch(new Request(request, { headers }));
+}, { preconnect: nativeFetch.preconnect });
+
 const tempDirs: string[] = [];
 const startedServers: Array<{ stop: (closeActiveConnections?: boolean) => void }> = [];
 
 afterEach(() => {
+  apiCredentialsByOrigin.clear();
   for (const server of startedServers.splice(0)) {
     server.stop(true);
   }
@@ -88,22 +120,26 @@ describe('api service monitoring expansion', () => {
       });
       const client = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc`
+          url: `${harness.baseUrl}/rpc`,
+          fetch
         })
       ) as ContractRouterClient<typeof controlContract>;
       const publicClient = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc/public`
+          url: `${harness.baseUrl}/rpc/public`,
+          fetch
         })
       ) as ContractRouterClient<typeof publicContract>;
       const appClient = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc/app`
+          url: `${harness.baseUrl}/rpc/app`,
+          fetch
         })
       ) as ContractRouterClient<typeof appContract>;
       const opsClient = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc/ops`
+          url: `${harness.baseUrl}/rpc/ops`,
+          fetch
         })
       ) as ContractRouterClient<typeof opsContract>;
 
@@ -114,6 +150,32 @@ describe('api service monitoring expansion', () => {
       expect((await appClient.system.regions()).regions.length).toBeGreaterThan(0);
       expect((await publicClient.capabilities.get()).deploymentModel).toBe('selfhost');
       expect((await publicClient.capabilities.get()).features.browserAuditDirectRun).toBe(true);
+      expect((await publicClient.capabilities.get()).metrics.networkProbe).toEqual({
+        version: 'v1',
+        dnsTiming: true,
+        tcpTiming: false,
+        tlsTiming: false,
+        responseHeaderTiming: true,
+        bodySampleTiming: false,
+        tlsMetadata: false
+      });
+
+      const unauthorizedSitesResponse = await nativeFetch(`${harness.baseUrl}/v1/sites`);
+      expect(unauthorizedSitesResponse.status).toBe(401);
+      expect(unauthorizedSitesResponse.headers.get('www-authenticate')).toContain('Bearer');
+      expect((await nativeFetch(`${harness.baseUrl}/v1/capabilities`)).status).toBe(200);
+      const publicHealth = await (await nativeFetch(`${harness.baseUrl}/health`)).json();
+      expect(publicHealth).toEqual({ service: 'webperf-api', ok: true });
+      expect((await nativeFetch(`${harness.baseUrl}/openapi/public.json`)).status).toBe(200);
+      expect((await nativeFetch(`${harness.baseUrl}/openapi/control.json`)).status).toBe(401);
+      expect(
+        (
+          await nativeFetch(`${harness.baseUrl}/v1/scheduler/dispatch`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${testAdminToken}` }
+          })
+        ).status
+      ).toBe(401);
 
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);
@@ -158,6 +220,7 @@ describe('api service monitoring expansion', () => {
       expect(thresholdReport.latestRunSummary?.status).toBe('warning');
       expect(thresholdReport.latestRunSummary?.evaluation?.thresholdBreached).toBe(true);
       expect(thresholdReport.latestRunSummary?.evaluation?.failedChecks).toBe(0);
+      expect(thresholdReport.profile.request?.headers[0]?.value).toBe('[REDACTED]');
       expect(probeRequests).toHaveLength(1);
       expect(probeRequests[0]).toMatchObject({
         request: {
@@ -234,13 +297,19 @@ describe('api service monitoring expansion', () => {
         status: string;
         error: string | null;
         result: { summary: { performanceScore: number | null }; artifacts: Array<{ kind: string }> } | null;
+        customHeaders: Array<{ name: string; value: string }>;
+        cookies: Array<{ name: string; value: string }>;
       };
       expect(browserAuditCreateResponse.status).toBe(201);
       expect(createdBrowserAudit.status).toBe('succeeded');
       expect(createdBrowserAudit.error).toBeNull();
       expect(createdBrowserAudit.result?.summary.performanceScore).toBe(0.91);
       expect(createdBrowserAudit.result?.artifacts.some((artifact) => artifact.kind === 'html')).toBe(true);
+      expect(createdBrowserAudit.customHeaders[0]?.value).toBe('[REDACTED]');
+      expect(createdBrowserAudit.cookies[0]?.value).toBe('[REDACTED]');
       expect(browserAuditRequests).toHaveLength(1);
+      expect(browserAuditRequests[0]?.customHeaders[0]?.value).toBe('Bearer smoke-token');
+      expect(browserAuditRequests[0]?.cookies[0]?.value).toBe('cookie-value');
       expect(browserAuditRequests[0]?.signature).not.toBe('pending');
       const expectedSignature = await createBrowserAuditSignature(
         'browser-audit-secret',
@@ -924,7 +993,14 @@ const startSelfhostHarness = async (
   process.env.SELFHOST_API_HOST = '127.0.0.1';
   process.env.SELFHOST_API_PORT = `${controlPort}`;
   process.env.SELFHOST_DATABASE_PATH = databasePath;
-  process.env.PROBE_SHARED_SECRET = 'dev-shared-secret';
+  process.env.SELFHOST_ADMIN_TOKEN = testAdminToken;
+  process.env.SELFHOST_ADMIN_TOKEN_NEXT = '';
+  process.env.SELFHOST_INTERNAL_SECRET = testInternalSecret;
+  process.env.SELFHOST_INTERNAL_SECRET_NEXT = '';
+  process.env.PROBE_SHARED_SECRET = testProbeSecret;
+  process.env.PROBE_SHARED_SECRET_NEXT = '';
+  process.env.BROWSER_AUDIT_SHARED_SECRET = options?.browserAuditSharedSecret ?? defaultBrowserAuditSecret;
+  process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT = '';
   process.env.SELFHOST_ACTIVE_REGION_CODES_JSON = '["tokyo"]';
   process.env.SELFHOST_REGION_IDS_JSON = '{"tokyo":"JP"}';
   process.env.SELFHOST_PROBE_BASE_URLS_JSON = `{"tokyo":"http://127.0.0.1:${probePort}"}`;
@@ -932,19 +1008,19 @@ const startSelfhostHarness = async (
 
   if (options?.browserAuditBaseUrl && options.browserAuditSharedSecret) {
     process.env.SELFHOST_BROWSER_AUDIT_BASE_URL = options.browserAuditBaseUrl;
-    process.env.BROWSER_AUDIT_SHARED_SECRET = options.browserAuditSharedSecret;
-    process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT = '';
   } else {
     delete process.env.SELFHOST_BROWSER_AUDIT_BASE_URL;
-    delete process.env.BROWSER_AUDIT_SHARED_SECRET;
-    delete process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT;
   }
 
+  const baseUrl = `http://127.0.0.1:${controlPort}`;
+  apiCredentialsByOrigin.set(baseUrl, {
+    adminToken: testAdminToken,
+    internalSecret: testInternalSecret
+  });
   const modulePath = new URL(`../src/index.ts?instance=${crypto.randomUUID()}`, import.meta.url).href;
   const module = (await import(modulePath)) as { server: { stop: (closeActiveConnections?: boolean) => void } };
   startedServers.push(module.server);
 
-  const baseUrl = `http://127.0.0.1:${controlPort}`;
   await waitForHealth(baseUrl);
 
   return { baseUrl };

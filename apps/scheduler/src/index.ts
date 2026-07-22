@@ -2,6 +2,7 @@ import { parseSelfhostSchedulerVars } from '@webperf/config/selfhost-scheduler';
 
 const runtime = parseSelfhostSchedulerVars({
   SELFHOST_SCHEDULER_API_BASE_URL: process.env.SELFHOST_SCHEDULER_API_BASE_URL,
+  SELFHOST_INTERNAL_SECRET: process.env.SELFHOST_INTERNAL_SECRET,
   SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: process.env.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
 });
 const pollIntervalMs = runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS * 1000;
@@ -13,7 +14,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function dispatchScheduledChecks() {
   const dispatchUrl = new URL('/v1/scheduler/dispatch', runtime.SELFHOST_SCHEDULER_API_BASE_URL);
   const startedAt = new Date().toISOString();
-  const response = await fetch(dispatchUrl, { method: 'POST' });
+  const response = await fetch(dispatchUrl, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${runtime.SELFHOST_INTERNAL_SECRET}`
+    }
+  });
   const bodyText = await response.text();
 
   if (!response.ok) {

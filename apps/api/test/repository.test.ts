@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import type { CheckProfile, CheckProfileRun, LatencyJobDetail, Property, RegionPack, RouteSet } from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,6 +7,13 @@ import { join } from 'node:path';
 import { createSqliteJobRepository } from '../src/repository';
 
 const tempDirs: string[] = [];
+const testEncryptionSecret = 'repository-test-encryption-secret';
+
+const createRepository = (databasePath: string) =>
+  createSqliteJobRepository({
+    databasePath,
+    encryptionSecret: testEncryptionSecret
+  });
 
 afterEach(() => {
   while (tempDirs.length > 0) {
@@ -209,18 +217,69 @@ const createCheckProfileRun = (overrides: Partial<CheckProfileRun> = {}): CheckP
 });
 
 describe('sqlite control repository', () => {
+  test('encrypts persisted payloads and supports key rotation', () => {
+    const databasePath = createTempDatabasePath();
+    const secretValue = 'Bearer must-not-appear-in-sqlite';
+    const querySecret = 'query-secret-must-not-appear';
+    const job = createJob({
+      url: `https://example.com/?token=${querySecret}`,
+      request: {
+        method: 'GET',
+        headers: [{ name: 'Authorization', value: secretValue }],
+        body: null
+      }
+    });
+
+    {
+      const repository = createSqliteJobRepository({
+        databasePath,
+        encryptionSecret: 'old-storage-encryption-secret'
+      });
+      repository.saveJob(job);
+      repository.close();
+    }
+
+    const database = new Database(databasePath, { readonly: true });
+    const row = database.query<{ payload_json: string; url: string }, []>('SELECT payload_json, url FROM jobs LIMIT 1').get();
+    expect(row?.payload_json.startsWith('webperf:enc:v1:')).toBe(true);
+    expect(row?.payload_json).not.toContain(secretValue);
+    expect(row?.payload_json).not.toContain(querySecret);
+    expect(row?.url).toBe('https://example.com/?redacted');
+    database.close();
+
+    {
+      const repository = createSqliteJobRepository({
+        databasePath,
+        encryptionSecret: 'new-storage-encryption-secret',
+        encryptionSecretNext: 'old-storage-encryption-secret'
+      });
+      expect(repository.getJob(job.id)?.request?.headers[0]?.value).toBe(secretValue);
+      repository.saveJob(job);
+      repository.close();
+    }
+
+    {
+      const repository = createSqliteJobRepository({
+        databasePath,
+        encryptionSecret: 'new-storage-encryption-secret'
+      });
+      expect(repository.getJob(job.id)?.request?.headers[0]?.value).toBe(secretValue);
+      repository.close();
+    }
+  });
+
   test('persists jobs across repository instances', () => {
     const databasePath = createTempDatabasePath();
 
     {
-      const repository = createSqliteJobRepository({ databasePath });
+      const repository = createRepository(databasePath);
       repository.saveJob(createJob());
       expect(repository.countJobs()).toBe(1);
       repository.close();
     }
 
     {
-      const repository = createSqliteJobRepository({ databasePath });
+      const repository = createRepository(databasePath);
       const job = repository.getJob('job_test');
       expect(job?.targets[0]?.measurement?.probeImpl).toBe('rust');
       expect(job?.summary.succeeded).toBe(1);
@@ -231,7 +290,7 @@ describe('sqlite control repository', () => {
 
   test('prunes jobs outside the retention window', () => {
     const databasePath = createTempDatabasePath();
-    const repository = createSqliteJobRepository({ databasePath });
+    const repository = createRepository(databasePath);
 
     repository.saveJob(
       createJob({
@@ -258,7 +317,7 @@ describe('sqlite control repository', () => {
     const databasePath = createTempDatabasePath();
 
     {
-      const repository = createSqliteJobRepository({ databasePath });
+      const repository = createRepository(databasePath);
       repository.saveProperty(createProperty());
       repository.saveRouteSet(createRouteSet());
       repository.saveRegionPack(createRegionPack());
@@ -268,7 +327,7 @@ describe('sqlite control repository', () => {
     }
 
     {
-      const repository = createSqliteJobRepository({ databasePath });
+      const repository = createRepository(databasePath);
       expect(repository.getProperty('property_test')?.name).toBe('Main site');
       expect(repository.getRouteSet('routeset_test')?.routes[0]?.label).toBe('Homepage');
       expect(repository.getRegionPack('regionpack_test')?.regions).toEqual(['tokyo', 'singapore']);
@@ -285,7 +344,7 @@ describe('sqlite control repository', () => {
 
   test('deletes saved entities and cascades check profile runs', () => {
     const databasePath = createTempDatabasePath();
-    const repository = createSqliteJobRepository({ databasePath });
+    const repository = createRepository(databasePath);
 
     repository.saveProperty(createProperty());
     repository.saveRouteSet(createRouteSet());

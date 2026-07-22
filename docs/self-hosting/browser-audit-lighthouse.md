@@ -88,8 +88,8 @@ To start it:
 docker compose \
   --env-file infra/docker-compose/.env \
   --profile browser-audit \
-  -f infra/docker-compose/docker-compose.yml \
-  up --build
+  -f infra/docker-compose/compose.yml \
+  up -d
 ```
 
 Set `BROWSER_AUDIT_SHARED_SECRET` in `infra/docker-compose/.env` when you want
@@ -98,8 +98,10 @@ The default `.env.example` leaves `SELFHOST_BROWSER_AUDIT_BASE_URL` empty, so
 the default Compose stack does not advertise Browser Audit until the optional
 profile is deliberately enabled.
 
-The profile publishes the worker on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
-The bundled Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled locally.
+Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` when
+enabling the profile. The worker remains on its dedicated Compose network and
+does not publish a host port. The image configures the Chrome setuid sandbox;
+the production profile does not add `SYS_ADMIN`.
 
 ## Docker Build
 
@@ -176,5 +178,12 @@ Recommended container behavior:
 Recommended Docker runtime settings for local validation:
 
 - keep the browser sandbox enabled
-- add `--cap-add=SYS_ADMIN` when running the container locally on Docker Desktop or OrbStack
-- if a provider cannot supply the required sandbox support, opt into `BROWSER_AUDIT_ALLOW_NO_SANDBOX=true` explicitly and treat that as a degraded profile
+- run as the image's non-root `bun` user with a writable `/tmp`, writable home
+  tmpfs, and at least 1 GiB of `/dev/shm`
+- preserve the image's root-owned mode-4755 `chrome-sandbox` binary; do not set
+  `no-new-privileges` on this one service because that disables the setuid
+  sandbox transition
+- do not grant `SYS_ADMIN`; if a host policy blocks the bundled sandbox, fix
+  user-namespace/setuid support instead
+- only as a documented last resort, opt into
+  `BROWSER_AUDIT_ALLOW_NO_SANDBOX=true` and treat that host as degraded

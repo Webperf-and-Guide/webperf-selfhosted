@@ -54,6 +54,10 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
   else \
     bun x @puppeteer/browsers install chrome@${CHROME_VERSION} --path /opt/chrome; \
   fi
+RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox \) -print -quit 2>/dev/null)" \
+  && test -n "$sandbox_path" \
+  && chown root:root "$sandbox_path" \
+  && chmod 4755 "$sandbox_path"
 RUN chown -R bun:bun /workspace
 
 USER bun

@@ -37,7 +37,7 @@
     "selfhost:restore": "bun tooling/scripts/selfhost-database.ts restore",
     "selfhost:doctor": "bun tooling/scripts/selfhost-database.ts doctor",
     "selfhost:maintenance": "bun tooling/scripts/selfhost-database.ts maintenance",
-    "compose:config": "docker compose --env-file infra/docker-compose/.env.example -f infra/docker-compose/docker-compose.yml config >/dev/null",
+    "compose:config": "bun tooling/scripts/check-compose.ts",
     "ui:normalize-imports": "bun tooling/scripts/normalize-ui-imports.ts",
     "ui:jsrepo:add": "jsrepo add",
     "ui:jsrepo:add:extras": "jsrepo add --cwd packages/ui --registry @ieedan/shadcn-svelte-extras && bun run ui:normalize-imports",

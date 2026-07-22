@@ -78,13 +78,13 @@ named `/data` volume:
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
-  -f infra/docker-compose/docker-compose.yml \
+  -f infra/docker-compose/compose.yml \
   exec api bun /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite --output /data/webperf-backup.sqlite
 
 docker compose \
   --env-file infra/docker-compose/.env \
-  -f infra/docker-compose/docker-compose.yml \
+  -f infra/docker-compose/compose.yml \
   exec api bun /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite
 ```
@@ -95,12 +95,12 @@ container attached to the same volume:
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
-  -f infra/docker-compose/docker-compose.yml \
+  -f infra/docker-compose/compose.yml \
   stop scheduler executor api
 
 docker compose \
   --env-file infra/docker-compose/.env \
-  -f infra/docker-compose/docker-compose.yml \
+  -f infra/docker-compose/compose.yml \
   run --rm --no-deps --entrypoint bun api \
   /app/tooling/scripts/selfhost-database.ts restore \
   /data/webperf-backup.sqlite --database /data/webperf.sqlite

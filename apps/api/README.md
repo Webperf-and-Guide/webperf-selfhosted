@@ -71,7 +71,7 @@ backup, restore, integrity, retention, and compaction commands are documented in
 The Compose bundle lives at:
 
 ```text
-infra/docker-compose/docker-compose.yml
+infra/docker-compose/compose.yml
 ```
 
 The polling scheduler lives in `apps/scheduler` and calls the dispatch endpoint on

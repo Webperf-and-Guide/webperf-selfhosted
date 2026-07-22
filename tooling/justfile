@@ -17,7 +17,7 @@ dev:
   bun run dev
 
 compose-config:
-  docker compose --env-file infra/docker-compose/.env.example -f infra/docker-compose/docker-compose.yml config >/dev/null
+  bun run compose:config
 
 dev-probe:
   cargo run -p probe-server --manifest-path apps/probe-rs/Cargo.toml

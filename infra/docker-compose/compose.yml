@@ -1,0 +1,313 @@
+name: webperf-selfhosted
+
+x-service-defaults: &service-defaults
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: "${WEBPERF_LOG_MAX_SIZE:-10m}"
+      max-file: "${WEBPERF_LOG_MAX_FILES:-3}"
+
+x-bun-read-only: &bun-read-only
+  user: "1000:1000"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000
+
+services:
+  console:
+    <<: [*service-defaults, *bun-read-only]
+    image: "ghcr.io/webperf-and-guide/webperf-console:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      CONTROL_BASE_URL: "${CONTROL_BASE_URL:-http://api:8788}"
+      SELFHOST_ADMIN_TOKEN: "${SELFHOST_ADMIN_TOKEN:?set SELFHOST_ADMIN_TOKEN in infra/docker-compose/.env}"
+      ORIGIN: "${CONSOLE_ORIGIN:-http://localhost:5173}"
+      HOST: "${CONSOLE_HOST:-0.0.0.0}"
+      PORT: "${CONSOLE_PORT:-3000}"
+    expose:
+      - "${CONSOLE_PORT:-3000}"
+    ports:
+      - "127.0.0.1:${CONSOLE_PUBLIC_PORT:-5173}:${CONSOLE_PORT:-3000}"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:' + (process.env.PORT ?? '3000') + '/'); if (!response.ok) process.exit(1);"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "${CONSOLE_CPU_LIMIT:-0.50}"
+          memory: "${CONSOLE_MEMORY_LIMIT:-256M}"
+    networks:
+      - console-control
+
+  api:
+    <<: [*service-defaults, *bun-read-only]
+    image: "ghcr.io/webperf-and-guide/webperf-api:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    environment:
+      SELFHOST_API_HOST: "${SELFHOST_API_HOST:-0.0.0.0}"
+      SELFHOST_API_PORT: "${SELFHOST_API_PORT:-8788}"
+      SELFHOST_DATABASE_PATH: "${SELFHOST_DATABASE_PATH:-/data/webperf.sqlite}"
+      SELFHOST_ARTIFACTS_PATH: "${SELFHOST_ARTIFACTS_PATH:-/data/artifacts}"
+      SELFHOST_ARTIFACT_UPLOAD_BASE_URL: "${SELFHOST_ARTIFACT_UPLOAD_BASE_URL:-http://api:8788}"
+      SELFHOST_MAX_ARTIFACT_BYTES: "${SELFHOST_MAX_ARTIFACT_BYTES:-25000000}"
+      SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS: "${SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS:-900}"
+      SELFHOST_RETENTION_DAYS: "${SELFHOST_RETENTION_DAYS:-30}"
+      SELFHOST_MIGRATION_BACKUP: "${SELFHOST_MIGRATION_BACKUP:-false}"
+      SELFHOST_ADMIN_TOKEN: "${SELFHOST_ADMIN_TOKEN:?set SELFHOST_ADMIN_TOKEN in infra/docker-compose/.env}"
+      SELFHOST_ADMIN_TOKEN_NEXT: "${SELFHOST_ADMIN_TOKEN_NEXT:-}"
+      SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET in infra/docker-compose/.env}"
+      SELFHOST_INTERNAL_SECRET_NEXT: "${SELFHOST_INTERNAL_SECRET_NEXT:-}"
+      SELFHOST_ACTIVE_REGION_CODES_JSON: '${SELFHOST_ACTIVE_REGION_CODES_JSON:-["tokyo"]}'
+      SELFHOST_REGION_IDS_JSON: '${SELFHOST_REGION_IDS_JSON:-{"tokyo":"JP"}}'
+      SELFHOST_PROBE_BASE_URLS_JSON: '${SELFHOST_PROBE_BASE_URLS_JSON:-{"tokyo":"http://probe:8080"}}'
+      SELFHOST_BROWSER_AUDIT_BASE_URL: "${SELFHOST_BROWSER_AUDIT_BASE_URL:-}"
+      SELFHOST_MAX_TARGET_ATTEMPTS: "${SELFHOST_MAX_TARGET_ATTEMPTS:-3}"
+    expose:
+      - "${SELFHOST_API_PORT:-8788}"
+    volumes:
+      - webperf-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:' + (process.env.SELFHOST_API_PORT ?? '8788') + '/health'); if (!response.ok) process.exit(1);"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPU_LIMIT:-1.00}"
+          memory: "${API_MEMORY_LIMIT:-1G}"
+    networks:
+      - console-control
+      - control-plane
+      - browser-runtime
+
+  scheduler:
+    <<: [*service-defaults, *bun-read-only]
+    image: "ghcr.io/webperf-and-guide/webperf-scheduler:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      SELFHOST_SCHEDULER_API_BASE_URL: "${SELFHOST_SCHEDULER_API_BASE_URL:-http://api:8788}"
+      SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
+      SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET in infra/docker-compose/.env}"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch((process.env.SELFHOST_SCHEDULER_API_BASE_URL ?? 'http://api:8788') + '/health'); if (!response.ok) process.exit(1);"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${SCHEDULER_CPU_LIMIT:-0.25}"
+          memory: "${SCHEDULER_MEMORY_LIMIT:-128M}"
+    networks:
+      - control-plane
+
+  executor:
+    <<: [*service-defaults, *bun-read-only]
+    image: "ghcr.io/webperf-and-guide/webperf-executor:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    stop_grace_period: 16m
+    depends_on:
+      api:
+        condition: service_healthy
+      probe:
+        condition: service_healthy
+    environment:
+      SELFHOST_EXECUTOR_API_BASE_URL: "${SELFHOST_EXECUTOR_API_BASE_URL:-http://api:8788}"
+      SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET in infra/docker-compose/.env}"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET in infra/docker-compose/.env}"
+      BROWSER_AUDIT_SHARED_SECRET: "${BROWSER_AUDIT_SHARED_SECRET:?set BROWSER_AUDIT_SHARED_SECRET in infra/docker-compose/.env}"
+      SELFHOST_PROBE_BASE_URLS_JSON: '${SELFHOST_PROBE_BASE_URLS_JSON:-{"tokyo":"http://probe:8080"}}'
+      SELFHOST_BROWSER_AUDIT_BASE_URL: "${SELFHOST_BROWSER_AUDIT_BASE_URL:-}"
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: "${SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP:-true}"
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: "${SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP:-true}"
+      SELFHOST_EXECUTOR_POLL_INTERVAL_MS: "${SELFHOST_EXECUTOR_POLL_INTERVAL_MS:-1000}"
+      SELFHOST_EXECUTOR_LEASE_DURATION_MS: "${SELFHOST_EXECUTOR_LEASE_DURATION_MS:-60000}"
+      SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: "${SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS:-20000}"
+      SELFHOST_EXECUTOR_MAX_EXECUTION_MS: "${SELFHOST_EXECUTOR_MAX_EXECUTION_MS:-900000}"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch((process.env.SELFHOST_EXECUTOR_API_BASE_URL ?? 'http://api:8788') + '/health'); if (!response.ok) process.exit(1);"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${EXECUTOR_CPU_LIMIT:-1.00}"
+          memory: "${EXECUTOR_MEMORY_LIMIT:-512M}"
+    networks:
+      - control-plane
+      - probe-runtime
+      - browser-runtime
+
+  probe:
+    <<: *service-defaults
+    image: "ghcr.io/webperf-and-guide/webperf-probe:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PROBE_LISTEN_ADDR: "0.0.0.0:8080"
+      REGION_CODE: "${PROBE_REGION_CODE:-tokyo}"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET in infra/docker-compose/.env}"
+      PROBE_SHARED_SECRET_NEXT: "${PROBE_SHARED_SECRET_NEXT:-}"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "/probe", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "${PROBE_CPU_LIMIT:-1.00}"
+          memory: "${PROBE_MEMORY_LIMIT:-256M}"
+    networks:
+      - probe-runtime
+
+  browser-audit-lighthouse:
+    <<: *service-defaults
+    profiles:
+      - browser-audit
+      - debug
+    image: "ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    user: "1000:1000"
+    read_only: true
+    shm_size: "1gb"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,uid=1000,gid=1000
+      - /home/bun:rw,nosuid,nodev,size=256m,uid=1000,gid=1000
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      BROWSER_AUDIT_SHARED_SECRET: "${BROWSER_AUDIT_SHARED_SECRET:?set BROWSER_AUDIT_SHARED_SECRET in infra/docker-compose/.env}"
+      BROWSER_AUDIT_SHARED_SECRET_NEXT: "${BROWSER_AUDIT_SHARED_SECRET_NEXT:-}"
+      BROWSER_AUDIT_ALLOW_NO_SANDBOX: "${BROWSER_AUDIT_ALLOW_NO_SANDBOX:-false}"
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:8080/healthz'); if (!response.ok) process.exit(1);"
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: "${BROWSER_AUDIT_CPU_LIMIT:-2.00}"
+          memory: "${BROWSER_AUDIT_MEMORY_LIMIT:-2G}"
+    networks:
+      - browser-runtime
+
+  api-debug:
+    <<: [*service-defaults, *bun-read-only]
+    profiles:
+      - debug
+    image: "ghcr.io/webperf-and-guide/webperf-api:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    entrypoint: ["bun", "/app/infra/docker-compose/debug-proxy.ts"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DEBUG_PROXY_TARGET: "http://api:8788"
+      DEBUG_PROXY_PORT: "8789"
+    ports:
+      - "127.0.0.1:${SELFHOST_API_DEBUG_PORT:-8788}:8789"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:8789/health'); if (!response.ok) process.exit(1);"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "${DEBUG_PROXY_CPU_LIMIT:-0.25}"
+          memory: "${DEBUG_PROXY_MEMORY_LIMIT:-128M}"
+    networks:
+      - control-plane
+
+  browser-audit-debug:
+    <<: [*service-defaults, *bun-read-only]
+    profiles:
+      - debug
+    image: "ghcr.io/webperf-and-guide/webperf-api:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    entrypoint: ["bun", "/app/infra/docker-compose/debug-proxy.ts"]
+    depends_on:
+      browser-audit-lighthouse:
+        condition: service_healthy
+    environment:
+      DEBUG_PROXY_TARGET: "http://browser-audit-lighthouse:8080"
+      DEBUG_PROXY_PORT: "8789"
+    ports:
+      - "127.0.0.1:${BROWSER_AUDIT_DEBUG_PORT:-8081}:8789"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:8789/healthz'); if (!response.ok) process.exit(1);"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "${DEBUG_PROXY_CPU_LIMIT:-0.25}"
+          memory: "${DEBUG_PROXY_MEMORY_LIMIT:-128M}"
+    networks:
+      - browser-runtime
+
+volumes:
+  webperf-data:
+
+networks:
+  console-control:
+  control-plane:
+  probe-runtime:
+  browser-runtime:

@@ -12,12 +12,18 @@ use probe_core::{
     Config, MeasureRequest, ProbeImplementation, ProbeMeasurementResponse, timestamp_is_valid,
     verify_request_signature,
 };
-use std::sync::Arc;
+use std::{
+    io::{BufRead, BufReader, Write},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{Level, info};
 
 const MAX_BODY_SIZE_BYTES: usize = 32 * 1024;
+const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -51,6 +57,34 @@ pub fn app(state: AppState) -> Router {
 
 pub async fn serve(listener: TcpListener, state: AppState) -> Result<()> {
     axum::serve(listener, app(state)).await?;
+    Ok(())
+}
+
+pub fn run_local_healthcheck(listen_addr: &str) -> Result<()> {
+    let configured_addr = listen_addr
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("probe listen address did not resolve"))?;
+    let connect_addr = SocketAddr::new(
+        match configured_addr.ip() {
+            IpAddr::V4(address) if address.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(address) if address.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            address => address,
+        },
+        configured_addr.port(),
+    );
+    let mut stream = TcpStream::connect_timeout(&connect_addr, HEALTHCHECK_TIMEOUT)?;
+    stream.set_read_timeout(Some(HEALTHCHECK_TIMEOUT))?;
+    stream.set_write_timeout(Some(HEALTHCHECK_TIMEOUT))?;
+    stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+
+    let mut status_line = String::new();
+    BufReader::new(stream).read_line(&mut status_line)?;
+
+    if !status_line.starts_with("HTTP/1.1 200") && !status_line.starts_with("HTTP/1.0 200") {
+        anyhow::bail!("probe healthcheck returned {status_line}");
+    }
+
     Ok(())
 }
 
@@ -126,4 +160,32 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
 
 fn plain_text_response(status: StatusCode, body: &'static str) -> Response {
     (status, body).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_local_healthcheck;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener as StdTcpListener,
+        thread,
+    };
+
+    #[test]
+    fn local_healthcheck_connects_to_an_unspecified_listen_address() {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("bind health fixture");
+        let port = listener.local_addr().expect("fixture address").port();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept health request");
+            let mut request = [0_u8; 128];
+            let bytes_read = socket.read(&mut request).expect("read health request");
+            assert!(String::from_utf8_lossy(&request[..bytes_read]).starts_with("GET /healthz "));
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .expect("write health response");
+        });
+
+        run_local_healthcheck(&format!("0.0.0.0:{port}")).expect("healthcheck succeeds");
+        server.join().expect("health fixture exits");
+    }
 }

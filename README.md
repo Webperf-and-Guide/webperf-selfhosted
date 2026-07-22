@@ -145,7 +145,10 @@ The API returns a queued resource immediately; poll `GET /v1/browser-audits/:id`
 
 ## Compose Bundle
 
-Compose assets live in [infra/docker-compose/docker-compose.yml](infra/docker-compose/docker-compose.yml).
+The versioned production bundle lives in
+[infra/docker-compose/compose.yml](infra/docker-compose/compose.yml); add
+[infra/docker-compose/compose.dev.yml](infra/docker-compose/compose.dev.yml)
+when building from the current source checkout.
 
 Install and scheduling notes live in:
 

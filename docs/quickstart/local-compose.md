@@ -10,10 +10,14 @@ Use this path when you want the default stack in Docker rather than local proces
 bun run selfhost:init
 ```
 
-2. Start the stack:
+2. Confirm the versioned image tag in `infra/docker-compose/.env`, then start
+   the stack:
 
 ```sh
-docker compose --env-file infra/docker-compose/.env -f infra/docker-compose/docker-compose.yml up --build
+docker compose \
+  --env-file infra/docker-compose/.env \
+  -f infra/docker-compose/compose.yml \
+  up -d
 ```
 
 3. Open the console:
@@ -22,10 +26,10 @@ docker compose --env-file infra/docker-compose/.env -f infra/docker-compose/dock
 open http://localhost:5173
 ```
 
-4. Verify API health:
+4. Verify the console's authenticated server-side API path:
 
 ```sh
-curl http://127.0.0.1:8788/health
+curl http://127.0.0.1:5173/api/control/health
 ```
 
 5. Smoke the console path:
@@ -48,6 +52,10 @@ bun run capture:console:baselines
 - `probe`: Rust measurement runtime on the internal Compose network
 - `browser-audit-lighthouse`: optional Bun browser-audit runtime when you enable the `browser-audit` profile
 
+`compose.yml` consumes versioned GHCR images. Repository contributors can add
+`-f infra/docker-compose/compose.dev.yml --build` to build the same services
+from the current checkout.
+
 ## Useful Env Vars
 
 - `CONTROL_BASE_URL`: where the console proxies API requests
@@ -69,8 +77,10 @@ bun run capture:console:baselines
 - `SELFHOST_SCHEDULER_API_BASE_URL`: base URL the scheduler polls
 - `SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS`: scheduler polling interval
 
-The probe is intentionally not published on a host port by default.
-If you need direct host access for debugging, add a temporary port mapping in your local Compose override instead of exposing it permanently.
+Only the console is published, and it binds to `127.0.0.1`. The API, probe,
+scheduler, executor, and optional Browser Audit runner have no host ports. Use
+the loopback-only `debug` profile when direct API or runner access is necessary;
+do not add a permanent public mapping.
 
 See [SQLite operations](../self-hosting/database-operations.md) before an
 upgrade or restore. It includes commands that operate directly on the Compose
@@ -100,22 +110,33 @@ Enable it only when you want to run the optional Bun + Chrome + Puppeteer + Ligh
 docker compose \
   --env-file infra/docker-compose/.env \
   --profile browser-audit \
-  -f infra/docker-compose/docker-compose.yml \
-  up --build
+  -f infra/docker-compose/compose.yml \
+  up -d
 ```
 
-When enabled, it is published on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
+Before starting it, set
+`SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` in the
+env file. The runner remains internal when enabled.
 When `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET` are configured, `POST /v1/browser-audits` queues work for the executor, which calls the optional runner and persists the result.
 Artifacts are written to `/data/artifacts` in the private data volume and are
 downloaded through the authenticated API/console. The size and upload lifetime
 can be tuned with `SELFHOST_MAX_ARTIFACT_BYTES` and
 `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`.
-The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
+The image configures Chrome's setuid sandbox and the profile does not grant
+`SYS_ADMIN`. One runner accepts at most one in-flight audit.
 
-Example queued request once the worker profile is up:
+For direct API debugging only, start the loopback proxy and then send an
+administrator-authenticated request:
 
 ```sh
+docker compose \
+  --env-file infra/docker-compose/.env \
+  --profile debug \
+  -f infra/docker-compose/compose.yml \
+  up -d api-debug
+
 curl -X POST http://127.0.0.1:8788/v1/browser-audits \
+  -H "authorization: Bearer $SELFHOST_ADMIN_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "targetUrl": "https://example.com",
@@ -133,16 +154,18 @@ curl -X POST http://127.0.0.1:8788/v1/browser-audits \
 The default local stack now includes `apps/scheduler`, which polls the API every
 60 seconds and dispatches due saved checks.
 
-If you prefer an external trigger instead, you can still call:
+If you need to inspect the dispatch endpoint, use the loopback debug proxy and
+the internal service credential:
 
 ```sh
-curl -X POST http://127.0.0.1:8788/v1/scheduler/dispatch
+curl -X POST http://127.0.0.1:8788/v1/scheduler/dispatch \
+  -H "authorization: Bearer $SELFHOST_INTERNAL_SECRET"
 ```
 
 An example GitHub Actions workflow lives in [examples/github-actions/scheduler-dispatch.yml](../../examples/github-actions/scheduler-dispatch.yml).
 
 ## Related Docs
 
-- [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
-- [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
-- [browser-audit Lighthouse runner](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md)
+- [single-machine quickstart](./single-machine.md)
+- [parallel local dev](./parallel-local-dev.md)
+- [browser-audit Lighthouse runner](../self-hosting/browser-audit-lighthouse.md)

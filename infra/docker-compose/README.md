@@ -1,72 +1,82 @@
 # Compose Bundle
 
-This folder contains the local Compose bundle for the self-hosted stack.
+This directory contains two Compose layers:
 
-## What It Runs
+- `compose.yml` is the production bundle and consumes one versioned GHCR tag
+  across every WebPerf service.
+- `compose.dev.yml` overrides those images with builds from the current source
+  checkout.
 
-- `console`: SvelteKit console built with the Node adapter
-- `probe`: the Rust probe runtime
-- `api`: the Bun-based API service with SQLite persistence
-- `scheduler`: the Bun polling worker for scheduled checks
-- `browser-audit-lighthouse`: optional Bun browser-audit runtime behind the `browser-audit` profile
+The default stack runs `console`, `api`, `scheduler`, `executor`, and `probe`.
+Only the console is published, on `127.0.0.1:5173`. API, probe, scheduler, and
+executor traffic stays on segmented Compose networks.
 
-## Start With Docker Compose
+## Production Start
 
-```sh
-docker compose -f infra/docker-compose/docker-compose.yml up --build
-```
-
-Generate random secrets and then customize ports or active regions if needed:
+Generate random credentials, confirm `WEBPERF_VERSION`, then start the tagged
+images:
 
 ```sh
 bun run selfhost:init
-docker compose --env-file infra/docker-compose/.env -f infra/docker-compose/docker-compose.yml up --build
+docker compose \
+  --env-file infra/docker-compose/.env \
+  -f infra/docker-compose/compose.yml \
+  up -d
 ```
 
-See [self-host authentication and secrets](../../docs/security/auth-and-secrets.md)
-for the token boundary, rotation, encryption, redaction, and network policy.
+Open `http://localhost:5173`. The persistent volume `webperf-data` owns both
+the SQLite database and Browser Audit artifacts below `/data`.
 
-The probe stays on the internal Compose network by default.
-Only the console and API are published to the host unless you add an explicit probe port mapping.
-The browser-audit Lighthouse runner is excluded by default and only starts when you enable the `browser-audit` profile.
+## Source-Build Start
 
-Console:
+Use both files when validating local changes:
 
 ```sh
-open http://localhost:5173
+docker compose \
+  --env-file infra/docker-compose/.env \
+  -f infra/docker-compose/compose.yml \
+  -f infra/docker-compose/compose.dev.yml \
+  up -d --build
 ```
 
-API health:
+## Optional Browser Audit
 
-```sh
-curl http://127.0.0.1:8788/health
-```
-
-## Optional Browser Audit Runtime
-
-To start the optional worker:
+Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080`, then
+enable the optional profile:
 
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
   --profile browser-audit \
-  -f infra/docker-compose/docker-compose.yml \
-  up --build
+  -f infra/docker-compose/compose.yml \
+  up -d
 ```
 
-This publishes the worker on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
-The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
+The Lighthouse reference runner stays off the host network, runs one audit at
+a time, uses a 1 GiB shared-memory allocation, and keeps the Chrome sandbox
+enabled without adding `SYS_ADMIN`.
 
-## Persistence
+## Loopback Debug Profile
 
-The API service stores job history in SQLite at `/data/webperf.sqlite` inside the container.
-The named volume `webperf-data` keeps that file across restarts.
+Start only the API debug proxy when direct API access is necessary:
 
-## Worker Environment
+```sh
+docker compose \
+  --env-file infra/docker-compose/.env \
+  --profile debug \
+  -f infra/docker-compose/compose.yml \
+  up -d api-debug
+```
 
-- `BROWSER_AUDIT_SHARED_SECRET`: current signing key for `POST /audit`
-- `BROWSER_AUDIT_SHARED_SECRET_NEXT`: optional rollover key
-- `BROWSER_AUDIT_ALLOW_NO_SANDBOX`: explicit opt-in for degraded local runtimes
-- `BROWSER_AUDIT_PUBLIC_PORT`: host port exposed when the optional profile is enabled
+This temporarily publishes the API at `127.0.0.1:8788`. To inspect the optional
+runner, first start its `browser-audit` profile and then start
+`browser-audit-debug`; that proxy binds `127.0.0.1:8081`. Neither debug proxy
+binds a non-loopback interface.
 
-See [docs/quickstart/local-compose.md](../../docs/quickstart/local-compose.md) for the current install path and scheduling notes.
+All production services have health checks, restart and stop policies, log
+rotation, non-root users, and configurable CPU/memory ceilings. Services are
+read-only except for explicit tmpfs mounts and the API's `/data` volume.
+
+See [Docker Compose install](../../docs/quickstart/local-compose.md),
+[authentication and secrets](../../docs/security/auth-and-secrets.md), and
+[Browser Audit sandboxing](../../docs/self-hosting/browser-audit-lighthouse.md).

@@ -145,6 +145,9 @@ Current repo state as of 2026-07-22:
 - SQLite startup now uses ordered migration files with WAL, busy-timeout, foreign-key, forward-schema refusal, and graceful close semantics; verified backup/restore/doctor/retention/optimize/VACUUM commands share the same database core, and optional startup pre-migration backups preserve existing installs before upgrades
 - the scheduler is now a testable internal-token-only dispatch loop with contract-validated responses, a 30-second request-and-body bound, capped outage backoff with headroom above every valid poll interval, abort-aware polling, and safe diagnostics; the real API integration uses that client, while a process-level recovery test restarts the API three times against one SQLite file and proves an expired running lease is reclaimed by a new executor identity exactly once
 - Browser Audit Protocol v1 now normalizes core metrics, scores, open extended metrics, checkpoints, issues, artifacts, timestamps, and engine/browser/runtime/component toolchains; artifact registry v1 keeps standard kinds while accepting safe extensions, legacy Lighthouse-shaped SQLite records normalize on read, and checked-in Lighthouse plus sitespeed.io fixtures prove the public contract is engine-neutral
+- production Compose now consumes one versioned GHCR tag for console, API, scheduler, executor, probe, and the optional Lighthouse runner, while `compose.dev.yml` restores source builds for contributor smoke tests
+- default Compose publishes only the console on `127.0.0.1`; loopback API/runner access is opt-in through the `debug` profile, and all runtime services now have non-root/read-only policies, health checks, bounded resources, log rotation, and explicit stop behavior
+- the optional Lighthouse container now prepares Chrome's setuid sandbox, stays host-port free with 1 GiB shared memory and one in-flight audit, and no longer receives default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -169,6 +172,10 @@ Current local URLs:
 - parallel console: `http://localhost:4174`
 - parallel probe: `http://127.0.0.1:8082`
 
+The API and Browser Audit URLs above describe standalone development. Default
+Compose publishes only `http://127.0.0.1:5173`; its API and runner addresses
+exist on the host only while their loopback `debug` proxies are enabled.
+
 ## Working Rules
 
 - keep the repo self-host coherent
@@ -182,7 +189,7 @@ Current local URLs:
 ## Immediate Next Tasks
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. ship versioned production/development Compose bundles with internal-only services
+2. validate the default and Browser Audit source-build Compose smokes in CI
 3. gate release images, SBOM, provenance, and digest metadata on complete CI
 4. complete the operator install, backup, upgrade, security, and troubleshooting documentation
 5. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend

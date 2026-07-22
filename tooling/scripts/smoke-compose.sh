@@ -2,18 +2,24 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-compose_file="$root_dir/infra/docker-compose/docker-compose.yml"
+compose_file="$root_dir/infra/docker-compose/compose.yml"
+dev_compose_file="$root_dir/infra/docker-compose/compose.dev.yml"
+compose_project="webperf-smoke-$$"
 profile="${COMPOSE_PROFILE:-default}"
 temp_env="$(mktemp)"
 temp_artifact="$(mktemp)"
 
-cleanup() {
-  local extra_args=()
-  if [[ "$profile" == "browser-audit" ]]; then
-    extra_args+=(--profile browser-audit)
-  fi
+compose() {
+  docker compose \
+    --project-name "$compose_project" \
+    --env-file "$temp_env" \
+    -f "$compose_file" \
+    -f "$dev_compose_file" \
+    "$@"
+}
 
-  docker compose --env-file "$temp_env" "${extra_args[@]}" -f "$compose_file" down -v --remove-orphans >/dev/null 2>&1 || true
+cleanup() {
+  compose --profile browser-audit --profile debug down -v --remove-orphans >/dev/null 2>&1 || true
   rm -f "$temp_env"
   rm -f "$temp_artifact"
 }
@@ -50,14 +56,47 @@ else:
 env_path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
 PY
 
-extra_args=()
+profile_args=()
 if [[ "$profile" == "browser-audit" ]]; then
-  extra_args+=(--profile browser-audit)
+  profile_args+=(--profile browser-audit)
 fi
 
-docker compose --env-file "$temp_env" "${extra_args[@]}" -f "$compose_file" up -d --build
+compose "${profile_args[@]}" up -d --build
 
-for _ in {1..60}; do
+for _ in {1..90}; do
+  if curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+curl -fsS http://127.0.0.1:5173/ >/dev/null
+
+console_mapping="$(compose "${profile_args[@]}" port console 3000)"
+if [[ "$console_mapping" != 127.0.0.1:* ]]; then
+  echo "Expected console to bind on loopback, got ${console_mapping:-no mapping}" >&2
+  exit 1
+fi
+
+api_mapping="$(compose "${profile_args[@]}" port api 8788 2>/dev/null || true)"
+if [[ -n "$api_mapping" ]]; then
+  echo "Expected API to stay unpublished, got ${api_mapping}" >&2
+  exit 1
+fi
+
+if [[ "$profile" == "browser-audit" ]]; then
+  browser_mapping="$(compose "${profile_args[@]}" port browser-audit-lighthouse 8080 2>/dev/null || true)"
+  if [[ -n "$browser_mapping" ]]; then
+    echo "Expected Browser Audit runner to stay unpublished, got ${browser_mapping}" >&2
+    exit 1
+  fi
+fi
+
+bun run smoke:console
+
+compose --profile debug up -d --no-deps api-debug
+
+for _ in {1..30}; do
   if curl -fsS http://127.0.0.1:8788/health >/dev/null 2>&1; then
     break
   fi
@@ -65,10 +104,13 @@ for _ in {1..60}; do
 done
 
 curl -fsS http://127.0.0.1:8788/health >/dev/null
-bun run smoke:console
+api_debug_mapping="$(compose --profile debug port api-debug 8789)"
+if [[ "$api_debug_mapping" != 127.0.0.1:* ]]; then
+  echo "Expected API debug proxy to bind on loopback, got ${api_debug_mapping:-no mapping}" >&2
+  exit 1
+fi
 
 if [[ "$profile" == "browser-audit" ]]; then
-  curl -fsS http://127.0.0.1:8081/healthz >/dev/null
   audit_response="$(
     curl -fsS -X POST http://127.0.0.1:8788/v1/browser-audits \
       -H 'authorization: Bearer smoke-admin-token-value' \

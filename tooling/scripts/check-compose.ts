@@ -20,7 +20,7 @@ type ComposeService = {
   profiles?: string[];
   cap_add?: string[];
   tmpfs?: string[];
-  shm_size?: string;
+  shm_size?: string | number;
   environment?: Record<string, string>;
   volumes?: Array<{ target?: string }>;
 };
@@ -53,7 +53,7 @@ const developmentWithProfiles = renderCompose(
   ['browser-audit', 'debug']
 );
 
-assertDeepEqual(
+assertStringArrayEqual(
   Object.keys(production.services).sort(),
   defaultServiceNames,
   'default Compose services'
@@ -72,7 +72,11 @@ for (const [name, expectedImage] of Object.entries(expectedImages)) {
 }
 
 for (const [name, service] of Object.entries(productionWithProfiles.services)) {
-  assert(service.user !== undefined && !service.user.startsWith('0'), `${name} must run as non-root`);
+  const runtimeUser = service.user?.split(':', 1)[0];
+  assert(
+    runtimeUser !== undefined && runtimeUser !== '0' && runtimeUser !== 'root',
+    `${name} must run as non-root`
+  );
   assert(service.read_only === true, `${name} must use a read-only root filesystem`);
   assert(service.restart === 'unless-stopped', `${name} must restart unless stopped`);
   assert(Boolean(service.stop_grace_period), `${name} must define a stop grace period`);
@@ -90,7 +94,7 @@ for (const name of ['api', 'console', 'executor', 'scheduler', 'api-debug', 'bro
   );
 }
 
-assertDeepEqual(
+assertStringArrayEqual(
   Object.entries(production.services)
     .filter(([, service]) => (service.ports?.length ?? 0) > 0)
     .map(([name]) => name),
@@ -104,10 +108,13 @@ assert(
 );
 
 const browser = productionWithProfiles.services['browser-audit-lighthouse'];
-assertDeepEqual(browser.profiles?.sort(), ['browser-audit', 'debug'], 'Browser Audit profiles');
+assertStringArrayEqual(browser.profiles?.sort(), ['browser-audit', 'debug'], 'Browser Audit profiles');
 assert((browser.ports?.length ?? 0) === 0, 'Browser Audit runner must not publish a host port');
 assert(!browser.cap_add?.includes('SYS_ADMIN'), 'Browser Audit runner must not add SYS_ADMIN');
-assert(Number(browser.shm_size) >= 1024 ** 3, 'Browser Audit runner must have at least 1 GiB of shared memory');
+assert(
+  parseSizeToBytes(browser.shm_size) >= 1024 ** 3,
+  'Browser Audit runner must have at least 1 GiB of shared memory'
+);
 assert(
   browser.environment?.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'false',
   'Browser Audit sandbox must be enabled by default'
@@ -160,7 +167,14 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
     throw new Error(result.stderr.toString() || 'docker compose config failed');
   }
 
-  return JSON.parse(result.stdout.toString()) as ComposeModel;
+  const stdout = result.stdout.toString();
+  try {
+    return JSON.parse(stdout) as ComposeModel;
+  } catch (error) {
+    throw new Error(
+      `docker compose config returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 function assertLoopbackPort(service: ComposeService | undefined, target: number, label: string) {
@@ -168,7 +182,35 @@ function assertLoopbackPort(service: ComposeService | undefined, target: number,
   assert(port?.host_ip === '127.0.0.1', `${label} must bind ${target} on 127.0.0.1`);
 }
 
-function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
+function parseSizeToBytes(value: string | number | undefined) {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (!value) {
+    return Number.NaN;
+  }
+
+  const direct = Number(value);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([kmgt]?i?b?)$/i);
+  if (!match) {
+    return Number.NaN;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase().replace('i', '').replace(/b$/, '');
+  const exponent = ['', 'k', 'm', 'g', 't'].indexOf(unit);
+  return exponent < 0 ? Number.NaN : amount * 1024 ** exponent;
+}
+
+function assertStringArrayEqual(
+  actual: string[] | undefined,
+  expected: string[],
+  label: string
+) {
   assert(
     JSON.stringify(actual) === JSON.stringify(expected),
     `${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`

@@ -73,7 +73,7 @@ done
 curl -fsS http://127.0.0.1:5173/ >/dev/null
 
 console_mapping="$(compose "${profile_args[@]}" port console 3000)"
-if [[ "$console_mapping" != 127.0.0.1:* ]]; then
+if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:* ]]; then
   echo "Expected console to bind on loopback, got ${console_mapping:-no mapping}" >&2
   exit 1
 fi
@@ -90,13 +90,32 @@ if [[ "$profile" == "browser-audit" ]]; then
     echo "Expected Browser Audit runner to stay unpublished, got ${browser_mapping}" >&2
     exit 1
   fi
+
+  browser_container_id="$(compose "${profile_args[@]}" ps -q browser-audit-lighthouse)"
+  if [[ -z "$browser_container_id" ]]; then
+    echo "Browser Audit runner container was not created" >&2
+    exit 1
+  fi
+  browser_health=""
+  for _ in {1..90}; do
+    browser_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$browser_container_id")"
+    if [[ "$browser_health" == "healthy" ]]; then
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$browser_health" != "healthy" ]]; then
+    compose "${profile_args[@]}" logs --no-color browser-audit-lighthouse >&2
+    echo "Browser Audit runner did not become healthy (status: ${browser_health:-unknown})" >&2
+    exit 1
+  fi
 fi
 
 bun run smoke:console
 
 compose --profile debug up -d --no-deps api-debug
 
-for _ in {1..30}; do
+for _ in {1..60}; do
   if curl -fsS http://127.0.0.1:8788/health >/dev/null 2>&1; then
     break
   fi
@@ -105,7 +124,7 @@ done
 
 curl -fsS http://127.0.0.1:8788/health >/dev/null
 api_debug_mapping="$(compose --profile debug port api-debug 8789)"
-if [[ "$api_debug_mapping" != 127.0.0.1:* ]]; then
+if [[ "$api_debug_mapping" != 127.0.0.1:* ]] && [[ "$api_debug_mapping" != \[::1\]:* ]]; then
   echo "Expected API debug proxy to bind on loopback, got ${api_debug_mapping:-no mapping}" >&2
   exit 1
 fi

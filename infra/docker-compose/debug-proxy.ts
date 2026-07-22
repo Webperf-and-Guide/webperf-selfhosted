@@ -8,8 +8,24 @@ Bun.serve({
     const requestUrl = new URL(request.url);
     const upstreamUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, target);
     const headers = new Headers(request.headers);
+    const connectionHeaders = (headers.get('connection') ?? '')
+      .split(',')
+      .map((name) => name.trim().toLowerCase())
+      .filter(Boolean);
 
-    for (const name of ['connection', 'host', 'keep-alive', 'transfer-encoding', 'upgrade']) {
+    for (const name of [
+      ...connectionHeaders,
+      'connection',
+      'host',
+      'keep-alive',
+      'proxy-authenticate',
+      'proxy-authorization',
+      'proxy-connection',
+      'te',
+      'trailer',
+      'transfer-encoding',
+      'upgrade'
+    ]) {
       headers.delete(name);
     }
 
@@ -20,7 +36,16 @@ Bun.serve({
         body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
         redirect: 'manual'
       });
-    } catch {
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          service: 'webperf-debug-proxy',
+          event: 'upstream_request_failed',
+          target: target.origin,
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+          errorCode: readErrorCode(error)
+        })
+      );
       return Response.json({ error: 'Debug target unavailable' }, { status: 502 });
     }
   }
@@ -61,4 +86,15 @@ function readPort() {
   }
 
   return value;
+}
+
+function readErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('cause' in error)) {
+    return null;
+  }
+
+  const cause = error.cause;
+  return cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+    ? cause.code
+    : null;
 }

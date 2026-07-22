@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
@@ -13,7 +13,7 @@ use probe_core::{
     verify_request_signature,
 };
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs},
     sync::Arc,
     time::Duration,
@@ -24,6 +24,7 @@ use tracing::{Level, info};
 
 const MAX_BODY_SIZE_BYTES: usize = 32 * 1024;
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
+const HEALTHCHECK_STATUS_PREFIX_BYTES: usize = 12;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -62,9 +63,10 @@ pub async fn serve(listener: TcpListener, state: AppState) -> Result<()> {
 
 pub fn run_local_healthcheck(listen_addr: &str) -> Result<()> {
     let configured_addr = listen_addr
-        .to_socket_addrs()?
+        .to_socket_addrs()
+        .with_context(|| format!("probe healthcheck: failed to resolve {listen_addr}"))?
         .next()
-        .ok_or_else(|| anyhow::anyhow!("probe listen address did not resolve"))?;
+        .with_context(|| format!("probe healthcheck: {listen_addr} did not resolve"))?;
     let connect_addr = SocketAddr::new(
         match configured_addr.ip() {
             IpAddr::V4(address) if address.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -73,16 +75,35 @@ pub fn run_local_healthcheck(listen_addr: &str) -> Result<()> {
         },
         configured_addr.port(),
     );
-    let mut stream = TcpStream::connect_timeout(&connect_addr, HEALTHCHECK_TIMEOUT)?;
-    stream.set_read_timeout(Some(HEALTHCHECK_TIMEOUT))?;
-    stream.set_write_timeout(Some(HEALTHCHECK_TIMEOUT))?;
-    stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+    let mut stream = TcpStream::connect_timeout(&connect_addr, HEALTHCHECK_TIMEOUT)
+        .with_context(|| format!("probe healthcheck: failed to connect to {connect_addr}"))?;
+    stream
+        .set_read_timeout(Some(HEALTHCHECK_TIMEOUT))
+        .context("probe healthcheck: failed to set read timeout")?;
+    stream
+        .set_write_timeout(Some(HEALTHCHECK_TIMEOUT))
+        .context("probe healthcheck: failed to set write timeout")?;
+    stream
+        .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .context("probe healthcheck: failed to write request")?;
 
-    let mut status_line = String::new();
-    BufReader::new(stream).read_line(&mut status_line)?;
+    let mut response_prefix = [0_u8; HEALTHCHECK_STATUS_PREFIX_BYTES];
+    let mut bytes_read = 0;
+    while bytes_read < response_prefix.len() {
+        let count = stream
+            .read(&mut response_prefix[bytes_read..])
+            .context("probe healthcheck: failed to read response")?;
+        if count == 0 {
+            anyhow::bail!("probe healthcheck: connection closed before HTTP status");
+        }
+        bytes_read += count;
+    }
 
-    if !status_line.starts_with("HTTP/1.1 200") && !status_line.starts_with("HTTP/1.0 200") {
-        anyhow::bail!("probe healthcheck returned {status_line}");
+    if response_prefix != *b"HTTP/1.1 200" && response_prefix != *b"HTTP/1.0 200" {
+        anyhow::bail!(
+            "probe healthcheck returned unexpected status prefix: {}",
+            String::from_utf8_lossy(&response_prefix)
+        );
     }
 
     Ok(())
@@ -166,7 +187,7 @@ fn plain_text_response(status: StatusCode, body: &'static str) -> Response {
 mod tests {
     use super::run_local_healthcheck;
     use std::{
-        io::{Read, Write},
+        io::{BufRead, BufReader, Read, Write},
         net::TcpListener as StdTcpListener,
         thread,
     };
@@ -186,6 +207,31 @@ mod tests {
         });
 
         run_local_healthcheck(&format!("0.0.0.0:{port}")).expect("healthcheck succeeds");
+        server.join().expect("health fixture exits");
+    }
+
+    #[test]
+    fn local_healthcheck_rejects_a_connection_closed_before_status() {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("bind health fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept health request");
+            let mut reader = BufReader::new(&mut socket);
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read health request");
+                if line == "\r\n" {
+                    break;
+                }
+            }
+        });
+
+        let error = run_local_healthcheck(&address.to_string()).expect_err("healthcheck fails");
+        assert!(
+            error
+                .to_string()
+                .contains("connection closed before HTTP status")
+        );
         server.join().expect("health fixture exits");
     }
 }

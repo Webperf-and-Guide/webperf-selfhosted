@@ -8,7 +8,7 @@ const workflowsDirectory = join(root, '.github/workflows');
 const violations: string[] = [];
 const workflowCache = new Map<string, string | undefined>();
 
-function readWorkflow(file: string, required = false): string | undefined {
+function readWorkflow(file: string): string | undefined {
   if (workflowCache.has(file)) {
     return workflowCache.get(file);
   }
@@ -17,15 +17,14 @@ function readWorkflow(file: string, required = false): string | undefined {
     workflowCache.set(file, content);
     return content;
   } catch {
-    const qualifier = required ? 'required ' : '';
-    violations.push(`${file}: ${qualifier}workflow file is missing or unreadable`);
+    violations.push(`${file}: workflow file is missing or unreadable`);
     workflowCache.set(file, undefined);
     return undefined;
   }
 }
 
-const releaseWorkflow = readWorkflow('release.yml', true);
-const ciWorkflow = readWorkflow('ci.yml', true);
+const releaseWorkflow = readWorkflow('release.yml');
+const ciWorkflow = readWorkflow('ci.yml');
 
 let workflowFiles: string[] = [];
 try {

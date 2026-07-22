@@ -1292,7 +1292,7 @@ const routeRequest = async (request: Request) => {
       {
         ok: false,
         message:
-          'Use /health, /v1/capabilities, /v1/sites, /v1/route-groups, /v1/region-sets, /v1/checks, /v1/runs, /v1/comparisons, /v1/exports, /v1/analyses, /v1/browser-audits, or their detail routes'
+          'Use /health, /v1/capabilities, /v1/sites, /v1/route-groups, /v1/region-sets, /v1/checks, /v1/checks/:checkId/runs, /v1/runs/:runId, /v1/comparisons, /v1/exports, /v1/analyses, or /v1/browser-audits'
       },
       { status: 404 }
     );
@@ -3202,6 +3202,7 @@ function addCompatibilityDeprecationHeaders(request: Request, response: Response
 
   const headers = new Headers(response.headers);
   headers.set('deprecation', 'true');
+  // A Sunset date will be added only after the public v1.0 removal date is announced.
   headers.append('link', `<${successorUrl.toString()}>; rel="successor-version"`);
   headers.set(
     'warning',

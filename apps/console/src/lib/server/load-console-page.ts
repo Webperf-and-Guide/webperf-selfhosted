@@ -1,4 +1,3 @@
-import { parseWebEnv } from '@webperf/config/public';
 import type {
   BrowserAuditListResponse,
   CheckProfileComparisonResponse,
@@ -12,21 +11,11 @@ import type {
   RegionsResponse,
   RouteSetListResponse
 } from '@webperf/contracts';
-import { env as privateEnv } from '$env/dynamic/private';
 import type { ConsolePageData, SavedChecksData } from '$lib/console-data';
 import { CONSOLE_COLLECTION_PAGE_SIZE, CONSOLE_RECENT_RUN_COUNT, CONSOLE_RUN_PAGE_SIZE } from '$lib/console-workspace/formatters';
 
 type LoaderFetch = typeof fetch;
-export const loadConsolePage = async ({
-  fetch
-}: {
-  fetch: LoaderFetch;
-  platform?: App.Platform;
-}): Promise<ConsolePageData> => {
-  const runtime = parseWebEnv({
-    CONTROL_BASE_URL: privateEnv.CONTROL_BASE_URL
-  });
-
+export const loadConsolePage = async ({ fetch }: { fetch: LoaderFetch }): Promise<ConsolePageData> => {
   const regionsPayload = await fetchOptionalJson<RegionsResponse>(fetch, '/api/control/regions');
   const capabilitiesPayload = await fetchOptionalJson<{
     features?: {

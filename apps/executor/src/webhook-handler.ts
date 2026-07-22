@@ -28,10 +28,10 @@ export const createWebhookExecutionHandler = ({
     );
   }
 
-  const run = structuredClone(context.run);
+  const { id: runId, alertDeliveries } = context.run;
   const { target, body } = context.payload;
 
-  if (run.alertDeliveries.some((delivery) => delivery.targetId === target.id)) {
+  if (alertDeliveries.some((delivery) => delivery.targetId === target.id)) {
     return;
   }
 
@@ -105,7 +105,7 @@ export const createWebhookExecutionHandler = ({
     leaseOwner,
     result: {
       kind: 'webhook_delivery',
-      runId: run.id,
+      runId,
       delivery
     }
   });

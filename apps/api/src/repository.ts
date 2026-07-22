@@ -5,6 +5,9 @@ import type {
   CheckProfile,
   CheckProfileRun,
   ComparisonResource,
+  EnqueueExecutionJob,
+  ExecutionJob,
+  ExecutionJobError,
   ExportResource,
   LatencyJob,
   LatencyJobDetail,
@@ -18,6 +21,9 @@ import {
   checkProfileSchema,
   checkProfileRunSchema,
   comparisonResourceSchema,
+  enqueueExecutionJobSchema,
+  executionJobErrorSchema,
+  executionJobSchema,
   exportResourceSchema,
   latencyJobDetailSchema,
   propertySchema,
@@ -71,7 +77,29 @@ export type JobRepository = {
   getBrowserAudit(id: string): BrowserAuditResource | null;
   listBrowserAudits(): BrowserAuditResource[];
   saveBrowserAudit(browserAudit: BrowserAuditResource): void;
+  enqueueExecutionJob(input: EnqueueExecutionJob, now?: Date): ExecutionJob;
+  getExecutionJob(id: string): ExecutionJob | null;
+  listExecutionJobs(): ExecutionJob[];
+  claimExecutionJob(input: ExecutionJobLeaseInput, now?: Date): ExecutionJob | null;
+  markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
+  renewExecutionJobLease(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
+  completeExecutionJob(input: ExecutionJobOwnerInput, now?: Date): ExecutionJob | null;
+  failExecutionJob(input: ExecutionJobOwnerInput & {
+    error: ExecutionJobError;
+    retryDelayMs?: number;
+  }, now?: Date): ExecutionJob | null;
+  cancelExecutionJob(id: string, now?: Date): ExecutionJob | null;
   close(): void;
+};
+
+export type ExecutionJobLeaseInput = {
+  leaseOwner: string;
+  leaseDurationMs: number;
+};
+
+export type ExecutionJobOwnerInput = {
+  id: string;
+  leaseOwner: string;
 };
 
 type EntityKind =
@@ -97,7 +125,25 @@ type PersistedPayloadRow = {
   payload_json: string;
 };
 
+type ExecutionJobRow = {
+  id: string;
+  kind: string;
+  resource_id: string;
+  status: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  available_at: string;
+  payload_json: string;
+  error_json: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
 const encryptedPayloadMigrationId = '20260722_001_encrypted_payloads_v2';
+const executionJobsMigrationId = '20260722_002_execution_jobs';
 
 type JsonSchema<T> = {
   parse(value: unknown): T;
@@ -193,6 +239,46 @@ export const createSqliteJobRepository = ({
     migratePayloads();
   }
 
+  const executionJobsMigration = db
+    .query<{ id: string }, [string]>('SELECT id FROM schema_migrations WHERE id = ? LIMIT 1')
+    .get(executionJobsMigrationId);
+
+  if (!executionJobsMigration) {
+    const migrateExecutionJobs = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS execution_jobs (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK (kind IN ('network_probe', 'browser_audit', 'webhook_delivery')),
+          resource_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'running', 'succeeded', 'failed', 'cancelled')),
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+          max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
+          available_at TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          error_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS execution_jobs_claim_idx
+          ON execution_jobs (status, available_at, lease_expires_at, created_at);
+
+        CREATE INDEX IF NOT EXISTS execution_jobs_resource_idx
+          ON execution_jobs (kind, resource_id, created_at DESC);
+      `);
+
+      db.query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
+        executionJobsMigrationId,
+        new Date().toISOString()
+      );
+    });
+
+    migrateExecutionJobs();
+  }
+
   const saveStatement = db.query(`
     INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -272,6 +358,138 @@ export const createSqliteJobRepository = ({
     DELETE FROM check_profile_runs
     WHERE profile_id = ?
   `);
+  const enqueueExecutionJobStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    number,
+    string,
+    string,
+    string,
+    string
+  ]>(`
+    INSERT INTO execution_jobs (
+      id, kind, resource_id, status, lease_owner, lease_expires_at,
+      attempt_count, max_attempts, available_at, payload_json, error_json,
+      created_at, updated_at, completed_at
+    )
+    VALUES (?, ?, ?, 'queued', NULL, NULL, 0, ?, ?, ?, NULL, ?, ?, NULL)
+    ON CONFLICT(id) DO NOTHING
+    RETURNING *
+  `);
+  const getExecutionJobStatement = db.query<ExecutionJobRow, [string]>(`
+    SELECT *
+    FROM execution_jobs
+    WHERE id = ?
+    LIMIT 1
+  `);
+  const listExecutionJobsStatement = db.query<ExecutionJobRow, []>(`
+    SELECT *
+    FROM execution_jobs
+    ORDER BY created_at DESC, id DESC
+  `);
+  const finalizeExhaustedExecutionJobsStatement = db.query(`
+    UPDATE execution_jobs
+    SET status = 'failed',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        error_json = ?,
+        updated_at = ?,
+        completed_at = ?
+    WHERE attempt_count >= max_attempts
+      AND (
+        (status = 'queued' AND available_at <= ?)
+        OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
+      )
+  `);
+  const claimExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'leased',
+        lease_owner = ?,
+        lease_expires_at = ?,
+        attempt_count = attempt_count + 1,
+        updated_at = ?,
+        completed_at = NULL
+    WHERE id = (
+      SELECT id
+      FROM execution_jobs
+      WHERE attempt_count < max_attempts
+        AND (
+          (status = 'queued' AND available_at <= ?)
+          OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
+        )
+      ORDER BY available_at ASC, created_at ASC, id ASC
+      LIMIT 1
+    )
+    RETURNING *
+  `);
+  const markExecutionJobRunningStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'running', lease_expires_at = ?, updated_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const renewExecutionJobLeaseStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET lease_expires_at = ?, updated_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const completeExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'succeeded',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        error_json = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const updateFailedExecutionJobStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    string | null,
+    string,
+    string,
+    string,
+    string
+  ]>(`
+    UPDATE execution_jobs
+    SET status = ?,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        available_at = ?,
+        error_json = ?,
+        completed_at = ?,
+        updated_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const cancelExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'cancelled',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE id = ?
+      AND status NOT IN ('succeeded', 'failed', 'cancelled')
+    RETURNING *
+  `);
 
   const parseJob = (row: JobRow) => {
     try {
@@ -319,6 +537,26 @@ export const createSqliteJobRepository = ({
       return null;
     }
   };
+
+  const parseExecutionJob = (row: ExecutionJobRow) =>
+    executionJobSchema.parse({
+      id: row.id,
+      kind: row.kind,
+      resourceId: row.resource_id,
+      status: row.status,
+      leaseOwner: row.lease_owner,
+      leaseExpiresAt: row.lease_expires_at,
+      attemptCount: row.attempt_count,
+      maxAttempts: row.max_attempts,
+      availableAt: row.available_at,
+      payload: storageCrypto.parse(row.payload_json),
+      error: row.error_json
+        ? executionJobErrorSchema.parse(storageCrypto.parse(row.error_json))
+        : null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at
+    });
 
   const getEntity = <T>(kind: EntityKind, id: string, schema: JsonSchema<T>) => {
     const row = getEntityStatement.get(kind, id);
@@ -515,8 +753,197 @@ export const createSqliteJobRepository = ({
         updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
       });
     },
+    enqueueExecutionJob(input, now = new Date()) {
+      const parsed = enqueueExecutionJobSchema.parse(input);
+      const nowIso = now.toISOString();
+      const availableAt = parsed.availableAt
+        ? new Date(parsed.availableAt).toISOString()
+        : nowIso;
+      const row = enqueueExecutionJobStatement.get(
+        parsed.id,
+        parsed.kind,
+        parsed.resourceId,
+        parsed.maxAttempts,
+        availableAt,
+        storageCrypto.stringify(parsed.payload),
+        nowIso,
+        nowIso
+      );
+      const persisted = row ?? getExecutionJobStatement.get(parsed.id);
+
+      if (!persisted) {
+        throw new Error('Execution job could not be persisted');
+      }
+
+      const executionJob = parseExecutionJob(persisted);
+
+      if (executionJob.kind !== parsed.kind || executionJob.resourceId !== parsed.resourceId) {
+        throw new Error('Execution job id already belongs to a different resource');
+      }
+
+      return executionJob;
+    },
+    getExecutionJob(id) {
+      const row = getExecutionJobStatement.get(id);
+      return row ? parseExecutionJob(row) : null;
+    },
+    listExecutionJobs() {
+      return listExecutionJobsStatement.all().map(parseExecutionJob);
+    },
+    claimExecutionJob(input, now = new Date()) {
+      const leaseExpiresAt = getLeaseExpiresAt(input, now);
+      const nowIso = now.toISOString();
+      const exhaustedError = storageCrypto.stringify({
+        code: 'lease_attempts_exhausted',
+        message: 'Execution stopped after the maximum number of lease attempts',
+        retryable: false
+      } satisfies ExecutionJobError);
+
+      finalizeExhaustedExecutionJobsStatement.run(
+        exhaustedError,
+        nowIso,
+        nowIso,
+        nowIso,
+        nowIso
+      );
+
+      const row = claimExecutionJobStatement.get(
+        input.leaseOwner,
+        leaseExpiresAt,
+        nowIso,
+        nowIso,
+        nowIso
+      );
+      return row ? parseExecutionJob(row) : null;
+    },
+    markExecutionJobRunning(input, now = new Date()) {
+      const leaseExpiresAt = getLeaseExpiresAt(input, now);
+      const nowIso = now.toISOString();
+      const row = markExecutionJobRunningStatement.get(
+        leaseExpiresAt,
+        nowIso,
+        input.id,
+        input.leaseOwner,
+        nowIso
+      );
+      return row ? parseExecutionJob(row) : null;
+    },
+    renewExecutionJobLease(input, now = new Date()) {
+      const leaseExpiresAt = getLeaseExpiresAt(input, now);
+      const nowIso = now.toISOString();
+      const row = renewExecutionJobLeaseStatement.get(
+        leaseExpiresAt,
+        nowIso,
+        input.id,
+        input.leaseOwner,
+        nowIso
+      );
+      return row ? parseExecutionJob(row) : null;
+    },
+    completeExecutionJob(input, now = new Date()) {
+      assertLeaseOwner(input.leaseOwner);
+      const nowIso = now.toISOString();
+      const row = completeExecutionJobStatement.get(
+        nowIso,
+        nowIso,
+        input.id,
+        input.leaseOwner,
+        nowIso
+      );
+
+      if (row) {
+        return parseExecutionJob(row);
+      }
+
+      const existing = getExecutionJobStatement.get(input.id);
+      const executionJob = existing ? parseExecutionJob(existing) : null;
+      return executionJob?.status === 'succeeded' ? executionJob : null;
+    },
+    failExecutionJob(input, now = new Date()) {
+      assertLeaseOwner(input.leaseOwner);
+      const error = executionJobErrorSchema.parse(input.error);
+      const retryDelayMs = input.retryDelayMs ?? 1_000;
+
+      if (!Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 86_400_000) {
+        throw new Error('Execution retry delay must be an integer between 0 and 86400000ms');
+      }
+
+      const fail = db.transaction(() => {
+        const persisted = getExecutionJobStatement.get(input.id);
+
+        if (!persisted) {
+          return null;
+        }
+
+        const executionJob = parseExecutionJob(persisted);
+
+        if (['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
+          return executionJob;
+        }
+
+        const nowIso = now.toISOString();
+
+        if (
+          executionJob.leaseOwner !== input.leaseOwner
+          || !executionJob.leaseExpiresAt
+          || executionJob.leaseExpiresAt <= nowIso
+        ) {
+          return null;
+        }
+
+        const terminal = !error.retryable || executionJob.attemptCount >= executionJob.maxAttempts;
+        const availableAt = terminal
+          ? executionJob.availableAt
+          : new Date(now.getTime() + retryDelayMs).toISOString();
+        const row = updateFailedExecutionJobStatement.get(
+          terminal ? 'failed' : 'queued',
+          availableAt,
+          storageCrypto.stringify(error),
+          terminal ? nowIso : null,
+          nowIso,
+          input.id,
+          input.leaseOwner,
+          nowIso
+        );
+        return row ? parseExecutionJob(row) : null;
+      });
+
+      return fail();
+    },
+    cancelExecutionJob(id, now = new Date()) {
+      const nowIso = now.toISOString();
+      const row = cancelExecutionJobStatement.get(nowIso, nowIso, id);
+
+      if (row) {
+        return parseExecutionJob(row);
+      }
+
+      const existing = getExecutionJobStatement.get(id);
+      const executionJob = existing ? parseExecutionJob(existing) : null;
+      return executionJob?.status === 'cancelled' ? executionJob : null;
+    },
     close() {
       db.close();
     }
   };
+};
+
+const assertLeaseOwner = (leaseOwner: string) => {
+  if (leaseOwner.length < 1 || leaseOwner.length > 160) {
+    throw new Error('Execution lease owner must contain between 1 and 160 characters');
+  }
+};
+
+const getLeaseExpiresAt = (input: ExecutionJobLeaseInput, now: Date) => {
+  assertLeaseOwner(input.leaseOwner);
+
+  if (
+    !Number.isSafeInteger(input.leaseDurationMs)
+    || input.leaseDurationMs < 1_000
+    || input.leaseDurationMs > 3_600_000
+  ) {
+    throw new Error('Execution lease duration must be an integer between 1000 and 3600000ms');
+  }
+
+  return new Date(now.getTime() + input.leaseDurationMs).toISOString();
 };

@@ -135,6 +135,7 @@ Current repo state as of 2026-07-22:
 - persisted JSON payloads are now AES-256-GCM encrypted with an HKDF-derived v2 key, legacy plaintext/v1 payloads receive a one-time transactional migration before strict plaintext rejection, sensitive headers/cookies/webhook secrets are masked across API/RPC/SSE/export paths, and `selfhost:init` generates a non-overwriting random Compose env file
 - the Rust probe now pins validated DNS addresses into reqwest across redirects, while the Lighthouse runner enforces public-network target/navigation/subresource checks plus download/new-window blocking and an explicit operator allowlist
 - `/v1/capabilities` now reports the implemented Fast Check metric surface, keeping TCP/TLS timing and TLS metadata disabled and null until they are actually measured
+- the durable execution foundation now defines public-safe execution job contracts and an encrypted SQLite `execution_jobs` state machine with atomic claim, lease renewal, expiry recovery, bounded retry, terminal failure, cancellation, and idempotent completion semantics
 
 Current local dev entrypoints:
 - `bun run dev`

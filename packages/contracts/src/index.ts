@@ -8,3 +8,4 @@ export * from './ops-contract';
 export * from './control-contract';
 export * from './probe-api';
 export * from './events';
+export * from './execution';

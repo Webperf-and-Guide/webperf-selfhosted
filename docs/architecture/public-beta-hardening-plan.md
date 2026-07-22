@@ -169,7 +169,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 - [ ] Add ordered migrations, WAL, busy timeout, foreign keys, and graceful
   close.
-- [ ] Add the required `execution_jobs` columns, indexes, and atomic claim.
+- [x] Add the required `execution_jobs` columns, indexes, and atomic claim.
 - [ ] Implement lease renewal, expiry recovery, retry, idempotency, terminal
   failure, and graceful shutdown in `apps/executor`.
 - [ ] Keep scheduler limited to authenticated due-check dispatch.

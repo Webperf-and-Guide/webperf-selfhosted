@@ -50,6 +50,10 @@
     "./events": {
       "types": "./src/events.ts",
       "import": "./src/events.ts"
+    },
+    "./execution": {
+      "types": "./src/execution.ts",
+      "import": "./src/execution.ts"
     }
   },
   "peerDependencies": {

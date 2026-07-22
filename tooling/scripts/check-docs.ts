@@ -26,7 +26,13 @@ for (const relativePath of (await files).sort()) {
   checkedFiles += 1;
 
   const absolutePath = resolve(repositoryRoot, relativePath);
-  const source = await Bun.file(absolutePath).text();
+  let source: string;
+  try {
+    source = await Bun.file(absolutePath).text();
+  } catch {
+    errors.push(`${relativePath}: unable to read Markdown file`);
+    continue;
+  }
 
   for (const [index, line] of source.split('\n').entries()) {
     if (/\/(?:Users|home)\/[A-Za-z0-9._-]+\//.test(line) || line.includes('file://')) {

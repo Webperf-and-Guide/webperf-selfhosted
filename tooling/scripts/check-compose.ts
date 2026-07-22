@@ -122,9 +122,11 @@ assert(
   browser.environment?.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'false',
   'Browser Audit sandbox must be enabled by default'
 );
+const selectedBrowserRuntimeVersion = browser.image?.match(/:([^:@]+)$/)?.[1];
 assert(
-  browser.environment?.WEBPERF_RUNTIME_VERSION === '0.1.0',
-  'Browser Audit runner must receive the selected WebPerf runtime version'
+  Boolean(selectedBrowserRuntimeVersion)
+    && browser.environment?.WEBPERF_RUNTIME_VERSION === selectedBrowserRuntimeVersion,
+  'Browser Audit runner version must match its selected image tag'
 );
 assertLoopbackPort(productionWithProfiles.services['api-debug'], 8789, 'API debug proxy');
 assertLoopbackPort(

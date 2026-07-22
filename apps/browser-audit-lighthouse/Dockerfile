@@ -65,7 +65,7 @@ RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name 
   && test -n "$sandbox_path" \
   && chown root:root "$sandbox_path" \
   && chmod 4755 "$sandbox_path" \
-  && if [ -x /opt/google/chrome/chrome ]; then cp -p "$sandbox_path" /opt/google/chrome/chrome-sandbox; fi \
+  && if [ -x /opt/google/chrome/chrome ] && [ "$sandbox_path" != "/opt/google/chrome/chrome-sandbox" ]; then cp -p "$sandbox_path" /opt/google/chrome/chrome-sandbox; fi \
   && if [ -f /opt/google/chrome/chrome-sandbox ]; then chown root:root /opt/google/chrome/chrome-sandbox && chmod 4755 /opt/google/chrome/chrome-sandbox; fi \
   && cp -p "$sandbox_path" /usr/local/sbin/chrome-devel-sandbox \
   && chown root:root /usr/local/sbin/chrome-devel-sandbox \

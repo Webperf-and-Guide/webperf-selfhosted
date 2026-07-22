@@ -17,7 +17,7 @@ export type StorageCrypto = {
 };
 
 export class UnencryptedPersistedPayloadError extends Error {
-  override name = 'UnencryptedPersistedPayloadError';
+  override readonly name: string = 'UnencryptedPersistedPayloadError';
 
   constructor() {
     super('Refusing to parse an unencrypted persisted payload');
@@ -25,7 +25,7 @@ export class UnencryptedPersistedPayloadError extends Error {
 }
 
 export class InvalidEncryptedPayloadEnvelopeError extends Error {
-  override name = 'InvalidEncryptedPayloadEnvelopeError';
+  override readonly name: string = 'InvalidEncryptedPayloadEnvelopeError';
 
   constructor() {
     super('Invalid encrypted payload envelope');

@@ -253,14 +253,35 @@ export const createSqliteJobRepository = ({
           status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'running', 'succeeded', 'failed', 'cancelled')),
           lease_owner TEXT,
           lease_expires_at TEXT,
-          attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
-          max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
+          attempt_count INTEGER NOT NULL,
+          max_attempts INTEGER NOT NULL CHECK (max_attempts > 0 AND max_attempts <= 20),
           available_at TEXT NOT NULL,
           payload_json TEXT NOT NULL,
           error_json TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          completed_at TEXT
+          completed_at TEXT,
+          CHECK (attempt_count >= 0 AND attempt_count <= max_attempts),
+          CHECK (
+            (
+              status IN ('leased', 'running')
+              AND lease_owner IS NOT NULL
+              AND lease_expires_at IS NOT NULL
+              AND completed_at IS NULL
+            )
+            OR (
+              status = 'queued'
+              AND lease_owner IS NULL
+              AND lease_expires_at IS NULL
+              AND completed_at IS NULL
+            )
+            OR (
+              status IN ('succeeded', 'failed', 'cancelled')
+              AND lease_owner IS NULL
+              AND lease_expires_at IS NULL
+              AND completed_at IS NOT NULL
+            )
+          )
         );
 
         CREATE INDEX IF NOT EXISTS execution_jobs_claim_idx
@@ -538,25 +559,38 @@ export const createSqliteJobRepository = ({
     }
   };
 
-  const parseExecutionJob = (row: ExecutionJobRow) =>
-    executionJobSchema.parse({
-      id: row.id,
-      kind: row.kind,
-      resourceId: row.resource_id,
-      status: row.status,
-      leaseOwner: row.lease_owner,
-      leaseExpiresAt: row.lease_expires_at,
-      attemptCount: row.attempt_count,
-      maxAttempts: row.max_attempts,
-      availableAt: row.available_at,
-      payload: storageCrypto.parse(row.payload_json),
-      error: row.error_json
-        ? executionJobErrorSchema.parse(storageCrypto.parse(row.error_json))
-        : null,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      completedAt: row.completed_at
-    });
+  const parseExecutionJob = (row: ExecutionJobRow): ExecutionJob | null => {
+    try {
+      return executionJobSchema.parse({
+        id: row.id,
+        kind: row.kind,
+        resourceId: row.resource_id,
+        status: row.status,
+        leaseOwner: row.lease_owner,
+        leaseExpiresAt: row.lease_expires_at,
+        attemptCount: row.attempt_count,
+        maxAttempts: row.max_attempts,
+        availableAt: row.available_at,
+        payload: storageCrypto.parse(row.payload_json),
+        error: row.error_json
+          ? executionJobErrorSchema.parse(storageCrypto.parse(row.error_json))
+          : null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        completedAt: row.completed_at
+      });
+    } catch {
+      console.warn(
+        JSON.stringify({
+          service: 'webperf-api',
+          warning: 'execution_job_invalid',
+          executionJobId: row.id,
+          error: 'Persisted execution job payload could not be decoded'
+        })
+      );
+      return null;
+    }
+  };
 
   const getEntity = <T>(kind: EntityKind, id: string, schema: JsonSchema<T>) => {
     const row = getEntityStatement.get(kind, id);
@@ -777,6 +811,10 @@ export const createSqliteJobRepository = ({
 
       const executionJob = parseExecutionJob(persisted);
 
+      if (!executionJob) {
+        throw new Error('Persisted execution job could not be decoded');
+      }
+
       if (executionJob.kind !== parsed.kind || executionJob.resourceId !== parsed.resourceId) {
         throw new Error('Execution job id already belongs to a different resource');
       }
@@ -788,7 +826,10 @@ export const createSqliteJobRepository = ({
       return row ? parseExecutionJob(row) : null;
     },
     listExecutionJobs() {
-      return listExecutionJobsStatement.all().map(parseExecutionJob);
+      return listExecutionJobsStatement
+        .all()
+        .map(parseExecutionJob)
+        .filter((job): job is ExecutionJob => job !== null);
     },
     claimExecutionJob(input, now = new Date()) {
       const leaseExpiresAt = getLeaseExpiresAt(input, now);
@@ -799,21 +840,24 @@ export const createSqliteJobRepository = ({
         retryable: false
       } satisfies ExecutionJobError);
 
-      finalizeExhaustedExecutionJobsStatement.run(
-        exhaustedError,
-        nowIso,
-        nowIso,
-        nowIso,
-        nowIso
-      );
+      const claim = db.transaction(() => {
+        finalizeExhaustedExecutionJobsStatement.run(
+          exhaustedError,
+          nowIso,
+          nowIso,
+          nowIso,
+          nowIso
+        );
 
-      const row = claimExecutionJobStatement.get(
-        input.leaseOwner,
-        leaseExpiresAt,
-        nowIso,
-        nowIso,
-        nowIso
-      );
+        return claimExecutionJobStatement.get(
+          input.leaseOwner,
+          leaseExpiresAt,
+          nowIso,
+          nowIso,
+          nowIso
+        );
+      });
+      const row = claim();
       return row ? parseExecutionJob(row) : null;
     },
     markExecutionJobRunning(input, now = new Date()) {
@@ -876,6 +920,10 @@ export const createSqliteJobRepository = ({
         }
 
         const executionJob = parseExecutionJob(persisted);
+
+        if (!executionJob) {
+          return null;
+        }
 
         if (['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
           return executionJob;

@@ -263,4 +263,52 @@ describe('durable execution repository', () => {
 
     repository.close();
   });
+
+  test('skips corrupted rows without crashing queue reads', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    repository.enqueueExecutionJob(
+      {
+        id: 'exec_corrupt',
+        kind: 'network_probe',
+        resourceId: 'job_corrupt',
+        maxAttempts: 2,
+        payload: { jobId: 'job_corrupt' }
+      },
+      new Date('2026-07-22T00:00:00.000Z')
+    );
+    repository.enqueueExecutionJob(
+      {
+        id: 'exec_valid',
+        kind: 'network_probe',
+        resourceId: 'job_valid',
+        maxAttempts: 2,
+        payload: { jobId: 'job_valid' }
+      },
+      new Date('2026-07-22T00:00:01.000Z')
+    );
+
+    const database = new Database(databasePath);
+    database
+      .query('UPDATE execution_jobs SET payload_json = ? WHERE id = ?')
+      .run('{"jobId":"unencrypted"}', 'exec_corrupt');
+    database.close();
+
+    expect(repository.getExecutionJob('exec_corrupt')).toBeNull();
+    expect(repository.listExecutionJobs().map((job) => job.id)).toEqual(['exec_valid']);
+    expect(
+      repository.claimExecutionJob(
+        { leaseOwner: 'executor-a', leaseDurationMs: 10_000 },
+        new Date('2026-07-22T00:00:02.000Z')
+      )
+    ).toBeNull();
+    expect(
+      repository.claimExecutionJob(
+        { leaseOwner: 'executor-a', leaseDurationMs: 10_000 },
+        new Date('2026-07-22T00:00:02.000Z')
+      )?.id
+    ).toBe('exec_valid');
+
+    repository.close();
+  });
 });

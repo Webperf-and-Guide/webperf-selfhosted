@@ -57,7 +57,12 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox \) -print -quit 2>/dev/null)" \
   && test -n "$sandbox_path" \
   && chown root:root "$sandbox_path" \
-  && chmod 4755 "$sandbox_path"
+  && chmod 4755 "$sandbox_path" \
+  && cp -p "$sandbox_path" /usr/local/sbin/chrome-devel-sandbox \
+  && chown root:root /usr/local/sbin/chrome-devel-sandbox \
+  && chmod 4755 /usr/local/sbin/chrome-devel-sandbox \
+  && test -u /usr/local/sbin/chrome-devel-sandbox \
+  && test -x /usr/local/sbin/chrome-devel-sandbox
 RUN chown -R bun:bun /workspace
 
 USER bun
@@ -66,6 +71,7 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
 ENV CHROME_INSTALL_DIR=/opt/chrome
+ENV CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
 
 EXPOSE 8080
 

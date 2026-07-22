@@ -148,7 +148,8 @@ Current repo state as of 2026-07-22:
 - production Compose now consumes one versioned GHCR tag for console, API, scheduler, executor, probe, and the optional Lighthouse runner, while `compose.dev.yml` restores source builds for contributor smoke tests
 - default Compose publishes only the console on `127.0.0.1`; loopback API/runner access is opt-in through the `debug` profile, and all runtime services now have non-root/read-only policies, health checks, bounded resources, log rotation, and explicit stop behavior
 - the optional Lighthouse container now prepares Chrome's setuid sandbox, stays host-port free with 1 GiB shared memory and one in-flight audit, and no longer receives default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
-- one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 96 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
+- one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 99 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
+- Compose smoke port-isolation assertions now inspect actual container port bindings instead of relying on version-dependent `docker compose port` output for exposed-but-unpublished ports
 - all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links
 - public-beta tags are accepted only from `main` after Sampo changesets are applied, the tag matches the highest public package version, and the protected `release` environment approves publication; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
 - the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
@@ -192,11 +193,11 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. validate the default and Browser Audit source-build Compose smokes in CI
-3. publish release images, SBOM, provenance, and digest metadata only after the reusable CI gate
-4. complete the operator install, backup, upgrade, security, and troubleshooting documentation
-5. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+1. finish the public-beta hardening PR CI/review loop and merge it to `main`
+2. perform the first protected v0 beta release and verify its images, attestations, checksums, metadata, and digest-pinned Compose bundle
+3. run a documented operator backup/restore drill against a release bundle
+4. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+5. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
 
 ## Update Protocol
 

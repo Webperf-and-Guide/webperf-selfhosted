@@ -18,6 +18,29 @@ compose() {
     "$@"
 }
 
+assert_service_unpublished() {
+  local service="$1"
+  local label="$2"
+  local container_id
+  local published_bindings
+
+  container_id="$(compose "${profile_args[@]}" ps -q "$service")"
+  if [[ -z "$container_id" ]]; then
+    echo "Expected ${label} container to exist" >&2
+    exit 1
+  fi
+
+  published_bindings="$(
+    docker inspect \
+      --format '{{range $port, $bindings := .HostConfig.PortBindings}}{{if $bindings}}{{$port}}={{json $bindings}} {{end}}{{end}}' \
+      "$container_id"
+  )"
+  if [[ -n "$published_bindings" ]]; then
+    echo "Expected ${label} to stay unpublished, got ${published_bindings}" >&2
+    exit 1
+  fi
+}
+
 cleanup() {
   compose --profile browser-audit --profile debug down -v --remove-orphans >/dev/null 2>&1 || true
   rm -f "$temp_env"
@@ -78,18 +101,10 @@ if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:*
   exit 1
 fi
 
-api_mapping="$(compose "${profile_args[@]}" port api 8788 2>/dev/null || true)"
-if [[ -n "$api_mapping" ]]; then
-  echo "Expected API to stay unpublished, got ${api_mapping}" >&2
-  exit 1
-fi
+assert_service_unpublished api "API"
 
 if [[ "$profile" == "browser-audit" ]]; then
-  browser_mapping="$(compose "${profile_args[@]}" port browser-audit-lighthouse 8080 2>/dev/null || true)"
-  if [[ -n "$browser_mapping" ]]; then
-    echo "Expected Browser Audit runner to stay unpublished, got ${browser_mapping}" >&2
-    exit 1
-  fi
+  assert_service_unpublished browser-audit-lighthouse "Browser Audit runner"
 
   browser_container_id="$(compose "${profile_args[@]}" ps -q browser-audit-lighthouse)"
   if [[ -z "$browser_container_id" ]]; then

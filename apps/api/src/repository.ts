@@ -579,13 +579,14 @@ export const createSqliteJobRepository = ({
         updatedAt: row.updated_at,
         completedAt: row.completed_at
       });
-    } catch {
+    } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'execution_job_invalid',
           executionJobId: row.id,
-          error: 'Persisted execution job payload could not be decoded'
+          error: 'Persisted execution job payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
@@ -994,4 +995,44 @@ const getLeaseExpiresAt = (input: ExecutionJobLeaseInput, now: Date) => {
   }
 
   return new Date(now.getTime() + input.leaseDurationMs).toISOString();
+};
+
+const describePersistedPayloadError = (error: unknown) => {
+  if (error instanceof AggregateError) {
+    return { type: 'decryption_failed', attempts: error.errors.length };
+  }
+
+  if (error instanceof SyntaxError) {
+    return { type: 'invalid_json' };
+  }
+
+  if (error instanceof Error) {
+    if (error.message === 'Refusing to parse an unencrypted persisted payload') {
+      return { type: 'unencrypted_payload' };
+    }
+    if (error.message === 'Invalid encrypted payload envelope') {
+      return { type: 'invalid_envelope' };
+    }
+  }
+
+  const issues = (error as { issues?: unknown } | null)?.issues;
+
+  if (Array.isArray(issues)) {
+    return {
+      type: 'schema_validation',
+      issues: issues.slice(0, 20).map((issue) => {
+        const candidate = issue as { code?: unknown; path?: unknown };
+        return {
+          code: typeof candidate.code === 'string' ? candidate.code : 'unknown',
+          path: Array.isArray(candidate.path)
+            ? candidate.path.filter((part): part is string | number =>
+                typeof part === 'string' || typeof part === 'number'
+              )
+            : []
+        };
+      })
+    };
+  }
+
+  return { type: 'payload_decode_failed' };
 };

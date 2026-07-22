@@ -291,23 +291,35 @@ describe('durable execution repository', () => {
     const database = new Database(databasePath);
     database
       .query('UPDATE execution_jobs SET payload_json = ? WHERE id = ?')
-      .run('{"jobId":"unencrypted"}', 'exec_corrupt');
+      .run('{"jobId":"raw-sensitive-value"}', 'exec_corrupt');
     database.close();
 
-    expect(repository.getExecutionJob('exec_corrupt')).toBeNull();
-    expect(repository.listExecutionJobs().map((job) => job.id)).toEqual(['exec_valid']);
-    expect(
-      repository.claimExecutionJob(
-        { leaseOwner: 'executor-a', leaseDurationMs: 10_000 },
-        new Date('2026-07-22T00:00:02.000Z')
-      )
-    ).toBeNull();
-    expect(
-      repository.claimExecutionJob(
-        { leaseOwner: 'executor-a', leaseDurationMs: 10_000 },
-        new Date('2026-07-22T00:00:02.000Z')
-      )?.id
-    ).toBe('exec_valid');
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(' '));
+
+    try {
+      expect(repository.getExecutionJob('exec_corrupt')).toBeNull();
+      expect(repository.listExecutionJobs().map((job) => job.id)).toEqual(['exec_valid']);
+      expect(
+        repository.claimExecutionJob(
+          { leaseOwner: 'executor-a', leaseDurationMs: 10_000 },
+          new Date('2026-07-22T00:00:02.000Z')
+        )
+      ).toBeNull();
+      expect(
+        repository.claimExecutionJob(
+          { leaseOwner: 'executor-a', leaseDurationMs: 10_000 },
+          new Date('2026-07-22T00:00:02.000Z')
+        )?.id
+      ).toBe('exec_valid');
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toHaveLength(3);
+    expect(JSON.parse(warnings[0]!).diagnostic).toEqual({ type: 'unencrypted_payload' });
+    expect(warnings.join('\n')).not.toContain('raw-sensitive-value');
 
     repository.close();
   });

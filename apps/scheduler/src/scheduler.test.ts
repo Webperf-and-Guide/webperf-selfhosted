@@ -94,7 +94,7 @@ describe('self-host scheduler boundary', () => {
 
     expect(observed.requestSignal?.aborted).toBe(true);
     expect(caught).toBeInstanceOf(SchedulerDispatchError);
-    expect(caught).toMatchObject({ code: 'request_failed', status: null });
+    expect(caught).toMatchObject({ code: 'request_timeout', status: null });
   });
 
   test('bounds response body reads while preserving the HTTP status', async () => {
@@ -119,7 +119,7 @@ describe('self-host scheduler boundary', () => {
     }
 
     expect(caught).toBeInstanceOf(SchedulerDispatchError);
-    expect(caught).toMatchObject({ code: 'response_invalid', status: 200 });
+    expect(caught).toMatchObject({ code: 'request_timeout', status: 200 });
   });
 
   test('rejects a credential-bearing or pathful API base URL before fetch', async () => {

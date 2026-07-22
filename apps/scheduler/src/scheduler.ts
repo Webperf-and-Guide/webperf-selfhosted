@@ -23,10 +23,23 @@ export const maxSchedulerRequestTimeoutMs = 5 * 60_000;
 export const maxSchedulerBackoffMs = 2 * 86_400_000;
 const minimumSchedulerBackoffCeilingMs = 15 * 60_000;
 
+export type SchedulerDispatchErrorCode =
+  | 'request_failed'
+  | 'request_timeout'
+  | 'response_invalid';
+
 const buildDispatchErrorMessage = (
-  code: 'request_failed' | 'response_invalid',
+  code: SchedulerDispatchErrorCode,
   status: number | null
 ) => {
+  if (code === 'request_timeout') {
+    if (status == null) {
+      return 'Scheduler dispatch request timed out';
+    }
+
+    return `Scheduler dispatch response timed out with HTTP ${status}`;
+  }
+
   if (code === 'response_invalid') {
     return 'Scheduler dispatch response was invalid';
   }
@@ -42,7 +55,7 @@ export class SchedulerDispatchError extends Error {
   override readonly name = 'SchedulerDispatchError';
 
   constructor(
-    readonly code: 'request_failed' | 'response_invalid',
+    readonly code: SchedulerDispatchErrorCode,
     readonly status: number | null
   ) {
     super(buildDispatchErrorMessage(code, status));
@@ -122,6 +135,10 @@ export const dispatchScheduledChecks = async ({
         throw signal.reason ?? error;
       }
 
+      if (timeoutController.signal.aborted) {
+        throw new SchedulerDispatchError('request_timeout', null);
+      }
+
       throw new SchedulerDispatchError('request_failed', null);
     }
 
@@ -137,6 +154,10 @@ export const dispatchScheduledChecks = async ({
     } catch (error) {
       if (signal?.aborted) {
         throw signal.reason ?? error;
+      }
+
+      if (timeoutController.signal.aborted) {
+        throw new SchedulerDispatchError('request_timeout', response.status);
       }
 
       throw new SchedulerDispatchError('response_invalid', response.status);

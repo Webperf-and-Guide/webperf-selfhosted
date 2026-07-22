@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.11-slim
+FROM oven/bun:1.3.13-slim
 
 ARG CHROME_VERSION=stable
 ARG TARGETARCH
@@ -47,7 +47,7 @@ COPY . /workspace/webperf-selfhosted
 
 WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
-RUN bun install --no-save --filter=webperf-browser-audit-lighthouse --omit=dev
+RUN bun install --frozen-lockfile --no-save --filter=webperf-browser-audit-lighthouse --omit=dev
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox && rm -rf /var/lib/apt/lists/*; \

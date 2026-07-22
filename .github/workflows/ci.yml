@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  js:
+    name: JS, contracts, and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test
+      - run: bun run compose:config
+
+  docs:
+    name: Documentation links and paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun run check:docs
+
+  rust:
+    name: Rust fmt, clippy, tests, and linux/amd64 image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+        working-directory: apps/probe-rs
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: apps/probe-rs
+      - run: cargo test --workspace
+        working-directory: apps/probe-rs
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./apps/probe-rs
+          file: ./apps/probe-rs/Dockerfile
+          platforms: linux/amd64
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=ci-probe
+          cache-to: type=gha,mode=max,scope=ci-probe
+
+  images:
+    name: Image ${{ matrix.name }} (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: console
+            file: apps/console/Dockerfile
+          - name: api
+            file: apps/api/Dockerfile
+          - name: scheduler
+            file: apps/scheduler/Dockerfile
+          - name: executor
+            file: apps/executor/Dockerfile
+          - name: browser-audit-lighthouse
+            file: apps/browser-audit-lighthouse/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=ci-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.name }}
+
+  integration:
+    name: Compose smoke (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: default
+            command: smoke:compose
+          - profile: browser-audit
+            command: smoke:compose:browser-audit
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: docker/setup-buildx-action@v4
+      - run: bun install --frozen-lockfile
+      - run: bun run ${{ matrix.command }}
+
+  required:
+    name: Required CI
+    if: ${{ always() }}
+    needs: [js, docs, rust, images, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job
+        env:
+          JS_RESULT: ${{ needs.js.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          IMAGES_RESULT: ${{ needs.images.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+        run: |
+          for result in "$JS_RESULT" "$DOCS_RESULT" "$RUST_RESULT" "$IMAGES_RESULT" "$INTEGRATION_RESULT"; do
+            test "$result" = "success"
+          done

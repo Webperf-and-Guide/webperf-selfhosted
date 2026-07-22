@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.10
+FROM oven/bun:1.3.13
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN bun install --no-save
+RUN bun install --frozen-lockfile --no-save
 
 WORKDIR /app/apps/console
 RUN bun run build

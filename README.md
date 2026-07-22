@@ -67,11 +67,11 @@ Default local URLs:
 
 Launch-ready docs are grouped into five operator paths:
 
-- [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
-- [docker compose install](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md)
-- [optional Lighthouse Browser Audit runner](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md)
-- [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
-- [GHCR runtime images](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md)
+- [single-machine quickstart](docs/quickstart/single-machine.md)
+- [docker compose install](docs/quickstart/local-compose.md)
+- [optional Lighthouse Browser Audit runner](docs/self-hosting/browser-audit-lighthouse.md)
+- [parallel local dev](docs/quickstart/parallel-local-dev.md)
+- [GHCR runtime images](docs/quickstart/runtime-images.md)
 
 Provider-specific deployment walkthroughs belong on `webperf.and.guide`, not in this repo.
 
@@ -127,11 +127,11 @@ Compatibility responses are marked deprecated and link to their canonical
 successor. They are migration-only surfaces that may be removed at public v1.0;
 new integrations should use the canonical paths above.
 
-See [public-api-surface.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/architecture/public-api-surface.md) for the current freeze line and list-query contract.
+See [public-api-surface.md](docs/architecture/public-api-surface.md) for the current freeze line and list-query contract.
 
 ## Parallel Local Dev
 
-Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md) when the default development ports are already occupied or two self-host configurations need to run side-by-side.
+Use [parallel-local-dev.md](docs/quickstart/parallel-local-dev.md) when the default development ports are already occupied or two self-host configurations need to run side-by-side.
 
 ## Optional Browser Audit
 
@@ -173,7 +173,7 @@ Pending release notes live under `.sampo/changesets/`.
 
 ## Published Images
 
-See [runtime-images.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md) for the current GHCR image policy and checked-in metadata refs.
+See [runtime-images.md](docs/quickstart/runtime-images.md) for the current GHCR image policy and checked-in metadata refs.
 
 Cloud local development continues to consume OSS packages through sibling `file:` dependencies, while runtime images continue to publish through GHCR.
 Merges or direct pushes to `main` automatically publish the probe and browser-audit images through the checked-in GitHub Actions workflows.

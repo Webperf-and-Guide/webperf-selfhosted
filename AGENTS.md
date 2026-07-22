@@ -148,6 +148,8 @@ Current repo state as of 2026-07-22:
 - production Compose now consumes one versioned GHCR tag for console, API, scheduler, executor, probe, and the optional Lighthouse runner, while `compose.dev.yml` restores source builds for contributor smoke tests
 - default Compose publishes only the console on `127.0.0.1`; loopback API/runner access is opt-in through the `debug` profile, and all runtime services now have non-root/read-only policies, health checks, bounded resources, log rotation, and explicit stop behavior
 - the optional Lighthouse container now prepares Chrome's setuid sandbox, stays host-port free with 1 GiB shared memory and one in-flight audit, and no longer receives default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
+- one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 96 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
+- all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -190,7 +192,7 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
 2. validate the default and Browser Audit source-build Compose smokes in CI
-3. gate release images, SBOM, provenance, and digest metadata on complete CI
+3. publish release images, SBOM, provenance, and digest metadata only after the reusable CI gate
 4. complete the operator install, backup, upgrade, security, and troubleshooting documentation
 5. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
 

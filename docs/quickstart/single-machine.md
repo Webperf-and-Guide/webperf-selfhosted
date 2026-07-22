@@ -69,11 +69,11 @@ That enables:
 - `GET /v1/browser-audits/:id`
 - authenticated artifact downloads from the Browser Audit detail view
 
-See [browser-audit-lighthouse.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md) for the runtime profile and current queued-execution limits.
+See [browser-audit-lighthouse.md](../self-hosting/browser-audit-lighthouse.md) for the runtime profile and current queued-execution limits.
 
 ## Notes
 
 - This repo stays vendor-neutral. Platform-specific deployment walkthroughs live on `webperf.and.guide`.
-- If you want a Docker-first install, use [local-compose.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md).
-- If you need alternate development ports, use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md).
+- If you want a Docker-first install, use [local-compose.md](./local-compose.md).
+- If you need alternate development ports, use [parallel-local-dev.md](./parallel-local-dev.md).
 - `bun run capture:console:baselines` captures desktop and mobile screenshots for `/`, `/resources`, `/checks`, `/reports`, and `/regions` against the currently running console.

@@ -221,10 +221,10 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 7. CI and release
 
-- [ ] Require frozen install, boundaries, retired paths, OpenAPI, TS/Svelte,
+- [x] Require frozen install, boundaries, retired paths, OpenAPI, TS/Svelte,
   domain/report/API, Rust fmt/clippy/test, docs links, and absolute-path checks.
-- [ ] Build every runtime image, including Linux/amd64 probe and Lighthouse.
-- [ ] Run durable recovery, scheduler, comparison, artifact, redaction, and SSRF
+- [x] Build every runtime image, including Linux/amd64 probe and Lighthouse.
+- [x] Run durable recovery, scheduler, comparison, artifact, redaction, and SSRF
   integration coverage.
 - [ ] Gate publishing on CI; produce version tags, release bundle, SBOM,
   provenance, and digest-bearing runtime metadata.

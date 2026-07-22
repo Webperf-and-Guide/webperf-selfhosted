@@ -17,15 +17,15 @@ Both image families publish through GitHub Actions in this repo.
 
 Checked-in image refs live in:
 
-- [probe.json](/Users/imjlk/repos/and-guide/webperf-selfhosted/infra/docker/metadata/probe.json)
-- [browser-audit-lighthouse.json](/Users/imjlk/repos/and-guide/webperf-selfhosted/infra/docker/metadata/browser-audit-lighthouse.json)
+- [probe.json](../../infra/docker/metadata/probe.json)
+- [browser-audit-lighthouse.json](../../infra/docker/metadata/browser-audit-lighthouse.json)
 
 The managed repo consumes these metadata files when it renders Bunny and Cloudflare runtime config.
 
 Relevant workflows:
 
-- [.github/workflows/publish-probe-image.yml](/Users/imjlk/repos/and-guide/webperf-selfhosted/.github/workflows/publish-probe-image.yml)
-- [.github/workflows/publish-browser-audit-image.yml](/Users/imjlk/repos/and-guide/webperf-selfhosted/.github/workflows/publish-browser-audit-image.yml)
+- [probe image workflow](../../.github/workflows/publish-probe-image.yml)
+- [Browser Audit image workflow](../../.github/workflows/publish-browser-audit-image.yml)
 
 ## Quick Pull
 

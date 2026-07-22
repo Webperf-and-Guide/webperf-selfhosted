@@ -1658,7 +1658,11 @@ async function handleExecutionResourceOperation(
     }
 
     return json(
-      buildBrowserAuditArtifactUploadGrant(executionJob, request),
+      buildBrowserAuditArtifactUploadGrant(
+        executionJob,
+        body.data.leaseOwner,
+        request
+      ),
       { headers: { 'cache-control': 'no-store' } }
     );
   }
@@ -1857,13 +1861,12 @@ function buildExecutionResourceContext(
 
 function buildBrowserAuditArtifactUploadGrant(
   executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  leaseOwner: string,
   request: Request
 ) {
   const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
   if (
-    executionJob.kind !== 'browser_audit'
-    || executionJob.resourceId !== payload.auditId
-    || !executionJob.leaseOwner
+    executionJob.resourceId !== payload.auditId
     || !repository.getBrowserAudit(payload.auditId)
   ) {
     throw new Error('Browser Audit artifact grant references a missing resource');
@@ -1882,7 +1885,7 @@ function buildBrowserAuditArtifactUploadGrant(
       secret: runtime.internalSecret,
       auditId: payload.auditId,
       executionJobId: executionJob.id,
-      leaseOwner: executionJob.leaseOwner,
+      leaseOwner,
       attemptCount: executionJob.attemptCount,
       expiresAt,
       maxArtifactBytes: runtime.maxArtifactBytes,
@@ -1978,12 +1981,15 @@ const browserAuditArtifactsMatch = (
     && artifact.registryVersion === indexed.registryVersion
     && artifact.kind === indexed.kind
     && artifact.url === `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(indexed.id)}`
-    && artifact.filename != null
+    && artifact.filename !== undefined
+    && artifact.filename !== null
     && artifact.filename === indexed.filename
     && artifact.contentType === indexed.contentType
-    && artifact.byteSize != null
+    && artifact.byteSize !== undefined
+    && artifact.byteSize !== null
     && artifact.byteSize === indexed.byteSize
-    && artifact.sha256 != null
+    && artifact.sha256 !== undefined
+    && artifact.sha256 !== null
     && artifact.sha256 === indexed.sha256
     && artifact.createdAt === indexed.createdAt
   );

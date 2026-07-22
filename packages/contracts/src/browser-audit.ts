@@ -10,7 +10,8 @@ const browserAuditIdentifierSchema = z
   .min(1)
   .max(120)
   .regex(/^[a-z0-9][a-z0-9._-]*$/);
-const browserAuditScoreKeyPattern = /^[a-z][a-zA-Z0-9]*$/;
+const browserAuditScoreKeyIdentifierPattern = /^[a-z][a-zA-Z0-9]*$/;
+const browserAuditLegacyUrlSchema = z.string().url();
 
 export const browserAuditPresetSchema = z.enum(['mobile', 'desktop']);
 export type BrowserAuditPreset = z.infer<typeof browserAuditPresetSchema>;
@@ -305,10 +306,18 @@ export const browserAuditScoresSchema = z
   .catchall(browserAuditScoreValueSchema)
   .superRefine((scores, context) => {
     for (const key of Object.keys(scores)) {
-      if (key.length > 120 || !browserAuditScoreKeyPattern.test(key)) {
+      if (key.length > 120) {
         context.addIssue({
           code: 'custom',
-          message: `Browser Audit score key must be camelCase: ${key}`,
+          message: 'Browser Audit score key must not exceed 120 characters',
+          path: [key]
+        });
+      }
+
+      if (!browserAuditScoreKeyIdentifierPattern.test(key)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Browser Audit score key must be a lowercase-start alphanumeric identifier',
           path: [key]
         });
       }
@@ -548,18 +557,18 @@ function normalizeLegacyBrowserAuditCheckpoint(value: unknown) {
     return value;
   }
 
-  const summary = browserAuditMetricSummarySchema.safeParse(checkpoint.summary);
+  const summary = normalizeLegacyBrowserAuditMetricSummary(checkpoint.summary);
 
-  if (!summary.success) {
+  if (!summary) {
     return value;
   }
 
   return {
     ...checkpoint,
-    finalUrl: summary.data.finalUrl,
-    statusCode: summary.data.statusCode,
-    coreMetrics: coreMetricsFromLegacySummary(summary.data),
-    scores: scoresFromLegacySummary(summary.data),
+    finalUrl: summary.finalUrl,
+    statusCode: summary.statusCode,
+    coreMetrics: coreMetricsFromLegacySummary(summary),
+    scores: scoresFromLegacySummary(summary),
     extendedMetrics: []
   };
 }
@@ -571,9 +580,9 @@ function normalizeLegacyBrowserAuditResult(value: unknown) {
     return value;
   }
 
-  const summary = browserAuditMetricSummarySchema.safeParse(result.summary);
+  const summary = normalizeLegacyBrowserAuditMetricSummary(result.summary);
 
-  if (!summary.success) {
+  if (!summary) {
     return value;
   }
 
@@ -584,17 +593,76 @@ function normalizeLegacyBrowserAuditResult(value: unknown) {
         id: 'primary',
         mode: 'navigation',
         label: null,
-        summary: summary.data
+        summary
       }];
 
   return {
     ...result,
     protocolVersion: browserAuditProtocolVersion,
-    coreMetrics: coreMetricsFromLegacySummary(summary.data),
-    scores: scoresFromLegacySummary(summary.data),
+    coreMetrics: coreMetricsFromLegacySummary(summary),
+    scores: scoresFromLegacySummary(summary),
     extendedMetrics: [],
     checkpoints
   };
+}
+
+function normalizeLegacyBrowserAuditMetricSummary(
+  value: unknown
+): BrowserAuditMetricSummary | null {
+  const summary = asRecord(value);
+
+  if (!summary) {
+    return null;
+  }
+
+  // Historical rows are treated as untrusted input. Invalid individual fields
+  // become null before the strict compatibility schema shapes the v1 output.
+  return browserAuditMetricSummarySchema.parse({
+    finalUrl: normalizeLegacyUrl(summary.finalUrl),
+    statusCode: normalizeLegacyStatusCode(summary.statusCode),
+    performanceScore: normalizeLegacyScore(summary.performanceScore),
+    accessibilityScore: normalizeLegacyScore(summary.accessibilityScore),
+    bestPracticesScore: normalizeLegacyScore(summary.bestPracticesScore),
+    seoScore: normalizeLegacyScore(summary.seoScore),
+    fcpMs: normalizeLegacyNonnegativeNumber(summary.fcpMs),
+    lcpMs: normalizeLegacyNonnegativeNumber(summary.lcpMs),
+    cls: normalizeLegacyNonnegativeNumber(summary.cls),
+    inpMs: normalizeLegacyNonnegativeNumber(summary.inpMs),
+    tbtMs: normalizeLegacyNonnegativeNumber(summary.tbtMs),
+    speedIndexMs: normalizeLegacyNonnegativeNumber(summary.speedIndexMs)
+  });
+}
+
+function normalizeLegacyUrl(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  return browserAuditLegacyUrlSchema.safeParse(value).success ? value : null;
+}
+
+function normalizeLegacyStatusCode(value: unknown) {
+  return typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= 100
+    && value <= 599
+    ? value
+    : null;
+}
+
+function normalizeLegacyScore(value: unknown) {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && value >= 0
+    && value <= 1
+    ? value
+    : null;
+}
+
+function normalizeLegacyNonnegativeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 function coreMetricsFromLegacySummary(summary: BrowserAuditMetricSummary) {

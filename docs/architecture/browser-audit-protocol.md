@@ -11,7 +11,8 @@ Every successful result contains:
 
 - `protocolVersion`
 - `coreMetrics` for FCP, LCP, CLS, INP, TBT, and Speed Index
-- normalized `scores` in the `0..1` range, with camelCase extension keys
+- normalized `scores` in the `0..1` range, with extension keys using
+  lowercase-start alphanumeric identifiers
 - open, uniquely identified `extendedMetrics`
 - navigation, snapshot, or timespan `checkpoints`
 - normalized `issues`

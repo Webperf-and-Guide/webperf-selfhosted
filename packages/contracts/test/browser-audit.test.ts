@@ -51,7 +51,10 @@ describe('engine-neutral Browser Audit Protocol', () => {
     expect(browserAuditArtifactKindSchema.parse('json')).toBe('lighthouse-json');
     expect(() => browserAuditArtifactKindSchema.parse('../report')).toThrow();
     expect(() => browserAuditScoresSchema.parse({ 'not-valid': 0.5 })).toThrow(
-      'camelCase'
+      'lowercase-start'
+    );
+    expect(() => browserAuditScoresSchema.parse({ [`a${'b'.repeat(120)}`]: 0.5 })).toThrow(
+      '120 characters'
     );
   });
 
@@ -127,5 +130,35 @@ describe('engine-neutral Browser Audit Protocol', () => {
       kind: 'lighthouse-json'
     });
     expect(normalized).not.toHaveProperty('summary');
+  });
+
+  test('sanitizes malformed legacy summary fields without rejecting the record', () => {
+    const normalized = browserAuditResultSchema.parse({
+      summary: {
+        finalUrl: 'not a URL',
+        statusCode: 999,
+        performanceScore: 92,
+        lcpMs: -1,
+        cls: Number.POSITIVE_INFINITY
+      },
+      checkpoints: [],
+      issues: [],
+      artifacts: [],
+      toolchain: {
+        bunVersion: '1.3.13',
+        chromeVersion: '136.0.0.0',
+        puppeteerVersion: '24.7.1',
+        lighthouseVersion: '12.6.0'
+      },
+      startedAt: '2026-07-22T00:00:01.000Z',
+      completedAt: '2026-07-22T00:00:03.000Z'
+    });
+
+    expect(normalized.coreMetrics).toMatchObject({ lcpMs: null, cls: null });
+    expect(normalized.scores.performance).toBeNull();
+    expect(normalized.checkpoints[0]).toMatchObject({
+      finalUrl: null,
+      statusCode: null
+    });
   });
 });

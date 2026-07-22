@@ -88,10 +88,10 @@ Current repo state as of 2026-07-22:
 - docs now explicitly treat this repo as the public source of truth for self-hosted contracts, schemas, and deterministic reporting behavior
 - `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
 - `apps/browser-audit-lighthouse` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
-- `infra/docker/metadata/probe.json` and `infra/docker/metadata/browser-audit-lighthouse.json` are now the canonical checked-in image refs that the managed cloud repo consumes when it renders Cloudflare/Bunny runtime config
+- tagged releases now publish digest-bearing `runtime-metadata.json` as the managed runtime handoff, replacing mutable checked-in image refs
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 - root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
-- the browser-audit image publish workflow now also watches workspace dependency inputs like `packages/contracts`, the root `package.json`, and `bun.lock` so GHCR refreshes do not miss compatible runtime changes
+- required CI now gates shared development-channel publishing for all six runtime images, so workspace dependency changes cannot leave only part of the runtime set stale
 - the console IA now has a real route split around `/`, `/resources`, `/checks`, `/reports`, and `/regions`, backed by a shared workspace component and route-loader helper
 - `packages/ui` now drives a shared token/theme system for both OSS and cloud apps, with Tailwind v4 entrypoints and minimal shadcn-compatible primitive exports
 - `packages/ui` now also acts as the canonical shared shadcn surface for both repos, with `tabs`, `scroll-area`, `dialog`, `popover`, `tooltip`, `checkbox`, `switch`, and `table` joined by jsrepo-managed `underline-tabs`, `field-set`, `number-field`, `tags-input`, and `copy-button`
@@ -124,7 +124,7 @@ Current repo state as of 2026-07-22:
 - the root `check` flow now also runs a checked-in OpenAPI regression script so the frozen public/control docs stay aligned with the real contract export paths
 - the repo now includes `smoke:compose` and `smoke:compose:browser-audit` helpers that boot the Compose stack with temporary secrets, verify API health, run the console smoke, and exercise direct-run browser-audit in the optional profile
 - the repo now also includes `capture:console:baselines` helpers that render `/`, `/resources`, `/checks`, `/reports`, and `/regions` at desktop and mobile sizes into `output/playwright/console-baselines`
-- the GHCR probe and browser-audit image workflows now auto-publish on pushes to `main` with `main`, `latest`, and `sha-*` tags, plus GitHub Actions cache and workflow-level concurrency so merge-to-main is enough to refresh the managed repo's source-of-truth runtime refs
+- pushes to `main` publish all six runtime images with `main` and `sha-*` development tags after required CI; tagged releases publish version tags, digest-pinned Compose, SPDX SBOMs, provenance, checksums, and release-scoped runtime metadata without a `latest` channel
 - the frozen public API docs now explicitly treat `runs` as nested check-run lists plus top-level persisted run detail resources, and the HTTP suite regression-tests `GET /v1/checks/:checkId/runs` paging/filtering alongside the other stabilized list surfaces
 - browser-audit history now also surfaces checkpoint summaries, per-header/per-cookie request context, flow-step detail, and clearer artifact pointer labels so direct-run operator debugging stays readable without managed orchestration tooling
 - internal workspace packages now consume `@webperf/contracts` through `workspace:*` consistently instead of mixing `file:` and workspace references, which keeps the Bun lockfile stable enough for `bun install --frozen-lockfile` in GitHub Actions
@@ -150,6 +150,7 @@ Current repo state as of 2026-07-22:
 - the optional Lighthouse container now prepares Chrome's setuid sandbox, stays host-port free with 1 GiB shared memory and one in-flight audit, and no longer receives default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
 - one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 96 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
 - all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links
+- public-beta tags are accepted only from `main` after Sampo changesets are applied and the tag matches the highest public package version; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
 
 Current local dev entrypoints:
 - `bun run dev`

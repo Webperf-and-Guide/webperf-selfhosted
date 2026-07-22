@@ -226,11 +226,11 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Build every runtime image, including Linux/amd64 probe and Lighthouse.
 - [x] Run durable recovery, scheduler, comparison, artifact, redaction, and SSRF
   integration coverage.
-- [ ] Gate publishing on CI; produce version tags, release bundle, SBOM,
+- [x] Gate publishing on CI; produce version tags, release bundle, SBOM,
   provenance, and digest-bearing runtime metadata.
-- [ ] Ensure release Compose uses immutable version/digest references, never
+- [x] Ensure release Compose uses immutable version/digest references, never
   `main` or `latest`.
-- [ ] Add a Sampo changeset for release automation.
+- [x] Add a Sampo changeset for release automation.
 
 ### 8. Documentation
 

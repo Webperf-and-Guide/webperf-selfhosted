@@ -1,56 +1,85 @@
-# Runtime Images
+# Runtime images and releases
 
-`webperf-selfhosted` is the source of truth for reusable runtime images.
+`webperf-selfhosted` builds the six Linux/amd64 image families used by the
+self-hosted product:
 
-## Published Image Families
-
+- `ghcr.io/webperf-and-guide/webperf-console`
+- `ghcr.io/webperf-and-guide/webperf-api`
+- `ghcr.io/webperf-and-guide/webperf-scheduler`
+- `ghcr.io/webperf-and-guide/webperf-executor`
 - `ghcr.io/webperf-and-guide/webperf-probe`
 - `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`
 
-## Publish Trigger
+## Formal releases
 
-Both image families publish through GitHub Actions in this repo.
+A `v0.x.y` tag on a commit in `main` starts the
+[release workflow](../../.github/workflows/release.yml). The workflow first
+runs the same required CI used by pull requests. It then publishes all six
+images with the version and source-SHA tags, generates SPDX SBOMs and
+provenance attestations, and creates a GitHub Release.
 
-- merges or direct pushes to `main` trigger the matching publish workflow
-- `workflow_dispatch` remains available for manual republish
-- the default-branch publish path keeps `:main`, `:latest`, and `:sha-...` tags aligned
+The downloadable release bundle contains a `compose.yml` in which every image
+is pinned by OCI digest. It also contains:
 
-Checked-in image refs live in:
+- `runtime-metadata.json`, with the version, source commit, image tags, and
+  digests;
+- one SPDX JSON SBOM per image;
+- `SHA256SUMS`, `CHANGELOG.md`, `SECURITY.md`, and the license;
+- a generated `.env.example` with no default secrets.
 
-- [probe.json](../../infra/docker/metadata/probe.json)
-- [browser-audit-lighthouse.json](../../infra/docker/metadata/browser-audit-lighthouse.json)
+Official installation material never uses `:main` or `:latest`. A version tag
+is convenient for discovery, while the release Compose file and managed-cloud
+runtime handoff use the immutable digest recorded in the same release.
 
-The managed repo consumes these metadata files when it renders Bunny and Cloudflare runtime config.
+The metadata schema and bundle contract live under
+[infra/release](../../infra/release/README.md). Managed consumers must fetch
+`runtime-metadata.json` from a specific GitHub Release instead of reading a
+mutable file from the default branch.
 
-Relevant workflows:
+## Development channel
 
-- [probe image workflow](../../.github/workflows/publish-probe-image.yml)
-- [Browser Audit image workflow](../../.github/workflows/publish-browser-audit-image.yml)
+After required CI passes on `main`, the
+[CI workflow](../../.github/workflows/ci.yml) publishes all six images as:
 
-## Quick Pull
+- `:main`
+- `:sha-<commit>`
 
-```bash
-docker pull ghcr.io/webperf-and-guide/webperf-probe:main
-docker pull ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse:main
+These tags are for integration and pre-release testing only. The project does
+not publish a `:latest` channel.
+
+## Creating a release
+
+Sampo changesets are the source for JS/TS package versions and release notes.
+
+```sh
+bun run sampo:release:dry-run
+bun run sampo:release
+git add CHANGELOG.md packages .sampo/changesets
+git commit -m "release: prepare 0.x.y"
+git tag v0.x.y
+git push origin main v0.x.y
 ```
 
-## Local Build
+Use the highest Sampo-managed `@webperf/*` package version as the repository
+release version. The tag workflow refuses a tag with pending changesets, a tag
+outside `main` history, or a version that does not match that highest package
+version.
 
-Probe:
+## Local image builds
 
-```bash
-docker build -f apps/probe-rs/Dockerfile -t webperf-probe:dev .
+Use `compose.dev.yml` to build all services from the current checkout, or build
+an individual image directly. For example:
+
+```sh
+docker buildx build --platform linux/amd64 \
+  -f apps/browser-audit-lighthouse/Dockerfile \
+  -t webperf-browser-audit-lighthouse:dev .
+
+docker buildx build --platform linux/amd64 \
+  -f apps/probe-rs/Dockerfile \
+  -t webperf-probe:dev apps/probe-rs
 ```
 
-Browser audit worker:
-
-```bash
-docker build -f apps/browser-audit-lighthouse/Dockerfile -t webperf-browser-audit-lighthouse:dev .
-```
-
-## Policy
-
-- GHCR images are the deployment artifact boundary.
-- This repo remains the runtime/image source of truth.
-- `webperf.and.guide` consumes these images and adds managed rollout/orchestration around them.
-- Package publishing is not part of the launch path. The launch baseline is repo source plus GHCR images.
+This repository remains the runtime and image source of truth. Managed
+orchestration, provider rollout, billing, and fleet configuration remain in
+`webperf.and.guide`.

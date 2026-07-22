@@ -1,0 +1,228 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Validate tag, ancestry, and Sampo state
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = "tag"
+          version="${GITHUB_REF_NAME#v}"
+          bun tooling/scripts/release-bundle.ts validate-repository-version "$version"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          if find .sampo/changesets -maxdepth 1 -type f -name '*.md' -print -quit | grep -q .; then
+            echo "Apply and commit every pending Sampo changeset before tagging a release." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: Required CI before release
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    name: Publish release image ${{ matrix.name }}
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: console
+            image: webperf-console
+            context: .
+            file: apps/console/Dockerfile
+          - name: api
+            image: webperf-api
+            context: .
+            file: apps/api/Dockerfile
+          - name: scheduler
+            image: webperf-scheduler
+            context: .
+            file: apps/scheduler/Dockerfile
+          - name: executor
+            image: webperf-executor
+            context: .
+            file: apps/executor/Dockerfile
+          - name: probe
+            image: webperf-probe
+            context: ./apps/probe-rs
+            file: ./apps/probe-rs/Dockerfile
+          - name: browser-audit-lighthouse
+            image: webperf-browser-audit-lighthouse
+            context: .
+            file: apps/browser-audit-lighthouse/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable image
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/webperf-and-guide/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+            ghcr.io/webperf-and-guide/${{ matrix.image }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
+      - name: Prepare release outputs
+        run: mkdir -p release-output
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/webperf-and-guide/${{ matrix.image }}@${{ steps.image.outputs.digest }}
+          output-file: release-output/${{ matrix.name }}-${{ needs.prepare.outputs.version }}.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest image provenance
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-name: ghcr.io/webperf-and-guide/${{ matrix.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Attest image SBOM
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-name: ghcr.io/webperf-and-guide/${{ matrix.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          sbom-path: release-output/${{ matrix.name }}-${{ needs.prepare.outputs.version }}.spdx.json
+          push-to-registry: true
+      - name: Record digest metadata
+        env:
+          IMAGE_NAME: ${{ matrix.name }}
+          IMAGE_REPOSITORY: ghcr.io/webperf-and-guide/${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          bun tooling/scripts/release-bundle.ts metadata \
+            "$IMAGE_NAME" "$IMAGE_REPOSITORY" "$VERSION" \
+            "$IMAGE_DIGEST" "$GITHUB_SHA" release-output
+      - name: Upload image release inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.name }}
+          path: release-output/
+          if-no-files-found: error
+          retention-days: 7
+
+  bundle:
+    name: Publish release bundle
+    needs: [prepare, ci, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Download image metadata and SBOMs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release-input
+          merge-multiple: true
+      - name: Render deterministic release bundle
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_name="webperf-selfhosted-v${VERSION}"
+          bun tooling/scripts/release-bundle.ts bundle \
+            "$VERSION" release-input "dist/${bundle_name}"
+          tar --sort=name --mtime='UTC 1970-01-01' \
+            --owner=0 --group=0 --numeric-owner \
+            -cf - -C dist "$bundle_name" \
+            | gzip -n > "dist/${bundle_name}.tar.gz"
+          (cd dist && sha256sum "${bundle_name}.tar.gz" > SHA256SUMS)
+      - name: Attest release archive
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}.tar.gz
+      - name: Upload release workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: webperf-selfhosted-v${{ needs.prepare.outputs.version }}
+          path: |
+            dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}.tar.gz
+            dist/SHA256SUMS
+            dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/compose.yml
+            dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/runtime-metadata.json
+            release-input/*.spdx.json
+          if-no-files-found: error
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_name="webperf-selfhosted-v${VERSION}"
+          assets=(
+            "dist/${bundle_name}.tar.gz"
+            "dist/SHA256SUMS"
+            "dist/${bundle_name}/compose.yml"
+            "dist/${bundle_name}/runtime-metadata.json"
+            release-input/*.spdx.json
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --verify-tag \
+              --title "WebPerf ${VERSION}" \
+              --generate-notes
+          fi

@@ -156,3 +156,62 @@ jobs:
           for result in "$JS_RESULT" "$DOCS_RESULT" "$RUST_RESULT" "$IMAGES_RESULT" "$INTEGRATION_RESULT"; do
             test "$result" = "success"
           done
+
+  publish-dev-images:
+    name: Publish dev image ${{ matrix.name }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: required
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: console
+            image: webperf-console
+            context: .
+            file: apps/console/Dockerfile
+          - name: api
+            image: webperf-api
+            context: .
+            file: apps/api/Dockerfile
+          - name: scheduler
+            image: webperf-scheduler
+            context: .
+            file: apps/scheduler/Dockerfile
+          - name: executor
+            image: webperf-executor
+            context: .
+            file: apps/executor/Dockerfile
+          - name: probe
+            image: webperf-probe
+            context: ./apps/probe-rs
+            file: ./apps/probe-rs/Dockerfile
+          - name: browser-audit-lighthouse
+            image: webperf-browser-audit-lighthouse
+            context: .
+            file: apps/browser-audit-lighthouse/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/webperf-and-guide/${{ matrix.image }}:main
+            ghcr.io/webperf-and-guide/${{ matrix.image }}:sha-${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=ci-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.name }}

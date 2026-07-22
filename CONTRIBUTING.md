@@ -40,9 +40,14 @@ Add the Sampo changeset file under `.sampo/changesets/` in the same PR as the us
 
 ## Runtime Images
 
-When a change affects reusable runtimes, update the canonical metadata in:
+When a change affects reusable runtimes, keep the corresponding Dockerfile,
+Compose service, CI image matrix, and release image matrix aligned. Run:
 
-- `infra/docker/metadata/probe.json`
-- `infra/docker/metadata/browser-audit-lighthouse.json`
+```sh
+bun run check:release
+```
 
-Those checked-in image refs are consumed by the managed cloud repo when it renders Cloudflare/Bunny deployment config.
+Pushes to `main` publish `main` and source-SHA development tags only after
+required CI passes. Tagged releases publish all six versioned images and a
+digest-bearing `runtime-metadata.json`; managed consumers fetch that file from
+a specific GitHub Release.

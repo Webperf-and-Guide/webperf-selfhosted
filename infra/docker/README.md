@@ -1,18 +1,27 @@
-# Docker notes
+# Docker image sources
 
-The runtime images in this repo are:
+The Dockerfiles in this repository build the six self-host runtime images:
 
-- `ghcr.io/webperf-and-guide/webperf-probe`
-- `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`
+- console
+- API
+- scheduler
+- executor
+- Rust probe
+- optional Lighthouse reference runner
 
-Recommended builds:
+All release images target `linux/amd64`. The production Compose source uses a
+single version placeholder, while each downloadable release bundle rewrites
+all image references to the OCI digests produced for that tagged commit.
 
-- `docker buildx build --platform linux/amd64 -f apps/probe-rs/Dockerfile .`
-- `docker buildx build --platform linux/amd64 -f apps/browser-audit-lighthouse/Dockerfile .`
+The [CI workflow](../../.github/workflows/ci.yml) publishes the `main` and
+source-SHA development channels only after required checks pass. The
+[release workflow](../../.github/workflows/release.yml) publishes versioned
+images, SBOMs, provenance, and digest-bearing runtime metadata.
 
-Ownership rules:
+The managed product consumes `runtime-metadata.json` from a specific GitHub
+Release. Managed orchestration stays in the cloud repository; reusable runtime
+sources and Dockerfiles stay here.
 
-- this repo is the source of truth for both runtime images
-- managed consumers resolve the checked-in metadata records rather than duplicating runtime image defaults
-- managed orchestration stays in the cloud repo, but the reusable runtime sources and Dockerfiles stay here
-- published runtime metadata stays pinned to `linux/amd64` for broad container-host compatibility even if local development supports more architectures
+For installation and local-build commands, see
+[runtime images and releases](../../docs/quickstart/runtime-images.md) and the
+[Compose bundle](../docker-compose/README.md).

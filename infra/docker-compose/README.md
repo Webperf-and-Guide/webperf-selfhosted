@@ -2,8 +2,9 @@
 
 This directory contains two Compose layers:
 
-- `compose.yml` is the production bundle and consumes one versioned GHCR tag
-  across every WebPerf service.
+- `compose.yml` is the repository production source and consumes one versioned
+  GHCR tag across every WebPerf service. Tagged release downloads rewrite
+  those references to immutable OCI digests.
 - `compose.dev.yml` overrides those images with builds from the current source
   checkout.
 
@@ -26,6 +27,10 @@ docker compose \
 
 Open `http://localhost:5173`. The persistent volume `webperf-data` owns both
 the SQLite database and Browser Audit artifacts below `/data`.
+
+For an operator install, prefer the `compose.yml` and `.env.example` from a
+GitHub Release bundle. That Compose file is digest-pinned and does not require
+`WEBPERF_VERSION`.
 
 ## Source-Build Start
 

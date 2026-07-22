@@ -171,12 +171,15 @@ bun run sampo:publish
 
 Pending release notes live under `.sampo/changesets/`.
 
-## Published Images
+## Published images and releases
 
-See [runtime-images.md](docs/quickstart/runtime-images.md) for the current GHCR image policy and checked-in metadata refs.
+See [runtime-images.md](docs/quickstart/runtime-images.md) for the six GHCR
+image families, development channels, tagged release workflow, SBOM and
+provenance policy, and digest-bearing runtime metadata contract.
 
-Cloud local development continues to consume OSS packages through sibling `file:` dependencies, while runtime images continue to publish through GHCR.
-Merges or direct pushes to `main` automatically publish the probe and browser-audit images through the checked-in GitHub Actions workflows.
+Required CI gates all image publishing. `main` and source-SHA tags are
+development channels; operator release bundles use versioned images pinned by
+digest and never use `latest`.
 
 ## Public Launch Notes
 

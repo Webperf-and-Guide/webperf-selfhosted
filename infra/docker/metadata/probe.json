@@ -1,4 +1,0 @@
-{
-  "image": "ghcr.io/webperf-and-guide/webperf-probe:main",
-  "platform": "linux/amd64"
-}

@@ -69,6 +69,28 @@ describe('SQLite operations', () => {
     expect(report.migrations.pending).toEqual([]);
   });
 
+  test('rechecks migration state under one write lock when another runner wins', () => {
+    const { databasePath } = createTempPaths();
+    const first = openSqliteDatabase(databasePath);
+    const second = openSqliteDatabase(databasePath);
+    const context = {
+      storageCrypto: createStorageCrypto({ currentSecret: encryptionSecret })
+    };
+    let winningMigrationIds: string[] = [];
+
+    const result = applySqliteMigrations(first, context, {
+      beforeMigrate() {
+        winningMigrationIds = applySqliteMigrations(second, context).appliedNow;
+      }
+    });
+
+    expect(winningMigrationIds).toEqual(sqliteMigrations.map((migration) => migration.id));
+    expect(result.appliedNow).toEqual([]);
+    expect(result.pending).toEqual([]);
+    first.close();
+    second.close();
+  });
+
   test('refuses to open a database migrated by an unknown newer version', () => {
     const { databasePath } = createTempPaths();
     const { database } = migrateDatabase(databasePath);
@@ -116,6 +138,40 @@ describe('SQLite operations', () => {
     expect(safetyBackup.query<{ status: string }, []>('SELECT status FROM jobs').get()?.status)
       .toBe('succeeded');
     safetyBackup.close();
+  });
+
+  test('requires an explicit opt-in to restore an older schema', () => {
+    const { directory, databasePath } = createTempPaths();
+    const legacyPath = join(directory, 'legacy.sqlite');
+    const legacy = new Database(legacyPath, { create: true });
+    legacy.exec('CREATE TABLE legacy_data (value TEXT NOT NULL);');
+    legacy.close();
+
+    const { database } = migrateDatabase(databasePath);
+    database.close();
+
+    expect(() => restoreSqliteDatabase({
+      databasePath,
+      sourcePath: legacyPath,
+      backupCurrent: false
+    })).toThrow('missing required migrations');
+
+    const result = restoreSqliteDatabase({
+      databasePath,
+      sourcePath: legacyPath,
+      backupCurrent: false,
+      allowPendingMigrations: true
+    });
+    expect(result.pendingMigrationIds)
+      .toEqual(sqliteMigrations.map((migration) => migration.id));
+
+    const restored = new Database(databasePath, { readonly: true });
+    expect(restored
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legacy_data'"
+      )
+      .get()?.name).toBe('legacy_data');
+    restored.close();
   });
 
   test('cleans only expired retained data and can run full maintenance', () => {

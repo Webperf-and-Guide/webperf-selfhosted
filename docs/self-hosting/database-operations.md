@@ -58,8 +58,10 @@ bun run selfhost:restore -- ./backups/webperf.sqlite
 ```
 
 Use `--no-backup` only when a separate verified copy of the current database
-already exists. After restoring an older snapshot, run `selfhost:migrate`, then
-`selfhost:doctor`, before restarting the stack.
+already exists. Restore rejects snapshots with pending migrations by default.
+For an intentional older-schema recovery, add `--allow-pending-migrations`;
+the command reports the exact pending IDs. Immediately run `selfhost:migrate`,
+then `selfhost:doctor`, before restarting the stack.
 
 ## Docker Compose
 

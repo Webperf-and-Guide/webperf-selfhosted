@@ -143,31 +143,41 @@ export const applySqliteMigrations = (
     options.beforeMigrate?.([...initialState.pending]);
   }
 
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      id TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    );
-  `);
-
   const now = options.now ?? (() => new Date());
-  const appliedNow: string[] = [];
+  const migrate = database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `);
 
-  for (const migration of sqliteMigrations) {
-    if (!initialState.pending.includes(migration.id)) {
-      continue;
+    const lockedState = getSqliteMigrationState(database);
+
+    if (lockedState.unknown.length > 0) {
+      throw new IncompatibleSqliteSchemaError(lockedState.unknown);
     }
 
-    const apply = database.transaction(() => {
+    const appliedNow: string[] = [];
+
+    for (const migration of sqliteMigrations) {
+      if (!lockedState.pending.includes(migration.id)) {
+        continue;
+      }
+
       migration.up(database, context);
       database
-        .query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .query<never, [string, string]>(
+          'INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)'
+        )
         .run(migration.id, now().toISOString());
-    });
+      appliedNow.push(migration.id);
+    }
 
-    apply.immediate();
-    appliedNow.push(migration.id);
-  }
+    return appliedNow;
+  });
+
+  const appliedNow = migrate.immediate();
 
   const finalState = getSqliteMigrationState(database);
   return { ...finalState, appliedNow };

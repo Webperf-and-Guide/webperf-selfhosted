@@ -59,8 +59,15 @@ const tableExists = (database: Database, table: string) => Boolean(
 
 export const defaultSqliteBackupPath = (databasePath: string, now = new Date()) => {
   assertFileDatabase(databasePath);
-  const timestamp = now.toISOString().replaceAll(/[-:.]/g, '');
+  const timestamp = now.toISOString().replaceAll(/[-:.TZ]/g, '');
   return `${databasePath}.backup-${timestamp}`;
+};
+
+// Bun's prepared statement API supports binding VACUUM INTO filenames. Keeping
+// the path bound avoids SQL interpolation; backup and restore tests exercise it
+// against WAL-visible data on the pinned Bun runtime.
+const vacuumInto = (database: Database, destinationPath: string) => {
+  database.query('VACUUM INTO ?').run(destinationPath);
 };
 
 export const createSqliteBackupFromConnection = (
@@ -76,7 +83,7 @@ export const createSqliteBackupFromConnection = (
   let published = false;
 
   try {
-    database.query('VACUUM INTO ?').run(temporaryPath);
+    vacuumInto(database, temporaryPath);
     chmodSync(temporaryPath, 0o600);
     const backup = openSqliteDatabase(temporaryPath, { readonly: true, create: false });
     let integrity: SqliteIntegrityReport;
@@ -244,6 +251,8 @@ export const cleanupSqliteRetention = (
                 FROM execution_jobs AS execution
                 WHERE execution.kind = 'browser_audit'
                   AND execution.resource_id = entity.id
+                  -- Active work intentionally survives retention so a stopped
+                  -- executor can resume it even after a long operator outage.
                   AND execution.status IN ('queued', 'leased', 'running')
               )
             )
@@ -289,11 +298,13 @@ export const restoreSqliteDatabase = ({
   databasePath,
   sourcePath,
   backupCurrent = true,
+  allowPendingMigrations = false,
   now = new Date()
 }: {
   databasePath: string;
   sourcePath: string;
   backupCurrent?: boolean;
+  allowPendingMigrations?: boolean;
   now?: Date;
 }) => {
   assertFileDatabase(databasePath);
@@ -331,6 +342,12 @@ export const restoreSqliteDatabase = ({
       );
     }
 
+    if (sourceMigrations.pending.length > 0 && !allowPendingMigrations) {
+      throw new Error(
+        `SQLite restore source is missing required migrations: ${sourceMigrations.pending.join(', ')}`
+      );
+    }
+
     const currentBackupPath = backupCurrent && existsSync(databasePath)
       ? backupSqliteDatabase({
           databasePath,
@@ -339,7 +356,7 @@ export const restoreSqliteDatabase = ({
       : null;
     mkdirSync(dirname(databasePath), { recursive: true });
     temporaryPath = `${databasePath}.restore-${randomUUID()}.tmp`;
-    source.query('VACUUM INTO ?').run(temporaryPath);
+    vacuumInto(source, temporaryPath);
     closeSource();
     chmodSync(temporaryPath, 0o600);
 
@@ -363,7 +380,12 @@ export const restoreSqliteDatabase = ({
     renameSync(temporaryPath, databasePath);
     temporaryPath = null;
     chmodSync(databasePath, 0o600);
-    return { databasePath, sourcePath, currentBackupPath };
+    return {
+      databasePath,
+      sourcePath,
+      currentBackupPath,
+      pendingMigrationIds: sourceMigrations.pending
+    };
   } catch (error) {
     if (temporaryPath) {
       rmSync(temporaryPath, { force: true });

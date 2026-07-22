@@ -44,7 +44,12 @@ const valueOptions = new Set([
   '--from',
   '--retention-days'
 ]);
-const flagOptions = new Set(['--backup', '--no-backup', '--vacuum']);
+const flagOptions = new Set([
+  '--backup',
+  '--no-backup',
+  '--vacuum',
+  '--allow-pending-migrations'
+]);
 const positionalArgs: string[] = [];
 
 for (let index = 0; index < args.length; index += 1) {
@@ -65,10 +70,18 @@ const resolveDatabasePath = () => {
 };
 
 const parsePositiveInteger = (value: string | undefined, fallback: number, label: string) => {
-  const parsed = value == null ? fallback : Number(value);
+  if (value == null) {
+    return fallback;
+  }
+
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new Error(`${label} must be a positive decimal integer`);
+  }
+
+  const parsed = Number(value);
 
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new Error(`${label} must be a positive integer`);
+    throw new Error(`${label} must be a positive decimal integer`);
   }
 
   return parsed;
@@ -153,7 +166,8 @@ const restore = () => {
   const result = restoreSqliteDatabase({
     databasePath,
     sourcePath,
-    backupCurrent: !hasFlag('--no-backup')
+    backupCurrent: !hasFlag('--no-backup'),
+    allowPendingMigrations: hasFlag('--allow-pending-migrations')
   });
 
   return { ok: true, command: 'restore', ...result };
@@ -198,14 +212,17 @@ const printHelp = () => {
 Commands:
   selfhost:migrate [--backup] [--backup-output <path>] [--database <path>]
   selfhost:backup [--output <path>] [--database <path>]
-  selfhost:restore -- <path> [--no-backup] [--database <path>]
+  selfhost:restore -- <path> [--no-backup] [--allow-pending-migrations] [--database <path>]
   selfhost:doctor [--database <path>]
   selfhost:maintenance [--retention-days <days>] [--vacuum] [--database <path>]`);
 };
 
 const main = () => {
   const unknownOption = args.find(
-    (value) => value.startsWith('--') && !valueOptions.has(value) && !flagOptions.has(value)
+    (value) => value.startsWith('--')
+      && value !== '--'
+      && !valueOptions.has(value)
+      && !flagOptions.has(value)
   );
 
   if (unknownOption) {

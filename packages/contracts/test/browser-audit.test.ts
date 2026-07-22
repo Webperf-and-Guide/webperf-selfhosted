@@ -3,6 +3,7 @@ import {
   browserAuditArtifactKindSchema,
   browserAuditPolicySchema,
   browserAuditResultSchema,
+  browserAuditScoresSchema,
   standardBrowserAuditArtifactKinds
 } from '../src/browser-audit';
 
@@ -49,6 +50,9 @@ describe('engine-neutral Browser Audit Protocol', () => {
     );
     expect(browserAuditArtifactKindSchema.parse('json')).toBe('lighthouse-json');
     expect(() => browserAuditArtifactKindSchema.parse('../report')).toThrow();
+    expect(() => browserAuditScoresSchema.parse({ 'not-valid': 0.5 })).toThrow(
+      'camelCase'
+    );
   });
 
   test('keeps portable navigation, snapshot, and timespan flows', () => {

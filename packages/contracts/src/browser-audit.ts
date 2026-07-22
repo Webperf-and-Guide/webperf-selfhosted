@@ -4,6 +4,13 @@ import { regionCodeSchema } from './regions';
 export const browserAuditDslVersion = 'v1' as const;
 export const browserAuditProtocolVersion = 'v1' as const;
 export const browserAuditArtifactRegistryVersion = 'v1' as const;
+const browserAuditIdentifierSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/);
+const browserAuditScoreKeyPattern = /^[a-z][a-zA-Z0-9]*$/;
 
 export const browserAuditPresetSchema = z.enum(['mobile', 'desktop']);
 export type BrowserAuditPreset = z.infer<typeof browserAuditPresetSchema>;
@@ -28,12 +35,7 @@ export const browserAuditStandardArtifactKindSchema = z.enum(
 export type BrowserAuditStandardArtifactKind =
   (typeof standardBrowserAuditArtifactKinds)[number];
 
-const browserAuditArtifactKindValueSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(120)
-  .regex(/^[a-z0-9][a-z0-9._-]*$/);
+const browserAuditArtifactKindValueSchema = browserAuditIdentifierSchema;
 
 export const browserAuditArtifactKindSchema = z.preprocess(
   (value) => {
@@ -300,16 +302,22 @@ export const browserAuditScoresSchema = z
     bestPractices: browserAuditScoreValueSchema.default(null),
     seo: browserAuditScoreValueSchema.default(null)
   })
-  .catchall(browserAuditScoreValueSchema);
+  .catchall(browserAuditScoreValueSchema)
+  .superRefine((scores, context) => {
+    for (const key of Object.keys(scores)) {
+      if (key.length > 120 || !browserAuditScoreKeyPattern.test(key)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Browser Audit score key must be camelCase: ${key}`,
+          path: [key]
+        });
+      }
+    }
+  });
 export type BrowserAuditScores = z.infer<typeof browserAuditScoresSchema>;
 
 export const browserAuditExtendedMetricSchema = z.object({
-  id: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .regex(/^[a-z0-9][a-z0-9._-]*$/),
+  id: browserAuditIdentifierSchema,
   label: z.string().trim().min(1).max(200).nullable().default(null),
   value: z.union([z.number().finite(), z.string().max(1_000), z.boolean(), z.null()]),
   unit: z.string().trim().min(1).max(40).nullable().default(null)
@@ -367,12 +375,7 @@ export type BrowserAuditToolchainComponent = z.infer<
 
 const browserAuditNormalizedToolchainSchema = z.object({
   engine: z.object({
-    id: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .regex(/^[a-z0-9][a-z0-9._-]*$/),
+    id: browserAuditIdentifierSchema,
     version: z.string().trim().min(1).max(200)
   }),
   browser: z.object({
@@ -540,27 +543,37 @@ function normalizeLegacyBrowserAuditToolchain(value: unknown) {
 
 function normalizeLegacyBrowserAuditCheckpoint(value: unknown) {
   const checkpoint = asRecord(value);
-  const summary = asRecord(checkpoint?.summary);
 
-  if (!checkpoint || !summary || asRecord(checkpoint.coreMetrics)) {
+  if (!checkpoint || asRecord(checkpoint.coreMetrics)) {
+    return value;
+  }
+
+  const summary = browserAuditMetricSummarySchema.safeParse(checkpoint.summary);
+
+  if (!summary.success) {
     return value;
   }
 
   return {
     ...checkpoint,
-    finalUrl: summary.finalUrl ?? null,
-    statusCode: summary.statusCode ?? null,
-    coreMetrics: coreMetricsFromLegacySummary(summary),
-    scores: scoresFromLegacySummary(summary),
+    finalUrl: summary.data.finalUrl,
+    statusCode: summary.data.statusCode,
+    coreMetrics: coreMetricsFromLegacySummary(summary.data),
+    scores: scoresFromLegacySummary(summary.data),
     extendedMetrics: []
   };
 }
 
 function normalizeLegacyBrowserAuditResult(value: unknown) {
   const result = asRecord(value);
-  const summary = asRecord(result?.summary);
 
-  if (!result || !summary || asRecord(result.coreMetrics)) {
+  if (!result || asRecord(result.coreMetrics)) {
+    return value;
+  }
+
+  const summary = browserAuditMetricSummarySchema.safeParse(result.summary);
+
+  if (!summary.success) {
     return value;
   }
 
@@ -571,20 +584,20 @@ function normalizeLegacyBrowserAuditResult(value: unknown) {
         id: 'primary',
         mode: 'navigation',
         label: null,
-        summary
+        summary: summary.data
       }];
 
   return {
     ...result,
     protocolVersion: browserAuditProtocolVersion,
-    coreMetrics: coreMetricsFromLegacySummary(summary),
-    scores: scoresFromLegacySummary(summary),
+    coreMetrics: coreMetricsFromLegacySummary(summary.data),
+    scores: scoresFromLegacySummary(summary.data),
     extendedMetrics: [],
     checkpoints
   };
 }
 
-function coreMetricsFromLegacySummary(summary: Record<string, unknown>) {
+function coreMetricsFromLegacySummary(summary: BrowserAuditMetricSummary) {
   return {
     fcpMs: summary.fcpMs ?? null,
     lcpMs: summary.lcpMs ?? null,
@@ -595,7 +608,7 @@ function coreMetricsFromLegacySummary(summary: Record<string, unknown>) {
   };
 }
 
-function scoresFromLegacySummary(summary: Record<string, unknown>) {
+function scoresFromLegacySummary(summary: BrowserAuditMetricSummary) {
   return {
     performance: summary.performanceScore ?? null,
     accessibility: summary.accessibilityScore ?? null,

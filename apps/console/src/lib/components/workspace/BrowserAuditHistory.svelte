@@ -1,5 +1,9 @@
 <script lang="ts">
-  import type { BrowserAuditResource } from '@webperf/contracts';
+  import type {
+    BrowserAuditExtendedMetric,
+    BrowserAuditResource,
+    BrowserAuditToolchainComponent
+  } from '@webperf/contracts';
   import { InlineStatusNotice } from '@webperf/ui/components/operator/inline-status-notice';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
   import { OperatorEmptyState } from '@webperf/ui/components/operator/operator-empty-state';
@@ -51,9 +55,7 @@
     }
   };
 
-  const formatExtendedMetric = (
-    metric: NonNullable<BrowserAuditResource['result']>['extendedMetrics'][number]
-  ) => {
+  const formatExtendedMetric = (metric: BrowserAuditExtendedMetric) => {
     if (metric.value == null) {
       return 'n/a';
     }
@@ -89,7 +91,7 @@
           { label: 'TBT', value: formatTiming(selectedAudit.result.coreMetrics.tbtMs) },
           { label: 'Speed index', value: formatTiming(selectedAudit.result.coreMetrics.speedIndexMs) },
           ...selectedAudit.result.extendedMetrics.map(
-            (metric: NonNullable<BrowserAuditResource['result']>['extendedMetrics'][number]) => ({
+            (metric: BrowserAuditExtendedMetric) => ({
               label: metric.label ?? metric.id,
               value: formatExtendedMetric(metric)
             })
@@ -151,7 +153,7 @@
             value:
               selectedAudit.result.toolchain.components
                 .map(
-                  (component: NonNullable<BrowserAuditResource['result']>['toolchain']['components'][number]) =>
+                  (component: BrowserAuditToolchainComponent) =>
                     `${component.name} ${component.version}`
                 )
                 .join(', ') || 'none'

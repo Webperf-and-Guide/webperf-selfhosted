@@ -1,6 +1,8 @@
 import {
+  browserAuditArtifactRegistryVersion,
   browserAuditCapabilitiesSchema,
   browserAuditDslVersion,
+  browserAuditProtocolVersion,
   type BrowserAuditCapabilities,
   type BrowserAuditToolchain
 } from '@webperf/contracts';
@@ -70,7 +72,9 @@ export const buildStartupCheck = async (config: BrowserAuditWorkerConfig): Promi
 
 export const buildCapabilities = (toolchain: BrowserAuditToolchain): BrowserAuditCapabilities =>
   browserAuditCapabilitiesSchema.parse({
+    protocolVersion: browserAuditProtocolVersion,
     flowDslVersion: browserAuditDslVersion,
+    artifactRegistryVersion: browserAuditArtifactRegistryVersion,
     toolchain,
     supportedCheckpointModes: ['navigation', 'snapshot', 'timespan'],
     supportedArtifactKinds: ['lighthouse-json', 'lighthouse-html', 'screenshot', 'trace'],

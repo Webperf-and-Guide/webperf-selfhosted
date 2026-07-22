@@ -1,6 +1,8 @@
 # Docker Compose Install
 
-Use this path when you want the default stack in Docker rather than local process mode.
+Use this source-checkout path when validating the default stack in Docker.
+Operators should prefer the digest-pinned [release install](../users/install.md),
+which does not require Bun or a repository checkout.
 
 ## Quick Start
 
@@ -61,7 +63,7 @@ from the current checkout.
 - `CONTROL_BASE_URL`: where the console proxies API requests
 - `SELFHOST_ADMIN_TOKEN`: server-only console and operator API token
 - `SELFHOST_INTERNAL_SECRET`: scheduler/executor credential and encrypted-payload key source
-- `PROBE_SHARED_SECRET`: shared secret used between the API and probe; replace the example value before you boot the stack
+- `PROBE_SHARED_SECRET`: shared secret used between the executor and probe; replace the example value before you boot the stack
 - `BROWSER_AUDIT_SHARED_SECRET`: shared secret used for signed browser-audit requests when the optional worker is enabled
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT`: optional rollover secret accepted alongside the current browser-audit key
 - `BROWSER_AUDIT_ALLOW_NO_SANDBOX`: explicit opt-in for local runtimes that cannot keep Chrome sandboxing enabled

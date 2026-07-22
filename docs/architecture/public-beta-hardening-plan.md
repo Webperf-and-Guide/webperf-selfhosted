@@ -234,15 +234,15 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 8. Documentation
 
-- [ ] Reorder README around Docker installation and operator outcomes.
-- [ ] Add install, configure, regions, checks, scheduling, browser audits,
+- [x] Reorder README around Docker installation and operator outcomes.
+- [x] Add install, configure, regions, checks, scheduling, browser audits,
   artifacts, backup/restore, upgrade, security, troubleshooting, reverse proxy,
   and cloud-vs-self-hosted user guides.
-- [ ] Move contributor setup below operator guidance.
-- [ ] Remove local absolute paths and validate all documentation links.
-- [ ] Document Browser sandboxing, trusted single-organization deployment, TLS,
+- [x] Move contributor setup below operator guidance.
+- [x] Remove local absolute paths and validate all documentation links.
+- [x] Document Browser sandboxing, trusted single-organization deployment, TLS,
   and additional access-control expectations.
-- [ ] Add a Sampo changeset for user-facing documentation.
+- [x] Add a Sampo changeset for user-facing documentation.
 
 ## Completion gates
 

@@ -151,6 +151,7 @@ Current repo state as of 2026-07-22:
 - one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 96 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
 - all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links
 - public-beta tags are accepted only from `main` after Sampo changesets are applied, the tag matches the highest public package version, and the protected `release` environment approves publication; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
+- the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
 
 Current local dev entrypoints:
 - `bun run dev`

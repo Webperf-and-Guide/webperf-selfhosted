@@ -2,6 +2,9 @@
 
 This repo is the self-hosted/open-core edition of `WebPerf`.
 
+Start with [Contributor development](docs/contributors/development.md) and the
+[release guide](docs/contributors/releases.md).
+
 ## Working Principles
 
 - Keep runtime and persistence choices self-host friendly.
@@ -16,9 +19,9 @@ Run these before opening a PR:
 
 ```sh
 bun run check
-bun test apps/api/test
+bun test
 cargo test --workspace --manifest-path apps/probe-rs/Cargo.toml
-bun test packages/domain-core/test/*.test.ts
+bun run compose:config
 ```
 
 For Svelte files, run:

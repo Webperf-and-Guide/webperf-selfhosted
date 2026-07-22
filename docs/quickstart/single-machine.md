@@ -1,6 +1,7 @@
 # Single-Machine Quickstart
 
-Use this path when you want the fastest possible self-host trial on one machine.
+Use this contributor path when you want the fastest source-based trial on one
+machine. Operators should use the tagged [install guide](../users/install.md).
 
 ## 1. Install Dependencies
 
@@ -20,6 +21,7 @@ This boots:
 - API
 - Rust probe
 - scheduler
+- executor
 
 Default local URLs:
 

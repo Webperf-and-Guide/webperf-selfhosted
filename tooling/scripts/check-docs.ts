@@ -11,6 +11,25 @@ const ignoredPrefixes = [
 const markdownLinkPattern = /!?\[[^\]]*\]\((<[^>]+>|[^\s)]+)(?:\s+["'][^)]*["'])?\)/g;
 const errors: string[] = [];
 let checkedFiles = 0;
+const requiredUserGuides = [
+  'install',
+  'configure',
+  'regions',
+  'checks',
+  'scheduling',
+  'browser-audits',
+  'artifacts',
+  'backup-restore',
+  'upgrade',
+  'security',
+  'troubleshooting',
+  'reverse-proxy',
+  'cloud-vs-self-hosted'
+].map((name) => `docs/users/${name}.md`);
+const requiredContributorGuides = [
+  'docs/contributors/development.md',
+  'docs/contributors/releases.md'
+];
 const files = Array.fromAsync(
   new Bun.Glob('**/*.md').scan({
     cwd: repositoryRoot,
@@ -74,6 +93,45 @@ for (const relativePath of (await files).sort()) {
       errors.push(`${relativePath}: link expects a directory ${rawTarget}`);
     }
   }
+}
+
+for (const requiredPath of [...requiredUserGuides, ...requiredContributorGuides]) {
+  if (!existsSync(resolve(repositoryRoot, requiredPath))) {
+    errors.push(`${requiredPath}: required public-beta guide is missing`);
+  }
+}
+
+let readme = '';
+try {
+  readme = await Bun.file(resolve(repositoryRoot, 'README.md')).text();
+} catch {
+  errors.push('README.md: unable to read public entrypoint');
+}
+const readmeHeadings = [
+  '## Screenshots',
+  '## Docker quick start',
+  '## Core features',
+  '## Optional Browser Audit',
+  '## Security warning',
+  '## Self-hosted and WebPerf Cloud',
+  '## Upgrade and backup',
+  '## Contributor setup'
+];
+let previousHeadingIndex = -1;
+for (const heading of readmeHeadings) {
+  const index = readme.indexOf(heading);
+  if (index === -1) {
+    errors.push(`README.md: required section is missing: ${heading}`);
+  } else if (index <= previousHeadingIndex) {
+    errors.push(`README.md: section is out of operator-first order: ${heading}`);
+  } else {
+    previousHeadingIndex = index;
+  }
+}
+const sourceDevIndex = readme.indexOf('bun run dev');
+const contributorIndex = readme.indexOf('## Contributor setup');
+if (sourceDevIndex !== -1 && sourceDevIndex < contributorIndex) {
+  errors.push('README.md: source development instructions must follow operator guidance');
 }
 
 if (errors.length > 0) {

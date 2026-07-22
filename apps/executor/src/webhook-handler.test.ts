@@ -5,6 +5,7 @@ import type {
   ExecutionResourceContext,
   ExecutionResourceResultRequest
 } from '@webperf/contracts';
+import { UrlValidationError } from '@webperf/domain-core';
 import type { ExecutorApiClient } from './client';
 import { createWebhookExecutionHandler } from './webhook-handler';
 import { ExecutionFailure } from './runner';
@@ -112,7 +113,8 @@ describe('webhook execution handler', () => {
     if (result?.kind !== 'webhook_delivery') {
       throw new Error('Expected a webhook result');
     }
-    expect(result.run.alertDeliveries[0]).toMatchObject({
+    expect(result.runId).toBe('run_webhook');
+    expect(result.delivery).toMatchObject({
       targetId: 'target_webhook',
       status: 'sent',
       responseStatus: 204
@@ -135,7 +137,10 @@ describe('webhook execution handler', () => {
       client,
       leaseOwner: 'executor-webhook',
       validateUrl: () => {
-        throw new Error('blocked target with sensitive detail');
+        throw new UrlValidationError(
+          'blocked target with sensitive detail',
+          'private_hostname'
+        );
       },
       fetchImpl: (async () => {
         fetchCalled = true;
@@ -152,7 +157,7 @@ describe('webhook execution handler', () => {
 
     expect(error).toBeInstanceOf(ExecutionFailure);
     expect(error).toMatchObject({
-      code: 'webhook_target_blocked',
+      code: 'webhook_target_private_hostname',
       retryable: false
     });
     expect(String(error)).not.toContain('sensitive detail');

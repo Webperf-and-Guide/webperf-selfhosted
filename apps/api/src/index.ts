@@ -1802,7 +1802,12 @@ function persistExecutionResourceResult(
 
   const payload = webhookDeliveryExecutionPayloadSchema.parse(executionJob.payload);
 
-  if (result.run.id !== payload.runId) {
+  if (
+    result.runId !== payload.runId
+    || result.delivery.targetId !== payload.target.id
+    || result.delivery.targetName !== payload.target.name
+    || result.delivery.url !== payload.target.url
+  ) {
     throw new Error('Webhook result does not match its payload');
   }
 
@@ -2392,11 +2397,19 @@ async function handleRunCheckProfile(profileId: string, request: Request) {
   }
 
   const run = createCheckProfileRunRecord(profile, 'manual', createdJobs);
-  createNetworkExecutionResource(
-    createdJobs.map((item) => item.job),
-    run,
-    profile.id
-  );
+  try {
+    createNetworkExecutionResource(
+      createdJobs.map((item) => item.job),
+      run,
+      profile.id
+    );
+  } catch (error) {
+    const incidentId = logExecutionCreationFailure('manual_check_run', error, profile.id);
+    return json(
+      { error: 'Failed to queue check run', incidentId },
+      { status: 500 }
+    );
+  }
 
   const response: CheckProfileRunResponse = {
     profile,
@@ -2416,49 +2429,39 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
     );
 
   const triggeredProfiles = dueProfiles.flatMap((profile) => {
-    let createdJobs: CreatedProfileJob[];
-
     try {
-      createdJobs = createJobsForProfile(profile, null);
-    } catch (error) {
-      console.warn(
-        JSON.stringify({
-          service: 'webperf-api',
-          warning: 'scheduled_profile_dispatch_failed',
-          profileId: profile.id,
-          error: error instanceof Error ? error.message : 'Unknown profile dispatch error'
-        })
+      const createdJobs = createJobsForProfile(profile, null);
+      const run = createCheckProfileRunRecord(profile, 'schedule', createdJobs);
+      createNetworkExecutionResource(
+        createdJobs.map((item) => item.job),
+        run,
+        profile.id
       );
+
+      const updatedProfile: CheckProfile = {
+        ...profile,
+        schedule: profile.schedule
+          ? {
+            ...profile.schedule,
+            lastRunAt: dispatchAt.toISOString(),
+            lastRunJobCount: createdJobs.length,
+            nextRunAt: computeNextRunAt(dispatchAt.toISOString(), profile.schedule.intervalMinutes)
+          }
+          : null,
+        updatedAt: dispatchAt.toISOString()
+      };
+
+      repository.saveCheckProfile(updatedProfile);
+
+      return [{
+        profileId: profile.id,
+        jobIds: run.routes.map((route) => route.jobId),
+        nextRunAt: updatedProfile.schedule?.nextRunAt ?? null
+      }];
+    } catch (error) {
+      logExecutionCreationFailure('scheduled_check_run', error, profile.id);
       return [];
     }
-
-    const run = createCheckProfileRunRecord(profile, 'schedule', createdJobs);
-    createNetworkExecutionResource(
-      createdJobs.map((item) => item.job),
-      run,
-      profile.id
-    );
-
-    const updatedProfile: CheckProfile = {
-      ...profile,
-      schedule: profile.schedule
-        ? {
-          ...profile.schedule,
-          lastRunAt: dispatchAt.toISOString(),
-          lastRunJobCount: createdJobs.length,
-          nextRunAt: computeNextRunAt(dispatchAt.toISOString(), profile.schedule.intervalMinutes)
-        }
-        : null,
-      updatedAt: dispatchAt.toISOString()
-    };
-
-    repository.saveCheckProfile(updatedProfile);
-
-    return [{
-      profileId: profile.id,
-      jobIds: run.routes.map((route) => route.jobId),
-      nextRunAt: updatedProfile.schedule?.nextRunAt ?? null
-    }];
   });
 
   const response: SchedulerDispatchResponse = {
@@ -2913,9 +2916,15 @@ function createNetworkExecutionResource(
   }
 
   const resourceId = run?.id ?? firstJob.id;
-  const maxAttempts = Math.max(...jobs.flatMap((job) =>
+  const attemptCounts = jobs.flatMap((job) =>
     job.targets.map((target) => target.maxAttempts)
-  ));
+  );
+
+  if (attemptCounts.length === 0) {
+    throw new Error('Network execution requires at least one target');
+  }
+
+  const maxAttempts = Math.max(...attemptCounts);
   const payload = networkProbeExecutionPayloadSchema.parse({
     version: 'v1',
     jobIds: jobs.map((job) => job.id),
@@ -2937,6 +2946,23 @@ function createNetworkExecutionResource(
       run
     }
   });
+}
+
+function logExecutionCreationFailure(
+  operation: 'manual_check_run' | 'scheduled_check_run',
+  error: unknown,
+  checkId: string
+) {
+  const incidentId = crypto.randomUUID();
+  console.error(JSON.stringify({
+    service: 'webperf-api',
+    event: 'execution_creation_failed',
+    operation,
+    checkId,
+    incidentId,
+    ...describeSafeError(error)
+  }));
+  return incidentId;
 }
 
 function createJobsForProfile(profile: CheckProfile, requesterIp: string | null): CreatedProfileJob[] {

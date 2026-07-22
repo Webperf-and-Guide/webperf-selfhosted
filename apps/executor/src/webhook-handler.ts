@@ -1,7 +1,8 @@
 import { createHmac } from 'node:crypto';
 import type { CheckProfileAlertDelivery, ExecutionJob } from '@webperf/contracts';
-import { validateMeasurementUrl } from '@webperf/domain-core';
+import { UrlValidationError, validateMeasurementUrl } from '@webperf/domain-core';
 import type { ExecutorApiClient } from './client';
+import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
 import { ExecutionFailure } from './runner';
 
 export type WebhookHandlerOptions = {
@@ -36,13 +37,17 @@ export const createWebhookExecutionHandler = ({
 
   try {
     validateUrl(target.url);
-  } catch {
+  } catch (error) {
+    const failureCode = error instanceof UrlValidationError
+      ? `webhook_target_${error.code}`
+      : 'webhook_target_blocked';
     throw new ExecutionFailure(
-      'webhook_target_blocked',
+      failureCode,
       'Webhook target is not allowed',
       false
     );
   }
+
   const serializedBody = JSON.stringify(body);
   let delivery: CheckProfileAlertDelivery;
 
@@ -62,7 +67,7 @@ export const createWebhookExecutionHandler = ({
 
     if (response.ok) {
       delivery = buildDelivery(target, 'sent', response.status, null);
-    } else if (isRetryableStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
+    } else if (isRetryableHttpStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
       throw new ExecutionFailure(
         'webhook_temporarily_unavailable',
         'Webhook endpoint is temporarily unavailable',
@@ -96,12 +101,12 @@ export const createWebhookExecutionHandler = ({
     delivery = buildDelivery(target, 'failed', null, 'Webhook delivery failed');
   }
 
-  run.alertDeliveries = [...run.alertDeliveries, delivery];
   await client.saveResult(executionJob.id, {
     leaseOwner,
     result: {
       kind: 'webhook_delivery',
-      run
+      runId: run.id,
+      delivery
     }
   });
 };
@@ -127,17 +132,3 @@ const buildDelivery = (
   responseStatus,
   error
 });
-
-const isRetryableStatus = (status: number) => status === 408 || status === 429 || status >= 500;
-
-const retryDelayMs = (attemptCount: number) => Math.min(60_000, 1_000 * 2 ** (attemptCount - 1));
-
-const throwIfAborted = (signal: AbortSignal) => {
-  if (!signal.aborted) {
-    return;
-  }
-
-  throw signal.reason instanceof Error
-    ? signal.reason
-    : new ExecutionFailure('execution_aborted', 'Execution was aborted', true, 1_000);
-};

@@ -14,6 +14,8 @@ const main = async () => {
     SELFHOST_INTERNAL_SECRET: process.env.SELFHOST_INTERNAL_SECRET,
     PROBE_SHARED_SECRET: process.env.PROBE_SHARED_SECRET,
     SELFHOST_PROBE_BASE_URLS_JSON: process.env.SELFHOST_PROBE_BASE_URLS_JSON,
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP:
+      process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP,
     SELFHOST_EXECUTOR_ID: process.env.SELFHOST_EXECUTOR_ID,
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: process.env.SELFHOST_EXECUTOR_POLL_INTERVAL_MS,
     SELFHOST_EXECUTOR_LEASE_DURATION_MS: process.env.SELFHOST_EXECUTOR_LEASE_DURATION_MS,
@@ -61,9 +63,19 @@ const main = async () => {
     client,
     leaseOwner,
     probeSharedSecret: runtime.PROBE_SHARED_SECRET,
-    probeBaseUrls: parseProbeBaseUrls(runtime.SELFHOST_PROBE_BASE_URLS_JSON)
+    probeBaseUrls: parseProbeBaseUrls(runtime.SELFHOST_PROBE_BASE_URLS_JSON, {
+      allowInsecureHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP
+    }),
+    allowInsecureProbeHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP
   });
   const webhookHandler = createWebhookExecutionHandler({ client, leaseOwner });
+
+  if (runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP) {
+    console.warn(JSON.stringify({
+      service: 'webperf-executor',
+      warning: 'insecure_probe_http_enabled'
+    }));
+  }
 
   try {
     await runExecutor({

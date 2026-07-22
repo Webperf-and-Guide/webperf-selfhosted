@@ -3,6 +3,7 @@ import type {
   AnalysisResource,
   BrowserAuditResource,
   CheckProfile,
+  CheckProfileAlertDelivery,
   CheckProfileRun,
   ComparisonResource,
   EnqueueExecutionJob,
@@ -665,6 +666,27 @@ export const createSqliteJobRepository = ({
     );
   };
 
+  const appendCheckProfileAlertDelivery = (
+    runId: string,
+    delivery: CheckProfileAlertDelivery
+  ) => {
+    const row = getCheckProfileRunStatement.get(runId);
+    const run = row ? parseCheckProfileRun(row) : null;
+
+    if (!run) {
+      throw new Error('Webhook execution references a missing run');
+    }
+
+    if (run.alertDeliveries.some((item) => item.targetId === delivery.targetId)) {
+      return;
+    }
+
+    persistCheckProfileRun({
+      ...run,
+      alertDeliveries: [...run.alertDeliveries, delivery]
+    });
+  };
+
   const persistBrowserAudit = (browserAudit: BrowserAuditResource) => {
     saveEntity('browser_audit', {
       ...browserAudit,
@@ -739,7 +761,7 @@ export const createSqliteJobRepository = ({
         persistBrowserAudit(result.audit);
         break;
       case 'webhook_delivery':
-        persistCheckProfileRun(result.run);
+        appendCheckProfileAlertDelivery(result.runId, result.delivery);
         break;
       default:
         assertNever(result);

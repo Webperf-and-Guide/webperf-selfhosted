@@ -7,6 +7,7 @@ import {
 } from './execution';
 import {
   browserAuditResourceSchema,
+  checkProfileAlertDeliverySchema,
   checkProfileRunSchema,
   checkProfileSchema,
   latencyJobDetailSchema,
@@ -94,7 +95,8 @@ const browserAuditExecutionResultSchema = z.object({
 
 const webhookDeliveryExecutionResultSchema = z.object({
   kind: z.literal('webhook_delivery'),
-  run: checkProfileRunSchema
+  runId: z.string().min(1).max(160),
+  delivery: checkProfileAlertDeliverySchema
 });
 
 export const executionResourceResultSchema = z.discriminatedUnion('kind', [

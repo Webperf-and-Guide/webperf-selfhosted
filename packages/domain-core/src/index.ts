@@ -344,7 +344,9 @@ const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => 
   };
 };
 
-export const toProbeSignaturePayload = (request: SignedProbeMeasurementRequest) =>
+export type ProbeSignatureRequest = Omit<SignedProbeMeasurementRequest, 'signature'>;
+
+export const toProbeSignaturePayload = (request: ProbeSignatureRequest) =>
   stableStringify({
     jobId: request.jobId,
     targetId: request.targetId,
@@ -356,7 +358,7 @@ export const toProbeSignaturePayload = (request: SignedProbeMeasurementRequest) 
 
 export const createProbeSignature = async (
   sharedSecret: string,
-  request: SignedProbeMeasurementRequest
+  request: ProbeSignatureRequest
 ) => {
   const key = await crypto.subtle.importKey(
     'raw',

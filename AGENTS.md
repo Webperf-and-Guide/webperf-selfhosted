@@ -139,7 +139,7 @@ Current repo state as of 2026-07-22:
 - `/v1/capabilities` now reports the implemented Fast Check metric surface, keeping TCP/TLS timing and TLS metadata disabled and null until they are actually measured
 - the durable execution foundation now defines public-safe execution job contracts and an encrypted SQLite `execution_jobs` state machine with atomic claim, lease renewal, expiry recovery, bounded retry, terminal failure, cancellation, and idempotent completion semantics
 - `apps/executor` now provides the internal-secret-authenticated claim/start/renew/complete/fail transport, a single-concurrency lease heartbeat, safe failure logging, and graceful stop-claiming behavior
-- Fast Check network measurement, deterministic Check evaluation, and signed idempotent webhook delivery now run through leased executor handlers with atomic domain-resource creation/result persistence; the API no longer starts those operations in-process
+- Fast Check network measurement, deterministic Check evaluation, and signed idempotent webhook delivery now run through leased executor handlers with atomic domain-resource creation/result persistence; webhook deliveries append atomically without whole-Run lost updates, non-loopback probe HTTP requires an explicit trusted-network opt-in, and the API no longer starts those operations in-process
 
 Current local dev entrypoints:
 - `bun run dev`

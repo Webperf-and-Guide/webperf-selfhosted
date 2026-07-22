@@ -17,7 +17,9 @@ bun run dev:executor
 Copy environment values from `apps/executor/.env.example`. The internal secret
 must match the API and scheduler value. The probe secret must match the Rust
 probe, and `SELFHOST_PROBE_BASE_URLS_JSON` maps public region codes to internal
-probe service origins.
+probe service origins. Non-loopback probe origins require HTTPS unless
+`SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP=true` explicitly marks an isolated,
+trusted service network such as the default Compose bridge.
 
 `SELFHOST_EXECUTOR_MAX_EXECUTION_MS` defaults to 15 minutes. A timed-out
 handler receives an abort signal and the execution is retried according to its

@@ -5,8 +5,7 @@ import type {
   LatencyJobDetail,
   LatencyJobTarget,
   ProbeMeasurementResponse,
-  RegionCode,
-  SignedProbeMeasurementRequest
+  RegionCode
 } from '@webperf/contracts';
 import {
   jsonValueSchema,
@@ -14,7 +13,7 @@ import {
   regionCodeSchema,
   signedProbeMeasurementRequestSchema
 } from '@webperf/contracts';
-import { createProbeSignature } from '@webperf/domain-core';
+import { createProbeSignature, type ProbeSignatureRequest } from '@webperf/domain-core';
 import {
   buildCheckProfileComparison,
   deriveJobStatus,
@@ -22,6 +21,7 @@ import {
   summarizeTargets
 } from '@webperf/report-core';
 import { ExecutorApiError, type ExecutorApiClient } from './client';
+import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
 import { ExecutionFailure } from './runner';
 
 export type NetworkHandlerOptions = {
@@ -29,10 +29,14 @@ export type NetworkHandlerOptions = {
   leaseOwner: string;
   probeSharedSecret: string;
   probeBaseUrls: Partial<Record<RegionCode, string>>;
+  allowInsecureProbeHttp?: boolean;
   fetchImpl?: typeof globalThis.fetch;
 };
 
-export const parseProbeBaseUrls = (json: string): Partial<Record<RegionCode, string>> => {
+export const parseProbeBaseUrls = (
+  json: string,
+  { allowInsecureHttp = false }: { allowInsecureHttp?: boolean } = {}
+): Partial<Record<RegionCode, string>> => {
   let value: unknown;
 
   try {
@@ -52,7 +56,7 @@ export const parseProbeBaseUrls = (json: string): Partial<Record<RegionCode, str
       throw new Error('Executor probe origins contain an invalid region entry');
     }
 
-    const endpoint = resolveProbeMeasureUrl(baseUrl);
+    const endpoint = resolveProbeMeasureUrl(baseUrl, allowInsecureHttp);
     return [parsedRegion.data, endpoint.origin] as const;
   });
 
@@ -68,6 +72,7 @@ export const createNetworkExecutionHandler = ({
   leaseOwner,
   probeSharedSecret,
   probeBaseUrls,
+  allowInsecureProbeHttp = false,
   fetchImpl = globalThis.fetch
 }: NetworkHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });
@@ -100,6 +105,7 @@ export const createNetworkExecutionHandler = ({
       persist,
       probeSharedSecret,
       probeBaseUrls,
+      allowInsecureProbeHttp,
       fetchImpl,
       signal
     });
@@ -148,6 +154,7 @@ const processNetworkJob = async ({
   persist,
   probeSharedSecret,
   probeBaseUrls,
+  allowInsecureProbeHttp,
   fetchImpl,
   signal
 }: {
@@ -156,6 +163,7 @@ const processNetworkJob = async ({
   persist: () => Promise<void>;
   probeSharedSecret: string;
   probeBaseUrls: Partial<Record<RegionCode, string>>;
+  allowInsecureProbeHttp: boolean;
   fetchImpl: typeof globalThis.fetch;
   signal: AbortSignal;
 }) => {
@@ -190,26 +198,31 @@ const processNetworkJob = async ({
     }
 
     try {
-      const payload = signedProbeMeasurementRequestSchema.parse({
+      const unsignedPayload = {
         jobId: job.id,
         targetId: `${job.id}:${target.region}`,
         region: target.region,
         url: job.url,
         request: job.request,
         timestamp: new Date().toISOString(),
-        signature: 'placeholder-signature',
-        keyVersion: 'current'
+        keyVersion: 'current' as const
+      } satisfies ProbeSignatureRequest;
+      const payload = signedProbeMeasurementRequestSchema.parse({
+        ...unsignedPayload,
+        signature: await createProbeSignature(probeSharedSecret, unsignedPayload)
       });
-      payload.signature = await createProbeSignature(probeSharedSecret, payload);
-      const response = await fetchImpl(resolveProbeMeasureUrl(probeBaseUrl), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload satisfies SignedProbeMeasurementRequest),
-        signal
-      });
+      const response = await fetchImpl(
+        resolveProbeMeasureUrl(probeBaseUrl, allowInsecureProbeHttp),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal
+        }
+      );
 
       if (!response.ok) {
-        if (isRetryableStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
+        if (isRetryableHttpStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
           markTargetRetryable(target, `probe_http_${response.status}`);
           recomputeJob(job);
           await persist();
@@ -227,9 +240,7 @@ const processNetworkJob = async ({
         continue;
       }
 
-      const parsed = probeMeasurementResponseSchema.safeParse(
-        (await response.json()) as ProbeMeasurementResponse
-      );
+      const parsed = probeMeasurementResponseSchema.safeParse(await response.json());
 
       if (!parsed.success) {
         markTargetFailed(target, 'probe_invalid_payload', 'Network probe returned an invalid result');
@@ -405,7 +416,7 @@ const buildWebhookFollowups = ({
     }));
 };
 
-const resolveProbeMeasureUrl = (baseUrl: string) => {
+const resolveProbeMeasureUrl = (baseUrl: string, allowInsecureHttp: boolean) => {
   let url: URL;
 
   try {
@@ -418,8 +429,14 @@ const resolveProbeMeasureUrl = (baseUrl: string) => {
     );
   }
 
+  const loopbackHostname = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(
+    url.hostname.toLowerCase()
+  );
+  const protocolAllowed = url.protocol === 'https:'
+    || (url.protocol === 'http:' && (loopbackHostname || allowInsecureHttp));
+
   if (
-    !['http:', 'https:'].includes(url.protocol)
+    !protocolAllowed
     || url.username
     || url.password
     || url.pathname !== '/'
@@ -434,20 +451,6 @@ const resolveProbeMeasureUrl = (baseUrl: string) => {
   }
 
   return new URL('/measure', url);
-};
-
-const isRetryableStatus = (status: number) => status === 408 || status === 429 || status >= 500;
-
-const retryDelayMs = (attemptCount: number) => Math.min(60_000, 1_000 * 2 ** (attemptCount - 1));
-
-const throwIfAborted = (signal: AbortSignal) => {
-  if (!signal.aborted) {
-    return;
-  }
-
-  throw signal.reason instanceof Error
-    ? signal.reason
-    : new ExecutionFailure('execution_aborted', 'Execution was aborted', true, 1_000);
 };
 
 const buildStatusFailureMessage = (statusCode: number | null | undefined) =>

@@ -128,22 +128,15 @@ describe('executor API client', () => {
       leaseOwner: 'executor-client',
       result: {
         kind: 'webhook_delivery',
-        run: {
-          id: 'run_client',
-          profileId: 'check_client',
-          trigger: 'manual',
-          createdAt: '2026-07-22T00:00:00.000Z',
-          routeCount: 1,
-          routes: [{
-            routeId: 'route_client',
-            routeLabel: 'Home',
-            url: 'https://example.com/',
-            jobId: 'job_client',
-            browserAudit: null
-          }],
-          browserAuditSummary: null,
-          evaluation: null,
-          alertDeliveries: []
+        runId: 'run_client',
+        delivery: {
+          targetId: 'webhook_client',
+          targetName: 'Client hook',
+          url: 'https://hooks.example.com/',
+          deliveredAt: '2026-07-22T00:00:01.000Z',
+          status: 'sent',
+          responseStatus: 204,
+          error: null
         }
       }
     });

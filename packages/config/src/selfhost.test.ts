@@ -36,6 +36,7 @@ describe('strict self-host configuration', () => {
         PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET
       })
     ).toMatchObject({
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: false,
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
       SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000
     });

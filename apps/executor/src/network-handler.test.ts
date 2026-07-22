@@ -124,6 +124,7 @@ describe('network execution handler', () => {
       leaseOwner: 'executor-network',
       probeSharedSecret: 'network-handler-probe-secret',
       probeBaseUrls: { tokyo: 'http://probe.test:8080' },
+      allowInsecureProbeHttp: true,
       fetchImpl: (async (input, init) => {
         probeRequest = new Request(input, init);
         return Response.json({
@@ -174,6 +175,7 @@ describe('network execution handler', () => {
       leaseOwner: 'executor-network',
       probeSharedSecret: 'network-handler-probe-secret',
       probeBaseUrls: { tokyo: 'http://probe.test:8080' },
+      allowInsecureProbeHttp: true,
       fetchImpl: (async () => new Response('Bearer raw-sensitive-probe-error', {
         status: 503
       })) as unknown as typeof fetch
@@ -201,13 +203,24 @@ describe('network execution handler', () => {
   });
 
   test('validates configured probe origins as region-keyed HTTP origins', () => {
-    expect(parseProbeBaseUrls('{"tokyo":"http://probe:8080"}')).toEqual({
+    expect(parseProbeBaseUrls('{"tokyo":"https://probe.example.com"}')).toEqual({
+      tokyo: 'https://probe.example.com'
+    });
+    expect(parseProbeBaseUrls('{"tokyo":"http://127.0.0.1:8080"}')).toEqual({
+      tokyo: 'http://127.0.0.1:8080'
+    });
+    expect(() => parseProbeBaseUrls('{"tokyo":"http://probe:8080"}')).toThrow(
+      ExecutionFailure
+    );
+    expect(parseProbeBaseUrls('{"tokyo":"http://probe:8080"}', {
+      allowInsecureHttp: true
+    })).toEqual({
       tokyo: 'http://probe:8080'
     });
-    expect(() => parseProbeBaseUrls('{"unknown":"http://probe:8080"}')).toThrow(
+    expect(() => parseProbeBaseUrls('{"unknown":"https://probe.example.com"}')).toThrow(
       'invalid region entry'
     );
-    expect(() => parseProbeBaseUrls('{"tokyo":"http://user:secret@probe:8080"}')).toThrow(
+    expect(() => parseProbeBaseUrls('{"tokyo":"https://user:secret@probe.example.com"}')).toThrow(
       ExecutionFailure
     );
   });

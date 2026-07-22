@@ -7,6 +7,10 @@ export const selfhostExecutorEnvSchema = z
     SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
     PROBE_SHARED_SECRET: z.string().trim().min(16),
     SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: z.preprocess(
+      (value) => value ?? 'false',
+      z.enum(['true', 'false']).transform((value) => value === 'true')
+    ),
     SELFHOST_EXECUTOR_ID: emptyStringToUndefined(z.string().trim().min(1).max(120)),
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: z.preprocess(
       (value) => value ?? '1000',

@@ -202,10 +202,14 @@ describe('executor runner', () => {
     await processExecutionJob({
       client,
       handler: async (_job, signal) => {
-        signal.addEventListener('abort', () => {
-          aborted = true;
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            aborted = true;
+            const error = new Error('Bearer raw-sensitive-abort-error');
+            error.name = 'AbortError';
+            reject(error);
+          });
         });
-        await new Promise(() => {});
       },
       executionJob: queuedJob,
       lease: { leaseOwner: 'executor-test', leaseDurationMs: 60_000 },
@@ -216,6 +220,11 @@ describe('executor runner', () => {
 
     expect(aborted).toBe(true);
     expect(failureCode).toBe('execution_timeout');
+    expect(testLogger.events).toContainEqual(expect.objectContaining({
+      event: 'handler_error_after_abort',
+      errorType: 'AbortError'
+    }));
+    expect(JSON.stringify(testLogger.events)).not.toContain('raw-sensitive-abort-error');
   });
 
   test('backs off claim failures with safe diagnostics', async () => {

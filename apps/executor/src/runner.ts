@@ -141,7 +141,7 @@ export const processExecutionJob = async ({
         kind: running.kind,
         ...describeSafeError(error)
       });
-      workController.abort();
+      workController.abort(createLeaseLostFailure());
     }
   });
 
@@ -150,16 +150,12 @@ export const processExecutionJob = async ({
       handler,
       executionJob: running,
       workController,
-      maxExecutionMs
+      maxExecutionMs,
+      logger
     });
 
     if (workController.signal.aborted) {
-      throw new ExecutionFailure(
-        'lease_lost',
-        'Execution lease was lost before completion',
-        true,
-        1_000
-      );
+      throw readWorkAbortFailure(workController.signal);
     }
 
     let completed: ExecutionJob;
@@ -287,49 +283,77 @@ const runHandlerWithTimeout = async ({
   handler,
   executionJob,
   workController,
-  maxExecutionMs
+  maxExecutionMs,
+  logger
 }: {
   handler: ExecutionHandler;
   executionJob: ExecutionJob;
   workController: AbortController;
   maxExecutionMs: number;
+  logger: ExecutorLogger;
 }) => {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => {
-      workController.abort();
-      reject(
-        new ExecutionFailure(
-          'execution_timeout',
-          'Execution exceeded the configured time limit',
-          true,
-          1_000
-        )
-      );
-    }, maxExecutionMs);
+  let onWorkAborted: (() => void) | undefined;
+  const workAborted = new Promise<never>((_resolve, reject) => {
+    onWorkAborted = () => {
+      reject(readWorkAbortFailure(workController.signal));
+    };
+
+    if (workController.signal.aborted) {
+      onWorkAborted();
+      return;
+    }
+
+    workController.signal.addEventListener('abort', onWorkAborted, { once: true });
   });
 
   const handlerCompleted = Promise.resolve()
     .then(() => handler(executionJob, workController.signal))
     .catch((error) => {
       if (workController.signal.aborted) {
-        return;
+        logger.error({
+          event: 'handler_error_after_abort',
+          executionJobId: executionJob.id,
+          kind: executionJob.kind,
+          ...describeSafeError(error)
+        });
+        throw readWorkAbortFailure(workController.signal);
       }
 
       throw error;
     });
+  const timeout = setTimeout(() => {
+    workController.abort(
+      new ExecutionFailure(
+        'execution_timeout',
+        'Execution exceeded the configured time limit',
+        true,
+        1_000
+      )
+    );
+  }, maxExecutionMs);
 
   try {
     await Promise.race([
       handlerCompleted,
-      timedOut
+      workAborted
     ]);
   } finally {
-    if (timeout) {
-      clearTimeout(timeout);
+    clearTimeout(timeout);
+    if (onWorkAborted) {
+      workController.signal.removeEventListener('abort', onWorkAborted);
     }
   }
 };
+
+const createLeaseLostFailure = () => new ExecutionFailure(
+  'lease_lost',
+  'Execution lease was lost before completion',
+  true,
+  1_000
+);
+
+const readWorkAbortFailure = (signal: AbortSignal) =>
+  signal.reason instanceof ExecutionFailure ? signal.reason : createLeaseLostFailure();
 
 const calculateClaimBackoff = (
   pollIntervalMs: number,

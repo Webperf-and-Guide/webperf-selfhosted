@@ -141,7 +141,7 @@ Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs
 - `BROWSER_AUDIT_SHARED_SECRET`
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT` for secret rotation
 
-The API returns a queued resource immediately; poll `GET /v1/browser-audits/:id` for completion. This surface is intentionally limited to persisted summaries and artifact metadata. It does not pull managed fleet, provider, or tenancy logic into OSS.
+The API returns a queued resource immediately; poll `GET /v1/browser-audits/:id` for completion. The local adapter persists artifact bytes outside SQLite and exposes administrator-authenticated downloads without pulling managed fleet, provider, or tenancy logic into OSS.
 
 ## Compose Bundle
 
@@ -152,6 +152,7 @@ Install and scheduling notes live in:
 - [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md)
 - [docs/architecture/execution-model.md](docs/architecture/execution-model.md)
 - [docs/self-hosting/browser-audit-lighthouse.md](docs/self-hosting/browser-audit-lighthouse.md)
+- [docs/self-hosting/artifacts.md](docs/self-hosting/artifacts.md)
 - [examples/github-actions/scheduler-dispatch.yml](examples/github-actions/scheduler-dispatch.yml)
 
 ## Release Tooling

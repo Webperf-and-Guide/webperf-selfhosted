@@ -82,7 +82,7 @@ export const createBrowserAuditExecutionHandler = ({
       policy: audit.policy,
       customHeaders: audit.customHeaders,
       cookies: audit.cookies,
-      artifactUpload: null,
+      artifactUpload: context.artifactUpload,
       timestamp: new Date().toISOString(),
       keyVersion: 'current' as const
     } satisfies BrowserAuditSignatureRequest;

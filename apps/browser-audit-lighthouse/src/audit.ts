@@ -494,6 +494,18 @@ const uploadArtifact = async (
     return [];
   }
 
+  if (Date.parse(input.artifactUpload.expiresAt) <= Date.now()) {
+    throw new Error('Artifact upload authorization expired');
+  }
+
+  if (payload.byteLength > input.artifactUpload.maxArtifactBytes) {
+    throw new Error('Artifact exceeds the configured upload byte limit');
+  }
+
+  if (!input.artifactUpload.allowedContentTypes.includes(contentType)) {
+    throw new Error('Artifact content type is not allowed by the upload policy');
+  }
+
   const response = await fetch(
     `${input.artifactUpload.baseUrl}/internal/browser-audits/${input.executionId}/artifacts?kind=${kind}&filename=${encodeURIComponent(filename)}`,
     {
@@ -501,9 +513,11 @@ const uploadArtifact = async (
       headers: {
         authorization: `Bearer ${input.artifactUpload.bearerToken}`,
         'content-type': contentType,
+        'content-length': String(payload.byteLength),
         'x-artifact-size': String(payload.byteLength)
       },
-      body: Buffer.from(payload)
+      body: Buffer.from(payload),
+      signal: AbortSignal.timeout(30_000)
     }
   );
 
@@ -511,6 +525,17 @@ const uploadArtifact = async (
     throw new Error(`Artifact upload failed with ${response.status}`);
   }
 
-  const uploaded = await response.json();
-  return [browserAuditArtifactRefSchema.parse(uploaded)];
+  const uploaded = browserAuditArtifactRefSchema.parse(await response.json());
+
+  if (
+    uploaded.kind !== kind
+    || uploaded.filename !== filename
+    || uploaded.contentType !== contentType
+    || uploaded.byteSize !== payload.byteLength
+    || !uploaded.sha256
+  ) {
+    throw new Error('Artifact upload response did not match the submitted artifact');
+  }
+
+  return [uploaded];
 };

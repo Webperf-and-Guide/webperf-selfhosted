@@ -53,7 +53,14 @@ const context = (): ExecutionResourceContext => ({
   kind: 'browser_audit',
   executionJob,
   payload: { version: 'v1', auditId: 'audit_handler' },
-  audit: queuedAudit()
+  audit: queuedAudit(),
+  artifactUpload: {
+    baseUrl: 'http://127.0.0.1:8788',
+    bearerToken: 'scoped-artifact-upload-token',
+    expiresAt: '2099-07-22T00:15:00.000Z',
+    maxArtifactBytes: 25_000_000,
+    allowedContentTypes: ['application/json', 'text/html']
+  }
 });
 
 const createClient = (savedResults: ExecutionResourceResultRequest[]): ExecutorApiClient => ({

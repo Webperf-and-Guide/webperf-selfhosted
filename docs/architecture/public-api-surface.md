@@ -37,7 +37,15 @@ Treat this document as the current freeze line:
 - `GET /v1/browser-audits`
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
+- `GET /v1/browser-audits/:id/artifacts/:artifactId`
 - `GET /v1/capabilities`
+
+Authentication boundary:
+
+- `GET /health` is the unauthenticated, minimal process health probe.
+- `GET /v1/capabilities` and `GET /openapi/public.json` are unauthenticated.
+- `GET /v1/health`, artifact downloads, and every data or execution endpoint
+  require the appropriate administrator or internal-service bearer token.
 
 ## Compatibility Aliases
 

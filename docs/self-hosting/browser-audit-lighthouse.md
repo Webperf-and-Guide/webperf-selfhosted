@@ -60,6 +60,7 @@ That enables the public self-host resources:
 - `GET /v1/browser-audits`
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
+- `GET /v1/browser-audits/:id/artifacts/:artifactId`
 
 `POST /v1/browser-audits` returns a queued resource. The durable executor calls
 the runner, retries transient unavailability, and persists:
@@ -68,10 +69,10 @@ the runner, retries transient unavailability, and persists:
 - summary metrics
 - failure reason
 - artifact metadata and pointers
+- artifact bytes in the configured self-host artifact store
 
 It intentionally does not add:
 
-- binary artifact download endpoints
 - managed queue/fleet/provider orchestration
 - SaaS tenancy or hosted retention rules
 
@@ -156,6 +157,11 @@ Supported artifacts:
 - trace upload
 
 The worker request/response contracts and artifact references live in `@webperf/contracts`.
+The API issues an execution-scoped, short-lived upload token; the worker never
+receives the administrator token or the internal service secret. The default
+store writes below `SELFHOST_ARTIFACTS_PATH`, keeps only metadata and SHA-256
+digests in SQLite, and streams downloads through the authenticated API and
+console. See [artifact storage](./artifacts.md).
 
 ## Runtime Notes
 

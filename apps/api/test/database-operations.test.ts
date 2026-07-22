@@ -213,6 +213,18 @@ describe('SQLite operations', () => {
       )
     `).run();
     database.query(`
+      INSERT INTO browser_audit_artifacts (
+        id, audit_id, registry_version, kind, filename, content_type,
+        byte_size, sha256, storage_key, created_at
+      ) VALUES
+        ('artifact_active', 'audit_active', 'v1', 'lighthouse-json', 'active.json',
+         'application/json', 6, '${'a'.repeat(64)}', 'audit_active/artifact_active',
+         '2026-05-01T00:00:00.000Z'),
+        ('artifact_orphan', 'audit_missing', 'v1', 'lighthouse-json', 'orphan.json',
+         'application/json', 6, '${'b'.repeat(64)}', 'audit_missing/artifact_orphan',
+         '2026-05-01T00:00:00.000Z')
+    `).run();
+    database.query(`
       INSERT INTO execution_jobs (
         id, kind, resource_id, status, lease_owner, lease_expires_at,
         attempt_count, max_attempts, available_at, payload_json, error_json,
@@ -228,11 +240,19 @@ describe('SQLite operations', () => {
       database,
       30,
       new Date('2026-07-22T00:00:00.000Z')
-    )).toEqual({ jobs: 1, checkRuns: 1, executionJobs: 1, derivedResources: 1 });
+    )).toEqual({
+      jobs: 1,
+      checkRuns: 1,
+      executionJobs: 1,
+      derivedResources: 1,
+      artifactIndexes: 1
+    });
     expect(database.query<{ id: string }, []>('SELECT id FROM jobs ORDER BY id').all())
       .toEqual([{ id: 'job_active' }, { id: 'job_recent' }]);
     expect(database.query<{ id: string }, []>('SELECT id FROM saved_entities ORDER BY id').all())
       .toEqual([{ id: 'audit_active' }, { id: 'property_old' }]);
+    expect(database.query<{ id: string }, []>('SELECT id FROM browser_audit_artifacts').all())
+      .toEqual([{ id: 'artifact_active' }]);
     database.close();
 
     const result = maintainSqliteDatabase({

@@ -18,12 +18,23 @@ describe('strict self-host configuration', () => {
     expect(() => parseSelfhostApiVars({})).toThrow();
     expect(parseSelfhostApiVars(requiredApiSecrets)).toMatchObject({
       ...requiredApiSecrets,
-      SELFHOST_MIGRATION_BACKUP: false
+      SELFHOST_MIGRATION_BACKUP: false,
+      SELFHOST_ARTIFACTS_PATH: './data/artifacts',
+      SELFHOST_MAX_ARTIFACT_BYTES: 25_000_000,
+      SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS: 900
     });
     expect(parseSelfhostApiVars({
       ...requiredApiSecrets,
       SELFHOST_MIGRATION_BACKUP: 'true'
     }).SELFHOST_MIGRATION_BACKUP).toBe(true);
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_ARTIFACT_UPLOAD_BASE_URL: 'https://operator:secret@api.example.test/path'
+    })).toThrow('Artifact upload base URL');
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_MAX_ARTIFACT_BYTES: '250000001'
+    })).toThrow();
   });
 
   test('requires server-side console, scheduler, and executor credentials', () => {

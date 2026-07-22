@@ -199,13 +199,13 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 5. Artifact storage
 
-- [ ] Add local-filesystem artifact index persistence.
-- [ ] Issue short-lived upload configuration to the runner.
-- [ ] Validate upload size, type, filename, token, and audit ownership.
-- [ ] Add authenticated streaming download and retention cleanup.
-- [ ] Keep S3-compatible storage as an interface/extension point only.
-- [ ] Add upload/download/traversal/retention integration tests.
-- [ ] Add a Sampo changeset for local artifact persistence.
+- [x] Add local-filesystem artifact index persistence.
+- [x] Issue short-lived upload configuration to the runner.
+- [x] Validate upload size, type, filename, token, and audit ownership.
+- [x] Add authenticated streaming download and retention cleanup.
+- [x] Keep S3-compatible storage as an interface/extension point only.
+- [x] Add upload/download/traversal/retention integration tests.
+- [x] Add a Sampo changeset for local artifact persistence.
 
 ### 6. Compose
 
@@ -253,7 +253,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Leased work recovers after API/executor restart.
 - [ ] Baseline/latest comparisons and deterministic analyses work.
 - [x] Browser Audit creation and execution are asynchronous.
-- [ ] Browser Audit stores downloadable local artifacts.
+- [x] Browser Audit stores downloadable local artifacts.
 - [ ] Secrets are absent from database API views, logs, exports, and errors.
 - [ ] Network and browser SSRF fixtures pass.
 - [ ] Canonical REST/OpenAPI surfaces agree and compatibility tests pass.

@@ -23,6 +23,7 @@ export type SqliteRetentionResult = {
   checkRuns: number;
   executionJobs: number;
   derivedResources: number;
+  artifactIndexes: number;
 };
 
 export type SqliteDoctorReport = {
@@ -221,25 +222,25 @@ export const cleanupSqliteRetention = (
   const cutoff = new Date(now);
   cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
   const cutoffIso = cutoff.toISOString();
-  const cleanup = database.transaction((): SqliteRetentionResult => ({
-    jobs: tableExists(database, 'jobs')
+  const cleanup = database.transaction((): SqliteRetentionResult => {
+    const jobs = tableExists(database, 'jobs')
       ? countChanges(database.query(`
           DELETE FROM jobs
           WHERE requested_at < ?
             AND status IN ('succeeded', 'failed', 'partial')
         `).run(cutoffIso))
-      : 0,
-    checkRuns: tableExists(database, 'check_profile_runs')
+      : 0;
+    const checkRuns = tableExists(database, 'check_profile_runs')
       ? countChanges(database.query('DELETE FROM check_profile_runs WHERE created_at < ?').run(cutoffIso))
-      : 0,
-    executionJobs: tableExists(database, 'execution_jobs')
+      : 0;
+    const executionJobs = tableExists(database, 'execution_jobs')
       ? countChanges(database.query(`
           DELETE FROM execution_jobs
           WHERE status IN ('succeeded', 'failed', 'cancelled')
             AND completed_at < ?
         `).run(cutoffIso))
-      : 0,
-    derivedResources: tableExists(database, 'saved_entities')
+      : 0;
+    const derivedResources = tableExists(database, 'saved_entities')
       ? countChanges(database.query(`
           DELETE FROM saved_entities AS entity
           WHERE entity.kind IN ('comparison', 'export', 'analysis', 'browser_audit')
@@ -257,8 +258,22 @@ export const cleanupSqliteRetention = (
               )
             )
         `).run(cutoffIso))
-      : 0
-  }));
+      : 0;
+    const artifactIndexes = tableExists(database, 'browser_audit_artifacts')
+      && tableExists(database, 'saved_entities')
+      ? countChanges(database.query(`
+          DELETE FROM browser_audit_artifacts AS artifact
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM saved_entities AS entity
+            WHERE entity.kind = 'browser_audit'
+              AND entity.id = artifact.audit_id
+          )
+        `).run())
+      : 0;
+
+    return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };
+  });
 
   return cleanup.immediate();
 };

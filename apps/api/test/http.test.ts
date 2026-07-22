@@ -35,6 +35,10 @@ const selfhostEnvKeys = [
   'SELFHOST_API_HOST',
   'SELFHOST_API_PORT',
   'SELFHOST_DATABASE_PATH',
+  'SELFHOST_ARTIFACTS_PATH',
+  'SELFHOST_ARTIFACT_UPLOAD_BASE_URL',
+  'SELFHOST_MAX_ARTIFACT_BYTES',
+  'SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS',
   'SELFHOST_ADMIN_TOKEN',
   'SELFHOST_ADMIN_TOKEN_NEXT',
   'SELFHOST_INTERNAL_SECRET',
@@ -469,7 +473,15 @@ describe('api service monitoring expansion', () => {
         status: string;
         result: {
           scores: { performance: number | null };
-          artifacts: Array<{ kind: string }>;
+          artifacts: Array<{
+            id: string;
+            kind: string;
+            url: string;
+            filename: string;
+            contentType: string;
+            byteSize: number;
+            sha256: string;
+          }>;
         } | null;
       };
       expect(browserAuditGetResponse.status).toBe(200);
@@ -481,6 +493,39 @@ describe('api service monitoring expansion', () => {
           (artifact) => artifact.kind === 'lighthouse-html'
         )
       ).toBe(true);
+      const htmlArtifact = browserAuditDetail.result?.artifacts.find(
+        (artifact) => artifact.kind === 'lighthouse-html'
+      );
+      if (!htmlArtifact) {
+        throw new Error('Expected a persisted Lighthouse HTML artifact');
+      }
+      expect(htmlArtifact.url).toBe(
+        `/v1/browser-audits/${createdBrowserAudit.id}/artifacts/${htmlArtifact.id}`
+      );
+      expect(htmlArtifact.filename).toBe(`${createdBrowserAudit.id}.html`);
+      expect(htmlArtifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect((await nativeFetch(`${harness.baseUrl}${htmlArtifact.url}`)).status).toBe(401);
+      const artifactDownload = await fetch(`${harness.baseUrl}${htmlArtifact.url}`);
+      expect(artifactDownload.status).toBe(200);
+      expect(artifactDownload.headers.get('content-type')).toBe('text/html');
+      expect(artifactDownload.headers.get('content-disposition')).toContain(
+        `filename="${createdBrowserAudit.id}.html"`
+      );
+      expect(await artifactDownload.text()).toContain(`<title>${createdBrowserAudit.id}</title>`);
+      const jsonArtifact = browserAuditDetail.result?.artifacts.find(
+        (artifact) => artifact.kind === 'lighthouse-json'
+      );
+      if (!jsonArtifact) {
+        throw new Error('Expected a persisted Lighthouse JSON artifact');
+      }
+      const jsonArtifactDownload = await fetch(`${harness.baseUrl}${jsonArtifact.url}`);
+      const expectedJsonArtifact = JSON.stringify({
+        executionId: createdBrowserAudit.id,
+        score: 0.91
+      });
+      expect(jsonArtifactDownload.headers.get('content-length'))
+        .toBe(String(new TextEncoder().encode(expectedJsonArtifact).byteLength));
+      expect(await jsonArtifactDownload.text()).toBe(expectedJsonArtifact);
 
       browserAuditWorker.setScenario({
         status: 'failed',
@@ -1075,6 +1120,86 @@ const startBrowserAuditWorkerServer = (
 
       const startedAt = new Date().toISOString();
       const completedAt = new Date(Date.now() + 250).toISOString();
+      const artifactPayloads = current.status === 'succeeded'
+        ? [
+            {
+              kind: 'lighthouse-json',
+              filename: `${payload.executionId}.json`,
+              contentType: 'application/json',
+              body: JSON.stringify({ executionId: payload.executionId, score: 0.91 })
+            },
+            {
+              kind: 'lighthouse-html',
+              filename: `${payload.executionId}.html`,
+              contentType: 'text/html',
+              body: `<!doctype html><title>${payload.executionId}</title>`
+            }
+          ]
+        : [];
+      if (current.status === 'succeeded' && payload.artifactUpload) {
+        const uploadPath = `${payload.artifactUpload.baseUrl}/internal/browser-audits/${payload.executionId}/artifacts`;
+        const scopedHeaders = {
+          authorization: `Bearer ${payload.artifactUpload.bearerToken}`,
+          'content-type': 'application/json',
+          'x-artifact-size': '0'
+        };
+        const negativeChecks = await Promise.all([
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=report.json`, {
+            method: 'POST',
+            headers: {
+              ...scopedHeaders,
+              authorization: `${scopedHeaders.authorization}tampered`
+            }
+          }),
+          nativeFetch(
+            `${payload.artifactUpload.baseUrl}/internal/browser-audits/${payload.executionId}_other/artifacts?kind=lighthouse-json&filename=report.json`,
+            { method: 'POST', headers: scopedHeaders }
+          ),
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=${encodeURIComponent('../report.json')}`, {
+            method: 'POST',
+            headers: scopedHeaders
+          }),
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=report.json`, {
+            method: 'POST',
+            headers: { ...scopedHeaders, 'content-type': 'text/html' }
+          }),
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=report.json`, {
+            method: 'POST',
+            headers: {
+              ...scopedHeaders,
+              'x-artifact-size': String(payload.artifactUpload.maxArtifactBytes + 1)
+            }
+          })
+        ]);
+        expect(negativeChecks.map((response) => response.status))
+          .toEqual([401, 401, 400, 415, 413]);
+      }
+      const artifacts = await Promise.all(artifactPayloads.map(async (artifact) => {
+        if (!payload.artifactUpload) {
+          throw new Error('Expected a scoped artifact upload configuration');
+        }
+
+        const body = new TextEncoder().encode(artifact.body);
+        const response = await nativeFetch(
+          `${payload.artifactUpload.baseUrl}/internal/browser-audits/${payload.executionId}/artifacts?kind=${artifact.kind}&filename=${encodeURIComponent(artifact.filename)}`,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${payload.artifactUpload.bearerToken}`,
+              'content-type': artifact.contentType,
+              'content-length': String(body.byteLength),
+              'x-artifact-size': String(body.byteLength)
+            },
+            body
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Mock artifact upload failed: ${response.status} ${await response.text()}`);
+        }
+
+        return response.json();
+      }));
 
       return Response.json({
         executionId: payload.executionId,
@@ -1120,24 +1245,7 @@ const startBrowserAuditWorkerServer = (
                   extendedMetrics: []
                 }],
                 issues: [],
-                artifacts: [
-                  {
-                    id: `${payload.executionId}_json`,
-                    kind: 'lighthouse-json',
-                    url: `https://artifacts.test/${payload.executionId}.json`,
-                    contentType: 'application/json',
-                    byteSize: 4096,
-                    createdAt: completedAt
-                  },
-                  {
-                    id: `${payload.executionId}_html`,
-                    kind: 'lighthouse-html',
-                    url: `https://artifacts.test/${payload.executionId}.html`,
-                    contentType: 'text/html',
-                    byteSize: 6144,
-                    createdAt: completedAt
-                  }
-                ],
+                artifacts,
                 toolchain: {
                   engine: { id: 'lighthouse', version: '12.6.0' },
                   browser: { name: 'Chrome', version: '136.0.0.0' },
@@ -1179,6 +1287,7 @@ const startSelfhostHarness = async (
   process.env.SELFHOST_API_HOST = '127.0.0.1';
   process.env.SELFHOST_API_PORT = `${controlPort}`;
   process.env.SELFHOST_DATABASE_PATH = databasePath;
+  process.env.SELFHOST_ARTIFACTS_PATH = join(databaseDirectory, 'artifacts');
   process.env.SELFHOST_ADMIN_TOKEN = testAdminToken;
   process.env.SELFHOST_ADMIN_TOKEN_NEXT = '';
   process.env.SELFHOST_INTERNAL_SECRET = testInternalSecret;

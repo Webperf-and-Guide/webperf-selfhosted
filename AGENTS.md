@@ -129,6 +129,7 @@ Current repo state as of 2026-07-22:
 - browser-audit history now also surfaces checkpoint summaries, per-header/per-cookie request context, flow-step detail, and clearer artifact pointer labels so direct-run operator debugging stays readable without managed orchestration tooling
 - internal workspace packages now consume `@webperf/contracts` through `workspace:*` consistently instead of mixing `file:` and workspace references, which keeps the Bun lockfile stable enough for `bun install --frozen-lockfile` in GitHub Actions
 - `ci-selfhost` now validates Compose through the checked-in `compose:config` script, which uses `infra/docker-compose/.env.example` instead of assuming repository-local secrets during static config validation
+- Browser Audit artifacts now use execution-scoped short-lived upload grants, a traversal-safe local filesystem adapter, SQLite metadata indexes, authenticated API/console downloads, and startup/maintenance retention reconciliation; the storage interface leaves S3-compatible backends as a future extension
 - executor transport now includes lease-bound execution context reads, atomic domain-result persistence, and atomic idempotent follow-up enqueueing without giving the executor direct SQLite access
 - public-beta hardening is now tracked in `docs/architecture/public-beta-hardening-plan.md`, covering durable execution, strict self-host security, engine-neutral browser audits, local artifacts, versioned Compose/release automation, and operator documentation
 - the optional browser runtime is now named `apps/browser-audit-lighthouse` and documented as a Lighthouse reference implementation, while provider-specific cloud config, health schemas, Turnstile/Cloudflare console adapters, and managed smoke/migration scripts have been removed from the self-host boundary
@@ -181,13 +182,10 @@ Current local URLs:
 ## Immediate Next Tasks
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. persist and serve local Browser Audit artifacts through authenticated, traversal-safe endpoints
-3. keep authentication, encrypted persistence, rotation, and redaction covered as artifacts are added
-4. align the Lighthouse reference runner upload client with the authenticated local artifact store
-5. add artifact upload/download/traversal/retention integration coverage
-6. ship versioned production/development Compose bundles with internal-only services
-7. gate release images, SBOM, provenance, and digest metadata on complete CI
-8. complete the operator install, backup, upgrade, security, and troubleshooting documentation
+2. ship versioned production/development Compose bundles with internal-only services
+3. gate release images, SBOM, provenance, and digest metadata on complete CI
+4. complete the operator install, backup, upgrade, security, and troubleshooting documentation
+5. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
 
 ## Update Protocol
 

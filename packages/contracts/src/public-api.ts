@@ -208,6 +208,7 @@ export const publicApiPaths = [
   '/v1/check-profiles/:id/report/export',
   '/v1/browser-audits',
   '/v1/browser-audits/:id',
+  '/v1/browser-audits/:id/artifacts/:artifactId',
   '/v1/scheduler/dispatch'
 ] as const;
 

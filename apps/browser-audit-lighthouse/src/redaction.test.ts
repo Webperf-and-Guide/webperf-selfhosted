@@ -13,7 +13,10 @@ describe('browser audit redaction', () => {
       cookies: [{ name: 'session', value: 'private-cookie' }],
       artifactUpload: {
         baseUrl: 'http://api:8788',
-        bearerToken: 'private-upload-token'
+        bearerToken: 'private-upload-token',
+        expiresAt: '2026-07-22T12:15:00.000Z',
+        maxArtifactBytes: 25_000_000,
+        allowedContentTypes: ['application/json', 'text/html']
       }
     } as BrowserAuditWorkerRequest;
 

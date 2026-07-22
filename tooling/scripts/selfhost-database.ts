@@ -14,6 +14,7 @@ import {
   restoreSqliteDatabase
 } from '../../apps/api/src/database/operations';
 import { createStorageCrypto } from '../../apps/api/src/storage-crypto';
+import { LocalBrowserAuditArtifactStore } from '../../apps/api/src/browser-audit-artifact-store';
 
 type Command = 'migrate' | 'backup' | 'restore' | 'doctor' | 'maintenance';
 
@@ -42,7 +43,8 @@ const valueOptions = new Set([
   '--backup-output',
   '--output',
   '--from',
-  '--retention-days'
+  '--retention-days',
+  '--artifacts'
 ]);
 const flagOptions = new Set([
   '--backup',
@@ -68,6 +70,12 @@ const resolveDatabasePath = () => {
     ?? './data/webperf.sqlite';
   return configured === ':memory:' ? configured : resolve(configured);
 };
+
+const resolveArtifactsPath = () => resolve(
+  optionValue('--artifacts')
+    ?? process.env.SELFHOST_ARTIFACTS_PATH
+    ?? './data/artifacts'
+);
 
 const parsePositiveInteger = (value: string | undefined, fallback: number, label: string) => {
   if (value == null) {
@@ -178,7 +186,7 @@ const doctor = () => ({
   ...doctorSqliteDatabase(resolveDatabasePath())
 });
 
-const maintenance = () => {
+const maintenance = async () => {
   const databasePath = resolveDatabasePath();
   const database = openSqliteDatabase(databasePath, { readonly: true, create: false });
 
@@ -202,8 +210,33 @@ const maintenance = () => {
     retentionDays,
     vacuum: hasFlag('--vacuum')
   });
+  const currentDatabase = openSqliteDatabase(databasePath, { readonly: true, create: false });
+  let storageKeys: string[];
 
-  return { ok: true, command: 'maintenance', databasePath, retentionDays, ...result };
+  try {
+    storageKeys = currentDatabase
+      .query<{ storage_key: string }, []>(
+        'SELECT storage_key FROM browser_audit_artifacts ORDER BY storage_key'
+      )
+      .all()
+      .map((row) => row.storage_key);
+  } finally {
+    currentDatabase.close();
+  }
+
+  const artifactsPath = resolveArtifactsPath();
+  const artifactCleanup = await new LocalBrowserAuditArtifactStore(artifactsPath)
+    .reconcile(new Set(storageKeys));
+
+  return {
+    ok: true,
+    command: 'maintenance',
+    databasePath,
+    artifactsPath,
+    retentionDays,
+    artifactCleanup,
+    ...result
+  };
 };
 
 const printHelp = () => {
@@ -214,10 +247,10 @@ Commands:
   selfhost:backup [--output <path>] [--database <path>]
   selfhost:restore -- <path> [--no-backup] [--allow-pending-migrations] [--database <path>]
   selfhost:doctor [--database <path>]
-  selfhost:maintenance [--retention-days <days>] [--vacuum] [--database <path>]`);
+  selfhost:maintenance [--retention-days <days>] [--vacuum] [--database <path>] [--artifacts <path>]`);
 };
 
-const main = () => {
+const main = async () => {
   const unknownOption = args.find(
     (value) => value.startsWith('--')
       && value !== '--'
@@ -247,7 +280,7 @@ const main = () => {
 };
 
 try {
-  const result = main();
+  const result = await main();
   console.log(JSON.stringify(result));
 
   if ('ok' in result && result.ok === false) {

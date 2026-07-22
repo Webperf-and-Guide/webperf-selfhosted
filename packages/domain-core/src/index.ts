@@ -397,7 +397,10 @@ export const toBrowserAuditSignaturePayload = (request: BrowserAuditSignatureReq
       request.artifactUpload == null
         ? null
         : {
-            baseUrl: request.artifactUpload.baseUrl
+            baseUrl: request.artifactUpload.baseUrl,
+            expiresAt: request.artifactUpload.expiresAt,
+            maxArtifactBytes: request.artifactUpload.maxArtifactBytes,
+            allowedContentTypes: [...request.artifactUpload.allowedContentTypes].sort()
           },
     timestamp: request.timestamp,
     keyVersion: request.keyVersion

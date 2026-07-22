@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createExecutorApiClient } from '../../executor/src/client';
 import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
 import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
@@ -171,6 +171,7 @@ const startApi = async (databasePath: string, probePort: number): Promise<ApiPro
       SELFHOST_API_HOST: '127.0.0.1',
       SELFHOST_API_PORT: String(port),
       SELFHOST_DATABASE_PATH: databasePath,
+      SELFHOST_ARTIFACTS_PATH: join(dirname(databasePath), 'artifacts'),
       SELFHOST_RETENTION_DAYS: '30',
       SELFHOST_MIGRATION_BACKUP: 'false',
       SELFHOST_ADMIN_TOKEN: testAdminToken,

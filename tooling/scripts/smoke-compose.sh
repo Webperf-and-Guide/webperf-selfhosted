@@ -5,6 +5,7 @@ root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 compose_file="$root_dir/infra/docker-compose/docker-compose.yml"
 profile="${COMPOSE_PROFILE:-default}"
 temp_env="$(mktemp)"
+temp_artifact="$(mktemp)"
 
 cleanup() {
   local extra_args=()
@@ -14,6 +15,7 @@ cleanup() {
 
   docker compose --env-file "$temp_env" "${extra_args[@]}" -f "$compose_file" down -v --remove-orphans >/dev/null 2>&1 || true
   rm -f "$temp_env"
+  rm -f "$temp_artifact"
 }
 
 trap cleanup EXIT
@@ -114,7 +116,32 @@ if [[ "$profile" == "browser-audit" ]]; then
     if (payload.status !== "succeeded") {
       throw new Error(`Expected succeeded browser audit, got ${payload.status}`);
     }
+    if (!payload.result?.artifacts?.length) {
+      throw new Error("Expected the browser audit to persist at least one artifact");
+    }
   ' "$audit_detail"
+
+  artifact_url="$(bun -e '
+    const artifact = JSON.parse(process.argv[1]).result.artifacts[0];
+    if (!artifact.url.startsWith("/v1/browser-audits/") || !artifact.sha256) {
+      throw new Error("Expected a local artifact reference with a SHA-256 digest");
+    }
+    console.log(artifact.url);
+  ' "$audit_detail")"
+  unauthenticated_status="$(
+    curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8788${artifact_url}"
+  )"
+  if [[ "$unauthenticated_status" != "401" ]]; then
+    echo "Expected unauthenticated artifact download to return 401, got ${unauthenticated_status}" >&2
+    exit 1
+  fi
+  curl -fsS "http://127.0.0.1:8788${artifact_url}" \
+    -H 'authorization: Bearer smoke-admin-token-value' \
+    -o "$temp_artifact"
+  if [[ ! -s "$temp_artifact" ]]; then
+    echo "Expected a non-empty Browser Audit artifact download" >&2
+    exit 1
+  fi
 fi
 
 echo "{\"ok\":true,\"profile\":\"$profile\"}"

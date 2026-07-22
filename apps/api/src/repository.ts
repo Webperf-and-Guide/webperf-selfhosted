@@ -1,5 +1,7 @@
 import type {
   AnalysisResource,
+  BrowserAuditArtifactKind,
+  BrowserAuditArtifactRef,
   BrowserAuditResource,
   CheckProfile,
   CheckProfileAlertDelivery,
@@ -89,6 +91,10 @@ export type JobRepository = {
   getBrowserAudit(id: string): BrowserAuditResource | null;
   listBrowserAudits(): BrowserAuditResource[];
   saveBrowserAudit(browserAudit: BrowserAuditResource): void;
+  saveBrowserAuditArtifact(artifact: BrowserAuditArtifactRecord): boolean;
+  getBrowserAuditArtifact(auditId: string, artifactId: string): BrowserAuditArtifactRecord | null;
+  listBrowserAuditArtifacts(auditId: string): BrowserAuditArtifactRecord[];
+  listBrowserAuditArtifactStorageKeys(): string[];
   createExecutionResource(input: {
     executionJob: EnqueueExecutionJob;
     result: ExecutionResourceResult;
@@ -128,6 +134,19 @@ export type ExecutionJobOwnerInput = {
   leaseOwner: string;
 };
 
+export type BrowserAuditArtifactRecord = {
+  id: string;
+  auditId: string;
+  registryVersion: BrowserAuditArtifactRef['registryVersion'];
+  kind: BrowserAuditArtifactKind;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  storageKey: string;
+  createdAt: string;
+};
+
 type EntityKind =
   | 'property'
   | 'route_set'
@@ -161,6 +180,19 @@ type ExecutionJobRow = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+};
+
+type BrowserAuditArtifactRow = {
+  id: string;
+  audit_id: string;
+  registry_version: string;
+  kind: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  storage_key: string;
+  created_at: string;
 };
 
 type JsonSchema<T> = {
@@ -299,6 +331,30 @@ export const createSqliteJobRepository = ({
   const deleteCheckProfileRunsStatement = db.query(`
     DELETE FROM check_profile_runs
     WHERE profile_id = ?
+  `);
+  const saveBrowserAuditArtifactStatement = db.query(`
+    INSERT INTO browser_audit_artifacts (
+      id, audit_id, registry_version, kind, filename, content_type,
+      byte_size, sha256, storage_key, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT DO NOTHING
+  `);
+  const getBrowserAuditArtifactStatement = db.query<BrowserAuditArtifactRow, [string, string]>(`
+    SELECT *
+    FROM browser_audit_artifacts
+    WHERE audit_id = ? AND id = ?
+    LIMIT 1
+  `);
+  const listBrowserAuditArtifactsStatement = db.query<BrowserAuditArtifactRow, [string]>(`
+    SELECT *
+    FROM browser_audit_artifacts
+    WHERE audit_id = ?
+    ORDER BY created_at, id
+  `);
+  const listBrowserAuditArtifactStorageKeysStatement = db.query<{ storage_key: string }, []>(`
+    SELECT storage_key
+    FROM browser_audit_artifacts
+    ORDER BY storage_key
   `);
   const enqueueExecutionJobStatement = db.query<ExecutionJobRow, [
     string,
@@ -519,6 +575,42 @@ export const createSqliteJobRepository = ({
       );
       return null;
     }
+  };
+
+  const parseBrowserAuditArtifact = (
+    row: BrowserAuditArtifactRow
+  ): BrowserAuditArtifactRecord | null => {
+    if (
+      row.registry_version !== 'v1'
+      || !/^[a-z0-9][a-z0-9._-]*$/.test(row.kind)
+      || row.filename.length < 1
+      || row.content_type.length < 1
+      || !Number.isSafeInteger(row.byte_size)
+      || row.byte_size < 0
+      || !/^[a-f0-9]{64}$/.test(row.sha256)
+      || row.storage_key.length < 3
+      || Number.isNaN(Date.parse(row.created_at))
+    ) {
+      console.warn(JSON.stringify({
+        service: 'webperf-api',
+        warning: 'browser_audit_artifact_row_invalid',
+        artifactId: row.id
+      }));
+      return null;
+    }
+
+    return {
+      id: row.id,
+      auditId: row.audit_id,
+      registryVersion: row.registry_version,
+      kind: row.kind,
+      filename: row.filename,
+      contentType: row.content_type,
+      byteSize: row.byte_size,
+      sha256: row.sha256,
+      storageKey: row.storage_key,
+      createdAt: row.created_at
+    };
   };
 
   const getEntity = <T>(kind: EntityKind, id: string, schema: JsonSchema<T>) => {
@@ -860,6 +952,47 @@ export const createSqliteJobRepository = ({
     },
     saveBrowserAudit(browserAudit) {
       persistBrowserAudit(browserAudit);
+    },
+    saveBrowserAuditArtifact(artifact) {
+      try {
+        const result = saveBrowserAuditArtifactStatement.run(
+          artifact.id,
+          artifact.auditId,
+          artifact.registryVersion,
+          artifact.kind,
+          artifact.filename,
+          artifact.contentType,
+          artifact.byteSize,
+          artifact.sha256,
+          artifact.storageKey,
+          artifact.createdAt
+        ) as { changes?: number };
+        return (result.changes ?? 0) === 1;
+      } catch (error) {
+        if (
+          error instanceof Error
+          && error.message.includes('browser_audit_artifact_limit')
+        ) {
+          return false;
+        }
+
+        throw error;
+      }
+    },
+    getBrowserAuditArtifact(auditId, artifactId) {
+      const row = getBrowserAuditArtifactStatement.get(auditId, artifactId);
+      return row ? parseBrowserAuditArtifact(row) : null;
+    },
+    listBrowserAuditArtifacts(auditId) {
+      return listBrowserAuditArtifactsStatement
+        .all(auditId)
+        .map(parseBrowserAuditArtifact)
+        .filter((artifact): artifact is BrowserAuditArtifactRecord => artifact !== null);
+    },
+    listBrowserAuditArtifactStorageKeys() {
+      return listBrowserAuditArtifactStorageKeysStatement
+        .all()
+        .map((row) => row.storage_key);
     },
     createExecutionResource(input, now = new Date()) {
       if (input.executionJob.kind !== input.result.kind) {

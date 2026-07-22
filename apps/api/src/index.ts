@@ -1,6 +1,7 @@
 import type {
   AnalysisResource,
   AnalysisListResponse,
+  BrowserAuditArtifactRef,
   BrowserAuditCapabilities,
   BrowserAuditListResponse,
   BrowserAuditResource,
@@ -55,6 +56,10 @@ import {
   analysisResourceSchema,
   appContract,
   browserAuditCapabilitiesSchema,
+  browserAuditArtifactKindSchema,
+  browserAuditArtifactLimit,
+  browserAuditArtifactRefSchema,
+  browserAuditArtifactRegistryVersion,
   browserAuditListResponseSchema,
   browserAuditResourceSchema,
   checkProfileListResponseSchema,
@@ -81,6 +86,8 @@ import {
   executionResourceContextRequestSchema,
   executionResourceContextSchema,
   executionResourceResultRequestSchema,
+  defaultBrowserAuditArtifactContentTypes,
+  standardBrowserAuditArtifactContentTypes,
   browserAuditExecutionPayloadSchema,
   networkProbeExecutionPayloadSchema,
   webhookDeliveryExecutionPayloadSchema,
@@ -120,6 +127,15 @@ import {
   summarizeTargets
 } from '@webperf/report-core';
 import { createSqliteJobRepository } from './repository';
+import {
+  ArtifactStoreValidationError,
+  LocalBrowserAuditArtifactStore,
+  normalizeArtifactFilename
+} from './browser-audit-artifact-store';
+import {
+  issueBrowserAuditUploadToken,
+  verifyBrowserAuditUploadToken
+} from './browser-audit-upload-token';
 import { authorizeApiRequest } from './auth';
 import { describeSafeError } from './diagnostics';
 import {
@@ -133,6 +149,10 @@ type SelfhostRuntime = {
   host: string;
   port: number;
   databasePath: string;
+  artifactsPath: string;
+  artifactUploadBaseUrl?: string;
+  maxArtifactBytes: number;
+  artifactUploadTtlSeconds: number;
   retentionDays: number;
   migrationBackup: boolean;
   adminToken: string;
@@ -154,6 +174,10 @@ const executionJobMutationPathPattern =
   /^\/internal\/execution-jobs\/([^/]+)\/(start|renew|complete|fail)$/;
 const executionJobResourcePathPattern =
   /^\/internal\/execution-jobs\/([^/]+)\/(context|result|followups)$/;
+const browserAuditArtifactUploadPathPattern =
+  /^\/internal\/browser-audits\/([^/]+)\/artifacts$/;
+const browserAuditArtifactDownloadPathPattern =
+  /^\/v1\/browser-audits\/([^/]+)\/artifacts\/([^/]+)$/;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -212,8 +236,10 @@ export const repository = createSqliteJobRepository({
   encryptionSecretNext: runtime.internalSecretNext,
   backupBeforeMigrations: runtime.migrationBackup
 });
+export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
 repository.pruneRetainedData(runtime.retentionDays);
+await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorageKeys()));
 
 const buildHealthPayload = () => ({
   service: 'webperf-api',
@@ -226,6 +252,12 @@ const buildHealthPayload = () => ({
     databasePath: runtime.databasePath,
     retainedDays: runtime.retentionDays,
     persistedJobs: repository.countJobs()
+  },
+  artifacts: {
+    kind: 'local-filesystem' as const,
+    path: runtime.artifactsPath,
+    maxArtifactBytes: runtime.maxArtifactBytes,
+    uploadTtlSeconds: runtime.artifactUploadTtlSeconds
   },
   savedConfigs: {
     properties: repository.listProperties().length,
@@ -974,6 +1006,17 @@ const routeRequest = async (request: Request) => {
       return withExecutionTransportErrors('claim', () => handleClaimExecutionJob(request));
     }
 
+    const browserAuditArtifactUploadMatch = pathname.match(
+      browserAuditArtifactUploadPathPattern
+    );
+    if (browserAuditArtifactUploadMatch?.[1] && request.method === 'POST') {
+      return handleBrowserAuditArtifactUpload(
+        browserAuditArtifactUploadMatch[1],
+        request,
+        url
+      );
+    }
+
     const executionResourceMatch = pathname.match(executionJobResourcePathPattern);
     if (executionResourceMatch?.[1] && executionResourceMatch[2] && request.method === 'POST') {
       const executionJobId = executionJobIdSchema.safeParse(executionResourceMatch[1]);
@@ -1358,6 +1401,20 @@ const routeRequest = async (request: Request) => {
       return analysis ? json(analysis) : json({ error: 'Analysis not found' }, { status: 404 });
     }
 
+    const browserAuditArtifactDownloadMatch = pathname.match(
+      browserAuditArtifactDownloadPathPattern
+    );
+    if (
+      browserAuditArtifactDownloadMatch?.[1]
+      && browserAuditArtifactDownloadMatch[2]
+      && request.method === 'GET'
+    ) {
+      return handleBrowserAuditArtifactDownload(
+        browserAuditArtifactDownloadMatch[1],
+        browserAuditArtifactDownloadMatch[2]
+      );
+    }
+
     const browserAuditMatch = pathname.match(/^\/v1\/browser-audits\/([^/]+)$/);
     if (browserAuditMatch?.[1] && request.method === 'GET') {
       return handleGetBrowserAudit(browserAuditMatch[1]);
@@ -1377,14 +1434,22 @@ export const server = Bun.serve({
   hostname: runtime.host,
   port: runtime.port,
   async fetch(request) {
-    const unauthorized = authorizeApiRequest(request, runtime);
+    const pathname = new URL(request.url).pathname;
+    const usesScopedArtifactToken = request.method === 'POST'
+      && browserAuditArtifactUploadPathPattern.test(pathname);
+    const unauthorized = usesScopedArtifactToken
+      ? null
+      : authorizeApiRequest(request, runtime);
 
     if (unauthorized) {
       return unauthorized;
     }
 
     const routedResponse = await routeRequest(request);
-    const response = isExecutionTransportPath(new URL(request.url).pathname)
+    const response = (
+      isExecutionTransportPath(pathname)
+      || (request.method === 'GET' && browserAuditArtifactDownloadPathPattern.test(pathname))
+    )
       ? routedResponse
       : await redactJsonResponse(routedResponse);
     return addCompatibilityDeprecationHeaders(request, response);
@@ -1397,6 +1462,7 @@ console.log(
     listeningOn: `http://${runtime.host}:${runtime.port}`,
     activeRegions: runtime.activeRegionCodes,
     databasePath: runtime.databasePath,
+    artifactsPath: runtime.artifactsPath,
     retainedDays: runtime.retentionDays
   })
 );
@@ -1556,7 +1622,7 @@ async function handleExecutionResourceOperation(
 
     const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
     return executionJob
-      ? json(buildExecutionResourceContext(executionJob), {
+      ? json(buildExecutionResourceContext(executionJob, request), {
           headers: { 'cache-control': 'no-store' }
         })
       : executionLeaseConflict();
@@ -1673,7 +1739,8 @@ function getOwnedRunningExecutionJob(executionJobId: string, leaseOwner: string)
 }
 
 function buildExecutionResourceContext(
-  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  request: Request
 ): ExecutionResourceContext {
   if (executionJob.kind === 'network_probe') {
     const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
@@ -1727,15 +1794,39 @@ function buildExecutionResourceContext(
     const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
     const audit = repository.getBrowserAudit(payload.auditId);
 
-    if (executionJob.resourceId !== payload.auditId || !audit) {
+    if (executionJob.resourceId !== payload.auditId || !audit || !executionJob.leaseOwner) {
       throw new Error('Browser audit execution references a missing resource');
     }
+
+    const issuedAt = new Date();
+    const expiresAt = new Date(
+      issuedAt.getTime() + runtime.artifactUploadTtlSeconds * 1_000
+    );
+    const artifactUploadBaseUrl = resolveArtifactUploadBaseUrl(
+      runtime.artifactUploadBaseUrl ?? new URL(request.url).origin
+    );
 
     return executionResourceContextSchema.parse({
       kind: 'browser_audit',
       executionJob,
       payload,
-      audit
+      audit,
+      artifactUpload: {
+        baseUrl: artifactUploadBaseUrl,
+        bearerToken: issueBrowserAuditUploadToken({
+          secret: runtime.internalSecret,
+          auditId: audit.id,
+          executionJobId: executionJob.id,
+          leaseOwner: executionJob.leaseOwner,
+          attemptCount: executionJob.attemptCount,
+          expiresAt,
+          maxArtifactBytes: runtime.maxArtifactBytes,
+          now: issuedAt
+        }),
+        expiresAt: expiresAt.toISOString(),
+        maxArtifactBytes: runtime.maxArtifactBytes,
+        allowedContentTypes: [...defaultBrowserAuditArtifactContentTypes]
+      }
     });
   }
 
@@ -1787,6 +1878,7 @@ function persistExecutionResourceResult(
       result.audit.id !== payload.auditId
       || !existing
       || !browserAuditInputsMatch(existing, result.audit)
+      || !browserAuditArtifactsMatch(payload.auditId, result.audit.result?.artifacts ?? [])
     ) {
       throw new Error('Browser audit result does not match its payload');
     }
@@ -1826,6 +1918,24 @@ const browserAuditInputsMatch = (
   && isDeepStrictEqual(existing.policy, result.policy)
   && isDeepStrictEqual(existing.customHeaders, result.customHeaders)
   && isDeepStrictEqual(existing.cookies, result.cookies);
+
+const browserAuditArtifactsMatch = (
+  auditId: string,
+  artifacts: BrowserAuditArtifactRef[]
+) => artifacts.every((artifact) => {
+  const indexed = repository.getBrowserAuditArtifact(auditId, artifact.id);
+  return Boolean(
+    indexed
+    && artifact.registryVersion === indexed.registryVersion
+    && artifact.kind === indexed.kind
+    && artifact.url === `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(indexed.id)}`
+    && artifact.filename === indexed.filename
+    && artifact.contentType === indexed.contentType
+    && artifact.byteSize === indexed.byteSize
+    && artifact.sha256 === indexed.sha256
+    && artifact.createdAt === indexed.createdAt
+  );
+});
 
 const executionLeaseConflict = () =>
   json(
@@ -2736,6 +2846,219 @@ function handleGetBrowserAudit(auditId: string) {
   return json(browserAudit, { status: 200 });
 }
 
+async function handleBrowserAuditArtifactUpload(
+  auditId: string,
+  request: Request,
+  url: URL
+) {
+  const token = readBearerToken(request.headers.get('authorization'));
+  const claims = token
+    ? verifyBrowserAuditUploadToken({
+        token,
+        secrets: [runtime.internalSecret, runtime.internalSecretNext]
+      })
+    : null;
+
+  if (!claims || claims.auditId !== auditId) {
+    return artifactUploadError('Artifact upload token is invalid or expired', 401);
+  }
+
+  const executionJob = repository.getExecutionJob(claims.executionJobId);
+  const now = new Date().toISOString();
+  if (
+    !executionJob
+    || executionJob.kind !== 'browser_audit'
+    || executionJob.resourceId !== auditId
+    || executionJob.status !== 'running'
+    || executionJob.leaseOwner !== claims.leaseOwner
+    || executionJob.attemptCount !== claims.attemptCount
+    || !executionJob.leaseExpiresAt
+    || executionJob.leaseExpiresAt <= now
+    || !repository.getBrowserAudit(auditId)
+  ) {
+    return artifactUploadError('Artifact upload lease is no longer active', 409);
+  }
+
+  if (repository.listBrowserAuditArtifacts(auditId).length >= browserAuditArtifactLimit) {
+    return artifactUploadError('Browser audit artifact limit has been reached', 409);
+  }
+
+  const kindValues = url.searchParams.getAll('kind');
+  const filenameValues = url.searchParams.getAll('filename');
+  const kind = browserAuditArtifactKindSchema.safeParse(kindValues[0]);
+  if (kindValues.length !== 1 || !kind.success || filenameValues.length !== 1) {
+    return artifactUploadError('Artifact kind and filename are required', 400);
+  }
+
+  let filename: string;
+  try {
+    filename = normalizeArtifactFilename(filenameValues[0] ?? '');
+  } catch (error) {
+    return artifactUploadError(
+      error instanceof Error ? error.message : 'Artifact filename is invalid',
+      400
+    );
+  }
+
+  const contentType = request.headers
+    .get('content-type')
+    ?.split(';', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (!contentType || !defaultBrowserAuditArtifactContentTypes.includes(
+    contentType as (typeof defaultBrowserAuditArtifactContentTypes)[number]
+  )) {
+    return artifactUploadError('Artifact content type is not allowed', 415);
+  }
+  const standardContentTypes = kind.data in standardBrowserAuditArtifactContentTypes
+    ? standardBrowserAuditArtifactContentTypes[
+        kind.data as keyof typeof standardBrowserAuditArtifactContentTypes
+      ]
+    : null;
+  if (standardContentTypes && !standardContentTypes.includes(contentType)) {
+    return artifactUploadError('Artifact content type does not match its registered kind', 415);
+  }
+
+  const declaredSize = parseArtifactByteSize(request.headers.get('x-artifact-size'));
+  if (declaredSize === null) {
+    return artifactUploadError('Artifact byte size is required', 400);
+  }
+
+  const maxBytes = Math.min(runtime.maxArtifactBytes, claims.maxArtifactBytes);
+  if (declaredSize > maxBytes) {
+    return artifactUploadError('Artifact exceeds the configured byte limit', 413);
+  }
+
+  const contentLength = request.headers.get('content-length');
+  if (contentLength !== null && parseArtifactByteSize(contentLength) !== declaredSize) {
+    return artifactUploadError('Artifact content length does not match its declared size', 400);
+  }
+
+  const artifactId = `artifact_${crypto.randomUUID()}`;
+  let storedStorageKey: string | null = null;
+  let indexed = false;
+
+  try {
+    const stored = await artifactStore.write({
+      auditId,
+      artifactId,
+      body: request.body,
+      expectedBytes: declaredSize,
+      maxBytes
+    });
+    storedStorageKey = stored.storageKey;
+    const createdAt = new Date().toISOString();
+    indexed = repository.saveBrowserAuditArtifact({
+      id: artifactId,
+      auditId,
+      registryVersion: browserAuditArtifactRegistryVersion,
+      kind: kind.data,
+      filename,
+      contentType,
+      byteSize: stored.byteSize,
+      sha256: stored.sha256,
+      storageKey: stored.storageKey,
+      createdAt
+    });
+
+    if (!indexed) {
+      return artifactUploadError('Artifact could not be indexed', 409);
+    }
+
+    const artifact = browserAuditArtifactRefSchema.parse({
+      id: artifactId,
+      registryVersion: browserAuditArtifactRegistryVersion,
+      kind: kind.data,
+      url: `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      filename,
+      contentType,
+      byteSize: stored.byteSize,
+      sha256: stored.sha256,
+      createdAt
+    });
+    return json(artifact, {
+      status: 201,
+      headers: { 'cache-control': 'no-store' }
+    });
+  } catch (error) {
+    if (error instanceof ArtifactStoreValidationError) {
+      return artifactUploadError(error.message, error.status);
+    }
+
+    const incidentId = crypto.randomUUID();
+    console.error(JSON.stringify({
+      service: 'webperf-api',
+      event: 'browser_audit_artifact_upload_failed',
+      auditId,
+      incidentId,
+      ...describeSafeError(error)
+    }));
+    return artifactUploadError('Artifact upload failed', 500, incidentId);
+  } finally {
+    if (storedStorageKey && !indexed) {
+      await artifactStore.delete(storedStorageKey).catch(() => undefined);
+    }
+  }
+}
+
+async function handleBrowserAuditArtifactDownload(
+  auditId: string,
+  artifactId: string
+) {
+  const artifact = repository.getBrowserAuditArtifact(auditId, artifactId);
+  if (!artifact || !repository.getBrowserAudit(auditId)) {
+    return json({ error: 'Browser audit artifact not found' }, { status: 404 });
+  }
+
+  try {
+    const download = await artifactStore.openDownload(
+      artifact.storageKey,
+      artifact.byteSize
+    );
+    return new Response(download.body, {
+      status: 200,
+      headers: {
+        'cache-control': 'private, no-store',
+        'content-type': artifact.contentType,
+        'content-length': String(download.byteSize),
+        'content-disposition': `attachment; filename="${artifact.filename}"`,
+        'x-content-type-options': 'nosniff',
+        etag: `"sha256-${artifact.sha256}"`
+      }
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      service: 'webperf-api',
+      warning: 'browser_audit_artifact_file_unavailable',
+      auditId,
+      artifactId,
+      ...describeSafeError(error)
+    }));
+    return json({ error: 'Browser audit artifact not found' }, { status: 404 });
+  }
+}
+
+const parseArtifactByteSize = (value: string | null) => {
+  if (!value || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+};
+
+const readBearerToken = (authorization: string | null) =>
+  authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1] ?? null;
+
+const artifactUploadError = (
+  error: string,
+  status: number,
+  incidentId?: string
+) => json(
+  incidentId ? { error, incidentId } : { error },
+  { status, headers: { 'cache-control': 'no-store' } }
+);
+
 function handleJobStream(jobId: string) {
   return new Response(createJobSnapshotStream(jobId), {
     headers: {
@@ -3347,6 +3670,12 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     host: parsed.SELFHOST_API_HOST,
     port: parsed.SELFHOST_API_PORT,
     databasePath: parsed.SELFHOST_DATABASE_PATH,
+    artifactsPath: parsed.SELFHOST_ARTIFACTS_PATH,
+    artifactUploadBaseUrl: parsed.SELFHOST_ARTIFACT_UPLOAD_BASE_URL
+      ? resolveArtifactUploadBaseUrl(parsed.SELFHOST_ARTIFACT_UPLOAD_BASE_URL)
+      : undefined,
+    maxArtifactBytes: parsed.SELFHOST_MAX_ARTIFACT_BYTES,
+    artifactUploadTtlSeconds: parsed.SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS,
     retentionDays: parsed.SELFHOST_RETENTION_DAYS,
     migrationBackup: parsed.SELFHOST_MIGRATION_BACKUP,
     adminToken: parsed.SELFHOST_ADMIN_TOKEN,
@@ -3359,6 +3688,23 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     probeBaseUrls: parseRegionMap(parsed.SELFHOST_PROBE_BASE_URLS_JSON),
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS
   };
+}
+
+function resolveArtifactUploadBaseUrl(value: string) {
+  const url = new URL(value);
+
+  if (
+    !['http:', 'https:'].includes(url.protocol)
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    throw new Error('Artifact upload base URL must be a credential-free HTTP(S) origin');
+  }
+
+  return url.origin;
 }
 
 function getRegionAvailability() {

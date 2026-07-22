@@ -485,7 +485,7 @@
           <div class="flex items-center justify-between gap-2">
             <div>
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Artifacts</p>
-              <p class="text-sm text-muted">Binary download stays runtime-specific, but the metadata and pointers are persisted here.</p>
+              <p class="text-sm text-muted">Saved files are downloaded through the authenticated self-host console.</p>
             </div>
             <Badge tone="muted">{selectedAudit.result?.artifacts.length ?? 0} refs</Badge>
           </div>
@@ -497,7 +497,7 @@
                 <TableHead>Content type</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead class="text-right">Pointer</TableHead>
+                <TableHead class="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -512,6 +512,14 @@
                       <div class="flex items-center justify-end gap-2">
                         <span class="max-w-[16rem] truncate text-xs text-muted">{formatPointerLabel(artifact.url)}</span>
                         <CopyButton text={artifact.url}>Copy pointer</CopyButton>
+                        <Button
+                          download={artifact.filename ?? true}
+                          href={`/api/control/browser-audits/${encodeURIComponent(selectedAudit.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
+                          size="xs"
+                          variant="outline"
+                        >
+                          Download
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

@@ -32,7 +32,8 @@ const requiredPublicPaths = [
   '/v1/analyses',
   '/v1/analyses/{analysisId}',
   '/v1/browser-audits',
-  '/v1/browser-audits/{auditId}'
+  '/v1/browser-audits/{auditId}',
+  '/v1/browser-audits/{auditId}/artifacts/{artifactId}'
 ] as const;
 
 const requiredControlPaths = [

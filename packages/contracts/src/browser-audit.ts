@@ -4,6 +4,19 @@ import { regionCodeSchema } from './regions';
 export const browserAuditDslVersion = 'v1' as const;
 export const browserAuditProtocolVersion = 'v1' as const;
 export const browserAuditArtifactRegistryVersion = 'v1' as const;
+export const browserAuditArtifactLimit = 50;
+export const defaultBrowserAuditArtifactContentTypes = [
+  'application/gzip',
+  'application/json',
+  'application/zip',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/html',
+  'text/plain',
+  'video/mp4',
+  'video/webm'
+] as const;
 const browserAuditIdentifierSchema = z
   .string()
   .trim()
@@ -35,6 +48,20 @@ export const browserAuditStandardArtifactKindSchema = z.enum(
 );
 export type BrowserAuditStandardArtifactKind =
   (typeof standardBrowserAuditArtifactKinds)[number];
+export const standardBrowserAuditArtifactContentTypes: Record<
+  BrowserAuditStandardArtifactKind,
+  readonly string[]
+> = {
+  'lighthouse-json': ['application/json'],
+  'lighthouse-html': ['text/html'],
+  screenshot: ['image/jpeg', 'image/png', 'image/webp'],
+  trace: ['application/gzip', 'application/json', 'application/zip'],
+  har: ['application/json'],
+  filmstrip: ['application/zip', 'image/jpeg', 'image/png', 'image/webp'],
+  video: ['video/mp4', 'video/webm'],
+  waterfall: ['image/jpeg', 'image/png', 'image/webp'],
+  log: ['application/json', 'text/plain']
+};
 
 const browserAuditArtifactKindValueSchema = browserAuditIdentifierSchema;
 
@@ -368,11 +395,28 @@ export const browserAuditArtifactRefSchema = z.object({
     .default(browserAuditArtifactRegistryVersion),
   kind: browserAuditArtifactKindSchema,
   url: z.string().min(1),
+  filename: z.string().min(1).max(255).nullable().default(null),
   contentType: z.string().min(1).max(200),
   byteSize: z.number().int().nonnegative().nullable().default(null),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
   createdAt: z.string().datetime()
 });
 export type BrowserAuditArtifactRef = z.infer<typeof browserAuditArtifactRefSchema>;
+
+export const browserAuditArtifactLocatorSchema = z.object({
+  auditId: z.string().min(1).max(160),
+  artifactId: z.string().min(1).max(160)
+});
+export type BrowserAuditArtifactLocator = z.infer<typeof browserAuditArtifactLocatorSchema>;
+
+export const browserAuditArtifactDownloadRoute = {
+  method: 'get',
+  path: '/v1/browser-audits/{auditId}/artifacts/{artifactId}',
+  operationId: 'downloadBrowserAuditArtifact',
+  summary: 'Download browser audit artifact',
+  description: 'Streams a persisted Browser Audit artifact using self-host administrator authentication.',
+  tags: ['browserAudits']
+} as const;
 
 export const browserAuditToolchainComponentSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -429,7 +473,7 @@ const browserAuditNormalizedResultSchema = z
     extendedMetrics: browserAuditExtendedMetricsSchema,
     checkpoints: z.array(browserAuditCheckpointResultSchema).max(3).default([]),
     issues: z.array(browserAuditIssueSchema).default([]),
-    artifacts: z.array(browserAuditArtifactRefSchema).default([]),
+    artifacts: z.array(browserAuditArtifactRefSchema).max(browserAuditArtifactLimit).default([]),
     toolchain: browserAuditToolchainSchema,
     startedAt: z.string().datetime(),
     completedAt: z.string().datetime()
@@ -442,6 +486,19 @@ const browserAuditNormalizedResultSchema = z
         path: ['completedAt']
       });
     }
+
+    const artifactIds = new Set<string>();
+    result.artifacts.forEach((artifact, index) => {
+      if (artifactIds.has(artifact.id)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Browser Audit artifact id must be unique: ${artifact.id}`,
+          path: ['artifacts', index, 'id']
+        });
+      }
+
+      artifactIds.add(artifact.id);
+    });
   });
 
 export const browserAuditResultSchema = z.preprocess(
@@ -472,7 +529,10 @@ export type BrowserAuditExecutionSummary = z.infer<typeof browserAuditExecutionS
 
 export const browserAuditArtifactUploadConfigSchema = z.object({
   baseUrl: z.string().url(),
-  bearerToken: z.string().min(1)
+  bearerToken: z.string().min(1),
+  expiresAt: z.string().datetime(),
+  maxArtifactBytes: z.number().int().positive(),
+  allowedContentTypes: z.array(z.string().min(1).max(200)).min(1).max(32)
 });
 export type BrowserAuditArtifactUploadConfig = z.infer<typeof browserAuditArtifactUploadConfigSchema>;
 

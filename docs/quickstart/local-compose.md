@@ -60,6 +60,10 @@ bun run capture:console:baselines
 - `SELFHOST_ACTIVE_REGION_CODES_JSON`: active region list
 - `SELFHOST_PROBE_BASE_URLS_JSON`: region to probe URL map
 - `SELFHOST_DATABASE_PATH`: SQLite file path inside the API container
+- `SELFHOST_ARTIFACTS_PATH`: Browser Audit artifact root inside the API container
+- `SELFHOST_ARTIFACT_UPLOAD_BASE_URL`: internal API origin reachable by the runner
+- `SELFHOST_MAX_ARTIFACT_BYTES`: per-file upload limit
+- `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`: lifetime of scoped runner upload grants
 - `SELFHOST_MIGRATION_BACKUP`: set to `true` to create a verified snapshot before
   startup applies pending migrations to an existing database
 - `SELFHOST_SCHEDULER_API_BASE_URL`: base URL the scheduler polls
@@ -71,6 +75,8 @@ If you need direct host access for debugging, add a temporary port mapping in yo
 See [SQLite operations](../self-hosting/database-operations.md) before an
 upgrade or restore. It includes commands that operate directly on the Compose
 named volume without exposing SQLite over the network.
+Artifact backup and retention behavior is documented in
+[Browser Audit artifact storage](../self-hosting/artifacts.md).
 
 ## Compose Smoke Helpers
 
@@ -100,6 +106,10 @@ docker compose \
 
 When enabled, it is published on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
 When `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET` are configured, `POST /v1/browser-audits` queues work for the executor, which calls the optional runner and persists the result.
+Artifacts are written to `/data/artifacts` in the private data volume and are
+downloaded through the authenticated API/console. The size and upload lifetime
+can be tuned with `SELFHOST_MAX_ARTIFACT_BYTES` and
+`SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`.
 The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
 
 Example queued request once the worker profile is up:

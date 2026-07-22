@@ -67,6 +67,7 @@ That enables:
 - `GET /v1/browser-audits`
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
+- authenticated artifact downloads from the Browser Audit detail view
 
 See [browser-audit-lighthouse.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md) for the runtime profile and current queued-execution limits.
 

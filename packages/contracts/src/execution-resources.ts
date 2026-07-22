@@ -13,6 +13,7 @@ import {
   latencyJobDetailSchema,
   webhookAlertTargetSchema
 } from './public-api';
+import { browserAuditArtifactUploadConfigSchema } from './browser-audit';
 
 export const networkProbeExecutionPayloadSchema = z
   .object({
@@ -65,7 +66,8 @@ const browserAuditExecutionContextSchema = z.object({
   kind: z.literal('browser_audit'),
   executionJob: executionJobSchema,
   payload: browserAuditExecutionPayloadSchema,
-  audit: browserAuditResourceSchema
+  audit: browserAuditResourceSchema,
+  artifactUpload: browserAuditArtifactUploadConfigSchema
 });
 
 const webhookDeliveryExecutionContextSchema = z.object({

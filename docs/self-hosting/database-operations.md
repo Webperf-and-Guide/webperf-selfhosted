@@ -29,9 +29,12 @@ Useful options:
   the API starts and applies migrations automatically.
 - `selfhost:maintenance -- --retention-days <days>` overrides
   `SELFHOST_RETENTION_DAYS`; `--vacuum` opts into the blocking full compaction.
+- `selfhost:maintenance -- --artifacts <path>` selects an artifact root when it
+  differs from `SELFHOST_ARTIFACTS_PATH`.
 
 `selfhost:maintenance` removes expired terminal jobs, Check run history,
-terminal execution rows, and derived resources. It preserves non-terminal jobs
+terminal execution rows, derived resources, and orphaned artifact indexes and
+files. It preserves non-terminal jobs
 and Browser Audits that still have queued or leased execution work. It always
 runs `PRAGMA optimize` and truncates the WAL; full `VACUUM` is explicit because
 it needs additional free disk space and takes an exclusive write lock.
@@ -46,6 +49,10 @@ plus `PRAGMA foreign_key_check` before reporting success.
 Keep backups outside the live data volume and protect them like production
 secrets: a backup made before the encrypted-payload migration can contain
 legacy cleartext values.
+
+The SQLite backup contains artifact metadata but not artifact bytes. Back up
+`SELFHOST_ARTIFACTS_PATH` separately as part of the same stopped-writer recovery
+point. See [Browser Audit artifact storage](./artifacts.md).
 
 ## Restore
 

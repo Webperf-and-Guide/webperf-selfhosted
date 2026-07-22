@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@webperf/config": ["../../packages/config/src/index.ts"],
+      "@webperf/config/*": ["../../packages/config/src/*"],
+      "@webperf/contracts": ["../../packages/contracts/src/index.ts"],
+      "@webperf/contracts/*": ["../../packages/contracts/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

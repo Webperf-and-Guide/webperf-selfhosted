@@ -170,8 +170,10 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [ ] Add ordered migrations, WAL, busy timeout, foreign keys, and graceful
   close.
 - [x] Add the required `execution_jobs` columns, indexes, and atomic claim.
-- [ ] Implement lease renewal, expiry recovery, retry, idempotency, terminal
-  failure, and graceful shutdown in `apps/executor`.
+- [x] Add internal-only claim/start/renew/complete/fail transport plus
+  single-concurrency heartbeat and graceful claim shutdown in `apps/executor`.
+- [ ] Move network probe, Browser Audit, evaluation, and webhook handlers into
+  `apps/executor` with retry and idempotent result persistence.
 - [ ] Keep scheduler limited to authenticated due-check dispatch.
 - [ ] Add init/migrate/backup/restore/doctor/maintenance commands.
 - [ ] Add restart-recovery and scheduler-dispatch integration tests.

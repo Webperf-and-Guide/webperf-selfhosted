@@ -77,6 +77,9 @@ import {
   createRouteSetSchema,
   exportListResponseSchema,
   exportResourceSchema,
+  executionJobFailRequestSchema,
+  executionJobLeaseRequestSchema,
+  executionJobOwnerRequestSchema,
   jobListResponseSchema,
   listQuerySchema,
   propertyListResponseSchema,
@@ -149,6 +152,9 @@ type SelfhostRuntime = {
 
 type MutableTarget = LatencyJobTarget;
 type MutableJob = LatencyJobDetail;
+type ExecutionJobMutationAction = 'start' | 'renew' | 'complete' | 'fail';
+const executionJobMutationPathPattern =
+  /^\/internal\/execution-jobs\/([^/]+)\/(start|renew|complete|fail)$/;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -964,6 +970,19 @@ const routeRequest = async (request: Request) => {
       return handleDispatchScheduledProfiles(request, url);
     }
 
+    if (pathname === '/internal/execution-jobs/claim' && request.method === 'POST') {
+      return handleClaimExecutionJob(request);
+    }
+
+    const executionJobMatch = pathname.match(executionJobMutationPathPattern);
+    if (executionJobMatch?.[1] && executionJobMatch[2] && request.method === 'POST') {
+      return handleExecutionJobMutation(
+        executionJobMatch[1],
+        executionJobMatch[2] as ExecutionJobMutationAction,
+        request
+      );
+    }
+
     const propertyMatch = pathname.match(/^\/v1\/properties\/([^/]+)$/);
     if (propertyMatch?.[1]) {
       if (request.method === 'GET') {
@@ -1337,7 +1356,10 @@ export const server = Bun.serve({
       return unauthorized;
     }
 
-    const response = await redactJsonResponse(await routeRequest(request));
+    const routedResponse = await routeRequest(request);
+    const response = isExecutionTransportPath(new URL(request.url).pathname)
+      ? routedResponse
+      : await redactJsonResponse(routedResponse);
     return addCompatibilityDeprecationHeaders(request, response);
   }
 });
@@ -1400,6 +1422,113 @@ async function handleCreateJob(request: Request) {
     { status: 201 }
   );
 }
+
+async function handleClaimExecutionJob(request: Request) {
+  const body = await parseJsonBody<unknown>(request);
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const parsed = executionJobLeaseRequestSchema.safeParse(body.data);
+
+  if (!parsed.success) {
+    return json(
+      { error: 'Invalid execution lease request', issues: parsed.error.flatten() },
+      { status: 400, headers: { 'cache-control': 'no-store' } }
+    );
+  }
+
+  const executionJob = repository.claimExecutionJob(parsed.data);
+
+  if (!executionJob) {
+    return new Response(null, {
+      status: 204,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
+
+  return json(executionJob, {
+    status: 200,
+    headers: { 'cache-control': 'no-store' }
+  });
+}
+
+async function handleExecutionJobMutation(
+  executionJobId: string,
+  action: ExecutionJobMutationAction,
+  request: Request
+) {
+  const body = await parseJsonBody<unknown>(request);
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  if (action === 'start' || action === 'renew') {
+    const parsed = executionJobLeaseRequestSchema.safeParse(body.data);
+
+    if (!parsed.success) {
+      return json(
+        { error: 'Invalid execution lease request', issues: parsed.error.flatten() },
+        { status: 400, headers: { 'cache-control': 'no-store' } }
+      );
+    }
+
+    const executionJob = action === 'start'
+      ? repository.markExecutionJobRunning({ id: executionJobId, ...parsed.data })
+      : repository.renewExecutionJobLease({ id: executionJobId, ...parsed.data });
+    return executionJob
+      ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
+      : executionLeaseConflict();
+  }
+
+  if (action === 'complete') {
+    const parsed = executionJobOwnerRequestSchema.safeParse(body.data);
+
+    if (!parsed.success) {
+      return json(
+        { error: 'Invalid execution owner request', issues: parsed.error.flatten() },
+        { status: 400, headers: { 'cache-control': 'no-store' } }
+      );
+    }
+
+    const executionJob = repository.completeExecutionJob({
+      id: executionJobId,
+      leaseOwner: parsed.data.leaseOwner
+    });
+    return executionJob
+      ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
+      : executionLeaseConflict();
+  }
+
+  const parsed = executionJobFailRequestSchema.safeParse(body.data);
+
+  if (!parsed.success) {
+    return json(
+      { error: 'Invalid execution failure request', issues: parsed.error.flatten() },
+      { status: 400, headers: { 'cache-control': 'no-store' } }
+    );
+  }
+
+  const executionJob = repository.failExecutionJob({
+    id: executionJobId,
+    ...parsed.data
+  });
+  return executionJob
+    ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
+    : executionLeaseConflict();
+}
+
+const executionLeaseConflict = () =>
+  json(
+    { error: 'Execution lease is no longer owned or has expired' },
+    { status: 409, headers: { 'cache-control': 'no-store' } }
+  );
+
+const isExecutionTransportPath = (pathname: string) =>
+  pathname === '/internal/execution-jobs/claim'
+  || executionJobMutationPathPattern.test(pathname);
 
 async function handleCreateProperty(request: Request) {
   return handleUpsertProperty(request);

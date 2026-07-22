@@ -26,6 +26,10 @@
     "./selfhost-scheduler": {
       "types": "./src/selfhost-scheduler.ts",
       "import": "./src/selfhost-scheduler.ts"
+    },
+    "./selfhost-executor": {
+      "types": "./src/selfhost-executor.ts",
+      "import": "./src/selfhost-executor.ts"
     }
   },
   "peerDependencies": {

@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+export const executionJobIdSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+
 export const executionJobKindSchema = z.enum([
   'network_probe',
   'browser_audit',
@@ -47,9 +53,9 @@ export type ExecutionJobError = z.infer<typeof executionJobErrorSchema>;
 
 export const executionJobSchema = z
   .object({
-    id: z.string().min(1).max(160),
+    id: executionJobIdSchema,
     kind: executionJobKindSchema,
-    resourceId: z.string().min(1).max(160),
+    resourceId: executionJobIdSchema,
     status: executionJobStatusSchema,
     leaseOwner: z.string().min(1).max(160).nullable(),
     leaseExpiresAt: z.string().datetime().nullable(),
@@ -99,11 +105,28 @@ export const executionJobSchema = z
 export type ExecutionJob = z.infer<typeof executionJobSchema>;
 
 export const enqueueExecutionJobSchema = z.object({
-  id: z.string().min(1).max(160),
+  id: executionJobIdSchema,
   kind: executionJobKindSchema,
-  resourceId: z.string().min(1).max(160),
+  resourceId: executionJobIdSchema,
   maxAttempts: z.number().int().positive().max(20).default(3),
   availableAt: z.string().datetime().optional(),
   payload: jsonValueSchema
 });
 export type EnqueueExecutionJob = z.infer<typeof enqueueExecutionJobSchema>;
+
+export const executionJobLeaseRequestSchema = z.object({
+  leaseOwner: z.string().min(1).max(160),
+  leaseDurationMs: z.number().int().min(1_000).max(3_600_000)
+});
+export type ExecutionJobLeaseRequest = z.infer<typeof executionJobLeaseRequestSchema>;
+
+export const executionJobOwnerRequestSchema = z.object({
+  leaseOwner: z.string().min(1).max(160)
+});
+export type ExecutionJobOwnerRequest = z.infer<typeof executionJobOwnerRequestSchema>;
+
+export const executionJobFailRequestSchema = executionJobOwnerRequestSchema.extend({
+  error: executionJobErrorSchema,
+  retryDelayMs: z.number().int().min(0).max(86_400_000).optional()
+});
+export type ExecutionJobFailRequest = z.infer<typeof executionJobFailRequestSchema>;

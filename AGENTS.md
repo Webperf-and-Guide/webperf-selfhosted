@@ -51,6 +51,7 @@ Included here:
 - `apps/console`
 - `apps/api`
 - `apps/scheduler`
+- `apps/executor`
 - `apps/probe-rs`
 - `apps/browser-audit-lighthouse`
 - `packages/contracts`
@@ -136,6 +137,7 @@ Current repo state as of 2026-07-22:
 - the Rust probe now pins validated DNS addresses into reqwest across redirects, while the Lighthouse runner enforces public-network target/navigation/subresource checks plus download/new-window blocking and an explicit operator allowlist
 - `/v1/capabilities` now reports the implemented Fast Check metric surface, keeping TCP/TLS timing and TLS metadata disabled and null until they are actually measured
 - the durable execution foundation now defines public-safe execution job contracts and an encrypted SQLite `execution_jobs` state machine with atomic claim, lease renewal, expiry recovery, bounded retry, terminal failure, cancellation, and idempotent completion semantics
+- `apps/executor` now provides the internal-secret-authenticated claim/start/renew/complete/fail transport, a single-concurrency lease heartbeat, safe failure logging, and graceful stop-claiming behavior; execution handlers still move out of the API in the next hardening slice
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -144,6 +146,7 @@ Current local dev entrypoints:
 - `bun run dev:console`
 - `bun run dev:api`
 - `bun run dev:scheduler`
+- `bun run dev:executor`
 - `bun run dev:probe`
 - `bun run smoke:console`
 - `bun run smoke:console:parallel`

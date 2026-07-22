@@ -79,6 +79,17 @@
         "vite": "^8.0.5",
       },
     },
+    "apps/executor": {
+      "name": "webperf-executor",
+      "dependencies": {
+        "@webperf/config": "workspace:*",
+        "@webperf/contracts": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.11",
+        "typescript": "^5.9.3",
+      },
+    },
     "apps/scheduler": {
       "name": "webperf-scheduler",
       "dependencies": {
@@ -1080,6 +1091,8 @@
     "webperf-browser-audit-lighthouse": ["webperf-browser-audit-lighthouse@workspace:apps/browser-audit-lighthouse"],
 
     "webperf-console": ["webperf-console@workspace:apps/console"],
+
+    "webperf-executor": ["webperf-executor@workspace:apps/executor"],
 
     "webperf-scheduler": ["webperf-scheduler@workspace:apps/scheduler"],
 

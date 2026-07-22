@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { JobRepository } from '../src/repository';
 
 type MockProbeScenario = {
   latencyMs: number;
@@ -62,7 +63,7 @@ const fetch = Object.assign((
   }
 
   const headers = new Headers(request.headers);
-  const token = url.pathname === '/v1/scheduler/dispatch'
+  const token = url.pathname === '/v1/scheduler/dispatch' || url.pathname.startsWith('/internal/')
     ? credentials.internalSecret
     : credentials.adminToken;
   headers.set('authorization', `Bearer ${token}`);
@@ -176,6 +177,83 @@ describe('api service monitoring expansion', () => {
           })
         ).status
       ).toBe(401);
+
+      harness.repository.enqueueExecutionJob({
+        id: 'exec_http_transport',
+        kind: 'network_probe',
+        resourceId: 'job_http_transport',
+        maxAttempts: 3,
+        payload: {
+          jobId: 'job_http_transport',
+          headers: [{ name: 'Authorization', value: 'Bearer executor-needs-this-value' }]
+        }
+      });
+      expect(
+        (
+          await nativeFetch(`${harness.baseUrl}/internal/execution-jobs/claim`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+          })
+        ).status
+      ).toBe(401);
+      expect(
+        (
+          await nativeFetch(`${harness.baseUrl}/internal/execution-jobs/claim`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${testAdminToken}`,
+              'content-type': 'application/json'
+            },
+            body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+          })
+        ).status
+      ).toBe(401);
+
+      const claimResponse = await fetch(`${harness.baseUrl}/internal/execution-jobs/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+      });
+      expect(claimResponse.status).toBe(200);
+      expect(claimResponse.headers.get('cache-control')).toBe('no-store');
+      const claimedExecution = await claimResponse.json();
+      expect(claimedExecution.status).toBe('leased');
+      expect(claimedExecution.payload.headers[0].value).toBe(
+        'Bearer executor-needs-this-value'
+      );
+
+      const startExecutionResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/start`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+        }
+      );
+      expect(startExecutionResponse.status).toBe(200);
+      expect((await startExecutionResponse.json()).status).toBe('running');
+
+      const staleCompletionResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-stale' })
+        }
+      );
+      expect(staleCompletionResponse.status).toBe(409);
+
+      const completeExecutionResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http' })
+        }
+      );
+      expect(completeExecutionResponse.status).toBe(200);
+      expect((await completeExecutionResponse.json()).status).toBe('succeeded');
 
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);
@@ -1018,12 +1096,15 @@ const startSelfhostHarness = async (
     internalSecret: testInternalSecret
   });
   const modulePath = new URL(`../src/index.ts?instance=${crypto.randomUUID()}`, import.meta.url).href;
-  const module = (await import(modulePath)) as { server: { stop: (closeActiveConnections?: boolean) => void } };
+  const module = (await import(modulePath)) as {
+    server: { stop: (closeActiveConnections?: boolean) => void };
+    repository: JobRepository;
+  };
   startedServers.push(module.server);
 
   await waitForHealth(baseUrl);
 
-  return { baseUrl };
+  return { baseUrl, repository: module.repository };
 };
 
 const waitForHealth = async (baseUrl: string) => {

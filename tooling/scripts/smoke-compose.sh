@@ -121,7 +121,9 @@ if [[ "$profile" == "browser-audit" ]]; then
   done
   if [[ "$browser_health" != "healthy" ]]; then
     docker exec "$browser_container_id" bun -e '
-      const response = await fetch("http://127.0.0.1:8080/healthz");
+      const response = await fetch("http://127.0.0.1:8080/healthz", {
+        signal: AbortSignal.timeout(5000)
+      });
       const body = await response.text();
       console.error(body.slice(0, 4096));
     ' >&2 || true

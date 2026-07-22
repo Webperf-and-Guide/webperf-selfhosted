@@ -5,6 +5,7 @@ import {
   executionJobSchema,
   executionPayloadMaxDepth
 } from '../src/execution';
+import { networkProbeExecutionPayloadSchema } from '../src/execution-resources';
 
 const nestedPayload = (depth: number): JsonValue => {
   let value: JsonValue = 'leaf';
@@ -74,5 +75,24 @@ describe('execution job contracts', () => {
         completedAt: '2026-07-22T00:01:00.000Z'
       }).success
     ).toBe(true);
+  });
+
+  test('binds check and run context together for network executions', () => {
+    expect(
+      networkProbeExecutionPayloadSchema.safeParse({
+        version: 'v1',
+        jobIds: ['job_contract'],
+        checkId: null,
+        runId: null
+      }).success
+    ).toBe(true);
+    expect(
+      networkProbeExecutionPayloadSchema.safeParse({
+        version: 'v1',
+        jobIds: ['job_contract'],
+        checkId: 'check_contract',
+        runId: null
+      }).success
+    ).toBe(false);
   });
 });

@@ -172,6 +172,8 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Add the required `execution_jobs` columns, indexes, and atomic claim.
 - [x] Add internal-only claim/start/renew/complete/fail transport plus
   single-concurrency heartbeat and graceful claim shutdown in `apps/executor`.
+- [x] Add lease-bound context/result/follow-up transport so handlers can persist
+  domain results atomically without opening SQLite from the executor.
 - [ ] Move network probe, Browser Audit, evaluation, and webhook handlers into
   `apps/executor` with retry and idempotent result persistence.
 - [ ] Keep scheduler limited to authenticated due-check dispatch.

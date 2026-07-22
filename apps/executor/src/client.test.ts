@@ -106,4 +106,73 @@ describe('executor API client', () => {
     expect(error).toBeInstanceOf(ExecutorApiError);
     expect((error as ExecutorApiError).cause).toBe(networkError);
   });
+
+  test('persists results and enqueues follow-ups through lease-bound routes', async () => {
+    const requests: Request[] = [];
+    const client = createExecutorApiClient({
+      baseUrl: 'http://api.test:8788',
+      internalSecret: 'executor-client-internal-secret',
+      fetchImpl: (async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1]
+      ) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        return request.url.endsWith('/result')
+          ? new Response(null, { status: 204 })
+          : Response.json({ jobs: [leasedJob] }, { status: 201 });
+      }) as unknown as typeof fetch
+    });
+
+    await client.saveResult('exec_client', {
+      leaseOwner: 'executor-client',
+      result: {
+        kind: 'webhook_delivery',
+        run: {
+          id: 'run_client',
+          profileId: 'check_client',
+          trigger: 'manual',
+          createdAt: '2026-07-22T00:00:00.000Z',
+          routeCount: 1,
+          routes: [{
+            routeId: 'route_client',
+            routeLabel: 'Home',
+            url: 'https://example.com/',
+            jobId: 'job_client',
+            browserAudit: null
+          }],
+          browserAuditSummary: null,
+          evaluation: null,
+          alertDeliveries: []
+        }
+      }
+    });
+    const followups = await client.enqueueFollowups('exec_client', {
+      leaseOwner: 'executor-client',
+      jobs: [{
+        id: 'exec_followup',
+        kind: 'webhook_delivery',
+        resourceId: 'run_client',
+        maxAttempts: 3,
+        payload: {
+          version: 'v1',
+          runId: 'run_client',
+          target: {
+            id: 'webhook_client',
+            name: 'Client hook',
+            url: 'https://hooks.example.com/',
+            enabled: true,
+            secret: null
+          },
+          body: { type: 'check.alert' }
+        }
+      }]
+    });
+
+    expect(followups.jobs).toEqual([leasedJob]);
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      '/internal/execution-jobs/exec_client/result',
+      '/internal/execution-jobs/exec_client/followups'
+    ]);
+  });
 });

@@ -43,6 +43,8 @@ import type {
   ReportExportFormat,
   ExportResource,
   ExportListResponse,
+  ExecutionResourceContext,
+  ExecutionResourceResult,
   RouteSet,
   RouteSetListResponse,
   SchedulerDispatchResponse,
@@ -81,6 +83,14 @@ import {
   executionJobIdSchema,
   executionJobLeaseRequestSchema,
   executionJobOwnerRequestSchema,
+  executionFollowupsRequestSchema,
+  executionFollowupsResponseSchema,
+  executionResourceContextRequestSchema,
+  executionResourceContextSchema,
+  executionResourceResultRequestSchema,
+  browserAuditExecutionPayloadSchema,
+  networkProbeExecutionPayloadSchema,
+  webhookDeliveryExecutionPayloadSchema,
   jobListResponseSchema,
   listQuerySchema,
   propertyListResponseSchema,
@@ -155,8 +165,11 @@ type SelfhostRuntime = {
 type MutableTarget = LatencyJobTarget;
 type MutableJob = LatencyJobDetail;
 type ExecutionJobMutationAction = 'start' | 'renew' | 'complete' | 'fail';
+type ExecutionJobResourceAction = 'context' | 'result' | 'followups';
 const executionJobMutationPathPattern =
   /^\/internal\/execution-jobs\/([^/]+)\/(start|renew|complete|fail)$/;
+const executionJobResourcePathPattern =
+  /^\/internal\/execution-jobs\/([^/]+)\/(context|result|followups)$/;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -976,6 +989,24 @@ const routeRequest = async (request: Request) => {
       return withExecutionTransportErrors('claim', () => handleClaimExecutionJob(request));
     }
 
+    const executionResourceMatch = pathname.match(executionJobResourcePathPattern);
+    if (executionResourceMatch?.[1] && executionResourceMatch[2] && request.method === 'POST') {
+      const executionJobId = executionJobIdSchema.safeParse(executionResourceMatch[1]);
+
+      if (!executionJobId.success) {
+        return json(
+          { error: 'Invalid execution job ID' },
+          { status: 400, headers: { 'cache-control': 'no-store' } }
+        );
+      }
+
+      const action = executionResourceMatch[2] as ExecutionJobResourceAction;
+      return withExecutionTransportErrors(
+        action,
+        () => handleExecutionResourceOperation(executionJobId.data, action, request)
+      );
+    }
+
     const executionJobMatch = pathname.match(executionJobMutationPathPattern);
     if (executionJobMatch?.[1] && executionJobMatch[2] && request.method === 'POST') {
       const executionJobId = executionJobIdSchema.safeParse(executionJobMatch[1]);
@@ -1523,6 +1554,243 @@ async function handleExecutionJobMutation(
     : executionLeaseConflict();
 }
 
+async function handleExecutionResourceOperation(
+  executionJobId: string,
+  action: ExecutionJobResourceAction,
+  request: Request
+) {
+  if (action === 'context') {
+    const body = await parseExecutionTransportBody(
+      request,
+      executionResourceContextRequestSchema,
+      'Invalid execution context request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+    return executionJob
+      ? json(buildExecutionResourceContext(executionJob), {
+          headers: { 'cache-control': 'no-store' }
+        })
+      : executionLeaseConflict();
+  }
+
+  if (action === 'result') {
+    const body = await parseExecutionTransportBody(
+      request,
+      executionResourceResultRequestSchema,
+      'Invalid execution result request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+
+    if (!executionJob) {
+      return executionLeaseConflict();
+    }
+
+    if (executionJob.kind !== body.data.result.kind) {
+      return json(
+        { error: 'Execution result kind does not match the leased job' },
+        { status: 409, headers: { 'cache-control': 'no-store' } }
+      );
+    }
+
+    persistExecutionResourceResult(executionJob, body.data.result);
+    return new Response(null, {
+      status: 204,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
+
+  const body = await parseExecutionTransportBody(
+    request,
+    executionFollowupsRequestSchema,
+    'Invalid execution follow-up request'
+  );
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+
+  if (!executionJob) {
+    return executionLeaseConflict();
+  }
+
+  const parentPayload = executionJob.kind === 'network_probe'
+    ? networkProbeExecutionPayloadSchema.parse(executionJob.payload)
+    : null;
+
+  if (
+    !parentPayload?.runId
+    || body.data.jobs.some((job) => {
+      if (job.kind !== 'webhook_delivery' || job.resourceId !== parentPayload.runId) {
+        return true;
+      }
+
+      const payload = webhookDeliveryExecutionPayloadSchema.safeParse(job.payload);
+      return !payload.success || payload.data.runId !== parentPayload.runId;
+    })
+  ) {
+    return json(
+      { error: 'Only run-owned webhook follow-ups may be enqueued' },
+      { status: 409, headers: { 'cache-control': 'no-store' } }
+    );
+  }
+
+  const followups = repository.enqueueExecutionJobs(body.data.jobs);
+  return json(
+    executionFollowupsResponseSchema.parse({ jobs: followups }),
+    { status: 201, headers: { 'cache-control': 'no-store' } }
+  );
+}
+
+function getOwnedRunningExecutionJob(executionJobId: string, leaseOwner: string) {
+  const executionJob = repository.getExecutionJob(executionJobId);
+  const now = new Date().toISOString();
+
+  if (
+    !executionJob
+    || executionJob.status !== 'running'
+    || executionJob.leaseOwner !== leaseOwner
+    || !executionJob.leaseExpiresAt
+    || executionJob.leaseExpiresAt <= now
+  ) {
+    return null;
+  }
+
+  return executionJob;
+}
+
+function buildExecutionResourceContext(
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>
+): ExecutionResourceContext {
+  if (executionJob.kind === 'network_probe') {
+    const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
+    const expectedResourceId = payload.runId ?? payload.jobIds[0];
+
+    if (executionJob.resourceId !== expectedResourceId) {
+      throw new Error('Network execution resource does not match its payload');
+    }
+
+    const jobs = payload.jobIds.map((jobId) => repository.getJob(jobId));
+
+    if (jobs.some((job) => job === null)) {
+      throw new Error('Network execution references a missing job');
+    }
+
+    const check = payload.checkId ? repository.getCheckProfile(payload.checkId) : null;
+    const run = payload.runId ? repository.getCheckProfileRun(payload.runId) : null;
+
+    if ((payload.checkId && !check) || (payload.runId && !run)) {
+      throw new Error('Network execution references a missing check or run');
+    }
+
+    const baselineRun = check && run ? resolveBaselineRun(check) : null;
+    const comparedRun = check && run
+      ? baselineRun && baselineRun.id !== run.id
+        ? baselineRun
+        : findPreviousRun(check.id, run.id)
+      : null;
+    const comparisonMode = comparedRun
+      ? baselineRun?.id === comparedRun.id
+        ? 'baseline' as const
+        : 'latest_previous' as const
+      : null;
+
+    return executionResourceContextSchema.parse({
+      kind: 'network_probe',
+      executionJob,
+      payload,
+      jobs,
+      check,
+      run,
+      comparedRun,
+      comparedJobs: comparedRun ? getJobsForRun(comparedRun) : [],
+      comparisonMode
+    });
+  }
+
+  if (executionJob.kind === 'browser_audit') {
+    const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+    const audit = repository.getBrowserAudit(payload.auditId);
+
+    if (executionJob.resourceId !== payload.auditId || !audit) {
+      throw new Error('Browser audit execution references a missing resource');
+    }
+
+    return executionResourceContextSchema.parse({
+      kind: 'browser_audit',
+      executionJob,
+      payload,
+      audit
+    });
+  }
+
+  const payload = webhookDeliveryExecutionPayloadSchema.parse(executionJob.payload);
+  const run = repository.getCheckProfileRun(payload.runId);
+
+  if (executionJob.resourceId !== payload.runId || !run) {
+    throw new Error('Webhook execution references a missing run');
+  }
+
+  return executionResourceContextSchema.parse({
+    kind: 'webhook_delivery',
+    executionJob,
+    payload,
+    run
+  });
+}
+
+function persistExecutionResourceResult(
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  result: ExecutionResourceResult
+) {
+  if (result.kind === 'network_probe') {
+    const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
+    const expectedJobIds = new Set(payload.jobIds);
+
+    if (
+      result.jobs.length !== expectedJobIds.size
+      || result.jobs.some((job) => !expectedJobIds.has(job.id))
+      || Boolean(result.run) !== Boolean(payload.runId)
+      || (result.run && (result.run.id !== payload.runId || result.run.profileId !== payload.checkId))
+    ) {
+      throw new Error('Network execution result does not match its payload');
+    }
+
+    repository.saveExecutionResourceResult(result);
+    return;
+  }
+
+  if (result.kind === 'browser_audit') {
+    const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+
+    if (result.audit.id !== payload.auditId) {
+      throw new Error('Browser audit result does not match its payload');
+    }
+
+    repository.saveExecutionResourceResult(result);
+    return;
+  }
+
+  const payload = webhookDeliveryExecutionPayloadSchema.parse(executionJob.payload);
+
+  if (result.run.id !== payload.runId) {
+    throw new Error('Webhook result does not match its payload');
+  }
+
+  repository.saveExecutionResourceResult(result);
+}
+
 const executionLeaseConflict = () =>
   json(
     { error: 'Execution lease is no longer owned or has expired' },
@@ -1531,7 +1799,8 @@ const executionLeaseConflict = () =>
 
 const isExecutionTransportPath = (pathname: string) =>
   pathname === '/internal/execution-jobs/claim'
-  || executionJobMutationPathPattern.test(pathname);
+  || executionJobMutationPathPattern.test(pathname)
+  || executionJobResourcePathPattern.test(pathname);
 
 async function parseExecutionTransportBody<T>(
   request: Request,
@@ -1567,7 +1836,7 @@ async function parseExecutionTransportBody<T>(
 }
 
 const withExecutionTransportErrors = async (
-  operation: 'claim' | ExecutionJobMutationAction,
+  operation: 'claim' | ExecutionJobMutationAction | ExecutionJobResourceAction,
   execute: () => Promise<Response>
 ) => {
   try {

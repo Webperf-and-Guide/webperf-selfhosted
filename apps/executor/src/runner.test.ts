@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ExecutionJob } from '@webperf/contracts';
-import { ExecutorApiError, type ExecutorApiClient } from './client';
+import { ExecutorApiError, type ExecutorLeaseClient } from './client';
 import { processExecutionJob, runExecutor, type ExecutorLogger } from './runner';
 
 const queuedJob: ExecutionJob = {
@@ -55,7 +55,7 @@ describe('executor runner', () => {
     const renewed = new Promise<void>((resolve) => {
       resolveRenewed = resolve;
     });
-    const client: ExecutorApiClient = {
+    const client: ExecutorLeaseClient = {
       claim: async () => {
         calls.push('claim');
         if (claimed) return null;
@@ -107,7 +107,7 @@ describe('executor runner', () => {
     const controller = new AbortController();
     const testLogger = logger();
     let persistedMessage: string | undefined;
-    const client: ExecutorApiClient = {
+    const client: ExecutorLeaseClient = {
       claim: async () => queuedJob,
       start: async () => runningJob,
       renew: async () => runningJob,
@@ -147,7 +147,7 @@ describe('executor runner', () => {
   test('does not fail a job after completion is rejected for a stale lease', async () => {
     const testLogger = logger();
     let failCalled = false;
-    const client: ExecutorApiClient = {
+    const client: ExecutorLeaseClient = {
       claim: async () => null,
       start: async () => runningJob,
       renew: async () => runningJob,
@@ -181,7 +181,7 @@ describe('executor runner', () => {
     const testLogger = logger();
     let aborted = false;
     let failureCode: string | undefined;
-    const client: ExecutorApiClient = {
+    const client: ExecutorLeaseClient = {
       claim: async () => null,
       start: async () => runningJob,
       renew: async () => runningJob,
@@ -231,7 +231,7 @@ describe('executor runner', () => {
     const controller = new AbortController();
     const testLogger = logger();
     let claimCount = 0;
-    const client: ExecutorApiClient = {
+    const client: ExecutorLeaseClient = {
       claim: async () => {
         claimCount += 1;
         if (claimCount === 1) {

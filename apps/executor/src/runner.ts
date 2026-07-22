@@ -1,5 +1,5 @@
 import type { ExecutionJob, ExecutionJobError } from '@webperf/contracts';
-import { ExecutorApiError, type ExecutorApiClient } from './client';
+import { ExecutorApiError, type ExecutorLeaseClient } from './client';
 import { describeSafeError } from './diagnostics';
 
 export type ExecutionHandler = (job: ExecutionJob, signal: AbortSignal) => Promise<void>;
@@ -34,7 +34,7 @@ export const runExecutor = async ({
   logger = consoleExecutorLogger,
   random = Math.random
 }: {
-  client: ExecutorApiClient;
+  client: ExecutorLeaseClient;
   handler: ExecutionHandler;
   leaseOwner: string;
   leaseDurationMs: number;
@@ -104,7 +104,7 @@ export const processExecutionJob = async ({
   maxExecutionMs,
   logger
 }: {
-  client: ExecutorApiClient;
+  client: ExecutorLeaseClient;
   handler: ExecutionHandler;
   executionJob: ExecutionJob;
   lease: { leaseOwner: string; leaseDurationMs: number };
@@ -221,7 +221,7 @@ const renewLeaseUntilStopped = async ({
   stopSignal,
   onLeaseLost
 }: {
-  client: ExecutorApiClient;
+  client: ExecutorLeaseClient;
   executionJob: ExecutionJob;
   lease: { leaseOwner: string; leaseDurationMs: number };
   heartbeatIntervalMs: number;

@@ -8,6 +8,7 @@ import type {
   EnqueueExecutionJob,
   ExecutionJob,
   ExecutionJobError,
+  ExecutionResourceResult,
   ExportResource,
   LatencyJob,
   LatencyJobDetail,
@@ -81,7 +82,9 @@ export type JobRepository = {
   getBrowserAudit(id: string): BrowserAuditResource | null;
   listBrowserAudits(): BrowserAuditResource[];
   saveBrowserAudit(browserAudit: BrowserAuditResource): void;
+  saveExecutionResourceResult(result: ExecutionResourceResult): void;
   enqueueExecutionJob(input: EnqueueExecutionJob, now?: Date): ExecutionJob;
+  enqueueExecutionJobs(inputs: EnqueueExecutionJob[], now?: Date): ExecutionJob[];
   getExecutionJob(id: string): ExecutionJob | null;
   listExecutionJobs(): ExecutionJob[];
   claimExecutionJob(input: ExecutionJobLeaseInput, now?: Date): ExecutionJob | null;
@@ -630,6 +633,69 @@ export const createSqliteJobRepository = ({
     return (result.changes ?? 0) > 0;
   };
 
+  const persistJob = (job: LatencyJobDetail) => {
+    saveStatement.run(
+      job.id,
+      redactUrlQuery(job.url),
+      job.status,
+      job.requestedAt,
+      new Date().toISOString(),
+      storageCrypto.stringify(job)
+    );
+  };
+
+  const persistCheckProfileRun = (run: CheckProfileRun) => {
+    saveCheckProfileRunStatement.run(
+      run.id,
+      run.profileId,
+      run.createdAt,
+      storageCrypto.stringify(run)
+    );
+  };
+
+  const persistBrowserAudit = (browserAudit: BrowserAuditResource) => {
+    saveEntity('browser_audit', {
+      ...browserAudit,
+      createdAt: browserAudit.requestedAt,
+      updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
+    });
+  };
+
+  const enqueueExecution = (input: EnqueueExecutionJob, now: Date) => {
+    const parsed = enqueueExecutionJobSchema.parse(input);
+    const nowIso = now.toISOString();
+    const availableAt = parsed.availableAt
+      ? new Date(parsed.availableAt).toISOString()
+      : nowIso;
+    const row = enqueueExecutionJobStatement.get(
+      parsed.id,
+      parsed.kind,
+      parsed.resourceId,
+      parsed.maxAttempts,
+      availableAt,
+      storageCrypto.stringify(parsed.payload),
+      nowIso,
+      nowIso
+    );
+    const persisted = row ?? getExecutionJobStatement.get(parsed.id);
+
+    if (!persisted) {
+      throw new Error('Execution job could not be persisted');
+    }
+
+    const executionJob = parseExecutionJob(persisted);
+
+    if (!executionJob) {
+      throw new Error('Persisted execution job could not be decoded');
+    }
+
+    if (executionJob.kind !== parsed.kind || executionJob.resourceId !== parsed.resourceId) {
+      throw new Error('Execution job id already belongs to a different resource');
+    }
+
+    return executionJob;
+  };
+
   return {
     getJob(id) {
       const row = getStatement.get(id);
@@ -653,14 +719,7 @@ export const createSqliteJobRepository = ({
         }));
     },
     saveJob(job) {
-      saveStatement.run(
-        job.id,
-        redactUrlQuery(job.url),
-        job.status,
-        job.requestedAt,
-        new Date().toISOString(),
-        storageCrypto.stringify(job)
-      );
+      persistJob(job);
     },
     pruneJobsOlderThan(retentionDays, now = new Date()) {
       const cutoff = new Date(now);
@@ -736,12 +795,7 @@ export const createSqliteJobRepository = ({
         .filter((run): run is CheckProfileRun => run !== null);
     },
     saveCheckProfileRun(run) {
-      saveCheckProfileRunStatement.run(
-        run.id,
-        run.profileId,
-        run.createdAt,
-        storageCrypto.stringify(run)
-      );
+      persistCheckProfileRun(run);
     },
     getComparison(id) {
       return getEntity('comparison', id, comparisonResourceSchema);
@@ -786,45 +840,36 @@ export const createSqliteJobRepository = ({
       return listEntities('browser_audit', browserAuditResourceSchema);
     },
     saveBrowserAudit(browserAudit) {
-      saveEntity('browser_audit', {
-        ...browserAudit,
-        createdAt: browserAudit.requestedAt,
-        updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
+      persistBrowserAudit(browserAudit);
+    },
+    saveExecutionResourceResult(result) {
+      const save = db.transaction(() => {
+        if (result.kind === 'network_probe') {
+          for (const job of result.jobs) {
+            persistJob(job);
+          }
+
+          if (result.run) {
+            persistCheckProfileRun(result.run);
+          }
+          return;
+        }
+
+        if (result.kind === 'browser_audit') {
+          persistBrowserAudit(result.audit);
+          return;
+        }
+
+        persistCheckProfileRun(result.run);
       });
+      save();
     },
     enqueueExecutionJob(input, now = new Date()) {
-      const parsed = enqueueExecutionJobSchema.parse(input);
-      const nowIso = now.toISOString();
-      const availableAt = parsed.availableAt
-        ? new Date(parsed.availableAt).toISOString()
-        : nowIso;
-      const row = enqueueExecutionJobStatement.get(
-        parsed.id,
-        parsed.kind,
-        parsed.resourceId,
-        parsed.maxAttempts,
-        availableAt,
-        storageCrypto.stringify(parsed.payload),
-        nowIso,
-        nowIso
-      );
-      const persisted = row ?? getExecutionJobStatement.get(parsed.id);
-
-      if (!persisted) {
-        throw new Error('Execution job could not be persisted');
-      }
-
-      const executionJob = parseExecutionJob(persisted);
-
-      if (!executionJob) {
-        throw new Error('Persisted execution job could not be decoded');
-      }
-
-      if (executionJob.kind !== parsed.kind || executionJob.resourceId !== parsed.resourceId) {
-        throw new Error('Execution job id already belongs to a different resource');
-      }
-
-      return executionJob;
+      return enqueueExecution(input, now);
+    },
+    enqueueExecutionJobs(inputs, now = new Date()) {
+      const enqueue = db.transaction(() => inputs.map((input) => enqueueExecution(input, now)));
+      return enqueue();
     },
     getExecutionJob(id) {
       const row = getExecutionJobStatement.get(id);

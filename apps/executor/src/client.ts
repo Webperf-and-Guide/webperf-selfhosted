@@ -1,17 +1,37 @@
 import type {
+  ExecutionFollowupsRequest,
+  ExecutionFollowupsResponse,
   ExecutionJob,
   ExecutionJobFailRequest,
   ExecutionJobLeaseRequest,
-  ExecutionJobOwnerRequest
+  ExecutionJobOwnerRequest,
+  ExecutionResourceContext,
+  ExecutionResourceResultRequest
 } from '@webperf/contracts';
-import { executionJobSchema } from '@webperf/contracts';
+import {
+  executionFollowupsResponseSchema,
+  executionJobSchema,
+  executionResourceContextSchema
+} from '@webperf/contracts';
 
-export type ExecutorApiClient = {
+export type ExecutorLeaseClient = {
   claim(input: ExecutionJobLeaseRequest): Promise<ExecutionJob | null>;
   start(id: string, input: ExecutionJobLeaseRequest): Promise<ExecutionJob>;
   renew(id: string, input: ExecutionJobLeaseRequest): Promise<ExecutionJob>;
   complete(id: string, input: ExecutionJobOwnerRequest): Promise<ExecutionJob>;
   fail(id: string, input: ExecutionJobFailRequest): Promise<ExecutionJob>;
+};
+
+export type ExecutorApiClient = ExecutorLeaseClient & {
+  context(id: string, input: ExecutionJobOwnerRequest): Promise<ExecutionResourceContext>;
+  saveResult(id: string, input: ExecutionResourceResultRequest): Promise<void>;
+  enqueueFollowups(id: string, input: ExecutionFollowupsRequest): Promise<ExecutionFollowupsResponse>;
+};
+
+type ResponseSchema<T> = {
+  safeParse(value: unknown):
+    | { success: true; data: T }
+    | { success: false };
 };
 
 export class ExecutorApiError extends Error {
@@ -66,11 +86,12 @@ export const createExecutorApiClient = ({
     throw new Error('Executor API base URL must be a credential-free HTTP(S) origin');
   }
 
-  const request = async (
+  const request = async <T>(
     path: string,
-    body: ExecutionJobLeaseRequest | ExecutionJobOwnerRequest | ExecutionJobFailRequest,
+    body: unknown,
+    schema: ResponseSchema<T> | null,
     allowEmpty: boolean
-  ) => {
+  ): Promise<T | null> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 
@@ -96,6 +117,10 @@ export const createExecutorApiClient = ({
         );
       }
 
+      if (!schema) {
+        throw new ExecutorApiError('Executor API returned an unexpected response body', response.status);
+      }
+
       let payload: unknown;
 
       try {
@@ -108,10 +133,10 @@ export const createExecutorApiClient = ({
         );
       }
 
-      const parsed = executionJobSchema.safeParse(payload);
+      const parsed = schema.safeParse(payload);
 
       if (!parsed.success) {
-        throw new ExecutorApiError('Executor API returned an invalid execution job', response.status);
+        throw new ExecutorApiError('Executor API returned an invalid response payload', response.status);
       }
 
       return parsed.data;
@@ -140,6 +165,7 @@ export const createExecutorApiClient = ({
     const executionJob = await request(
       `/internal/execution-jobs/${encodeURIComponent(id)}/${action}`,
       body,
+      executionJobSchema,
       false
     );
 
@@ -151,10 +177,46 @@ export const createExecutorApiClient = ({
   };
 
   return {
-    claim: (input) => request('/internal/execution-jobs/claim', input, true),
+    claim: (input) => request('/internal/execution-jobs/claim', input, executionJobSchema, true),
     start: (id, input) => mutate(id, 'start', input),
     renew: (id, input) => mutate(id, 'renew', input),
     complete: (id, input) => mutate(id, 'complete', input),
-    fail: (id, input) => mutate(id, 'fail', input)
+    fail: (id, input) => mutate(id, 'fail', input),
+    context: async (id, input) => {
+      const context = await request(
+        `/internal/execution-jobs/${encodeURIComponent(id)}/context`,
+        input,
+        executionResourceContextSchema,
+        false
+      );
+
+      if (!context) {
+        throw new ExecutorApiError('Executor API returned an empty context response', null);
+      }
+
+      return context;
+    },
+    saveResult: async (id, input) => {
+      await request(
+        `/internal/execution-jobs/${encodeURIComponent(id)}/result`,
+        input,
+        null,
+        true
+      );
+    },
+    enqueueFollowups: async (id, input) => {
+      const followups = await request(
+        `/internal/execution-jobs/${encodeURIComponent(id)}/followups`,
+        input,
+        executionFollowupsResponseSchema,
+        false
+      );
+
+      if (!followups) {
+        throw new ExecutorApiError('Executor API returned an empty follow-up response', null);
+      }
+
+      return followups;
+    }
   };
 };

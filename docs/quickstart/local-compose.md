@@ -60,11 +60,17 @@ bun run capture:console:baselines
 - `SELFHOST_ACTIVE_REGION_CODES_JSON`: active region list
 - `SELFHOST_PROBE_BASE_URLS_JSON`: region to probe URL map
 - `SELFHOST_DATABASE_PATH`: SQLite file path inside the API container
+- `SELFHOST_MIGRATION_BACKUP`: set to `true` to create a verified snapshot before
+  startup applies pending migrations to an existing database
 - `SELFHOST_SCHEDULER_API_BASE_URL`: base URL the scheduler polls
 - `SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS`: scheduler polling interval
 
 The probe is intentionally not published on a host port by default.
 If you need direct host access for debugging, add a temporary port mapping in your local Compose override instead of exposing it permanently.
+
+See [SQLite operations](../self-hosting/database-operations.md) before an
+upgrade or restore. It includes commands that operate directly on the Compose
+named volume without exposing SQLite over the network.
 
 ## Compose Smoke Helpers
 

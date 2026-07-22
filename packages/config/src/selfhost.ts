@@ -17,6 +17,10 @@ export const selfhostApiEnvSchema = z.object({
     (value) => value ?? '30',
     z.coerce.number().int().positive()
   ),
+  SELFHOST_MIGRATION_BACKUP: z.preprocess(
+    (value) => value ?? 'false',
+    z.enum(['true', 'false']).transform((value) => value === 'true')
+  ),
   SELFHOST_ADMIN_TOKEN: z.string().trim().min(16),
   SELFHOST_ADMIN_TOKEN_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
   SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
@@ -39,6 +43,7 @@ export const parseSelfhostApiVars = (
     SELFHOST_API_PORT: input.SELFHOST_API_PORT,
     SELFHOST_DATABASE_PATH: input.SELFHOST_DATABASE_PATH,
     SELFHOST_RETENTION_DAYS: input.SELFHOST_RETENTION_DAYS,
+    SELFHOST_MIGRATION_BACKUP: input.SELFHOST_MIGRATION_BACKUP,
     SELFHOST_ADMIN_TOKEN: input.SELFHOST_ADMIN_TOKEN,
     SELFHOST_ADMIN_TOKEN_NEXT: input.SELFHOST_ADMIN_TOKEN_NEXT,
     SELFHOST_INTERNAL_SECRET: input.SELFHOST_INTERNAL_SECRET,

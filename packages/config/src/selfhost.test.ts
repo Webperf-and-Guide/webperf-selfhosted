@@ -16,7 +16,14 @@ const executionSecrets = {
 describe('strict self-host configuration', () => {
   test('requires every production API secret and does not invent fallbacks', () => {
     expect(() => parseSelfhostApiVars({})).toThrow();
-    expect(parseSelfhostApiVars(requiredApiSecrets)).toMatchObject(requiredApiSecrets);
+    expect(parseSelfhostApiVars(requiredApiSecrets)).toMatchObject({
+      ...requiredApiSecrets,
+      SELFHOST_MIGRATION_BACKUP: false
+    });
+    expect(parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_MIGRATION_BACKUP: 'true'
+    }).SELFHOST_MIGRATION_BACKUP).toBe(true);
   });
 
   test('requires server-side console, scheduler, and executor credentials', () => {

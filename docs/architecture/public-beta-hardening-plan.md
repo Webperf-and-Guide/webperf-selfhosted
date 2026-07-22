@@ -168,7 +168,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 3. Executor and SQLite leases
 
-- [ ] Add ordered migrations, WAL, busy timeout, foreign keys, and graceful
+- [x] Add ordered migrations, WAL, busy timeout, foreign keys, and graceful
   close.
 - [x] Add the required `execution_jobs` columns, indexes, and atomic claim.
 - [x] Add internal-only claim/start/renew/complete/fail transport plus
@@ -180,7 +180,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Move Browser Audit execution into `apps/executor` and make API creation
   asynchronous.
 - [ ] Keep scheduler limited to authenticated due-check dispatch.
-- [ ] Add init/migrate/backup/restore/doctor/maintenance commands.
+- [x] Add init/migrate/backup/restore/doctor/maintenance commands.
 - [ ] Add restart-recovery and scheduler-dispatch integration tests.
 - [x] Add a Sampo changeset for durable execution; extend it with database
   operations before this phase closes.

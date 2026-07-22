@@ -35,6 +35,7 @@ See:
 - [docs/github-launch.md](docs/github-launch.md)
 - [SECURITY.md](SECURITY.md)
 - [self-host authentication and secrets](docs/security/auth-and-secrets.md)
+- [SQLite backup, restore, and maintenance](docs/self-hosting/database-operations.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
@@ -79,6 +80,10 @@ Provider-specific deployment walkthroughs belong on `webperf.and.guide`, not in 
 ```bash
 bun run check
 bun run selfhost:init
+bun run selfhost:migrate
+bun run selfhost:backup
+bun run selfhost:doctor
+bun run selfhost:maintenance
 bun run dev:browser-audit-lighthouse
 bun run dev:parallel
 bun run smoke:console

@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import type {
   AnalysisResource,
   BrowserAuditResource,
@@ -32,14 +31,20 @@ import {
   regionPackSchema,
   routeSetSchema
 } from '@webperf/contracts';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
 import {
   createStorageCrypto,
   InvalidEncryptedPayloadEnvelopeError,
   UnencryptedPersistedPayloadError
 } from './storage-crypto';
 import { redactUrlQuery } from './redaction';
+import {
+  cleanupSqliteRetention,
+  createSqliteBackupFromConnection,
+  defaultSqliteBackupPath,
+  type SqliteRetentionResult
+} from './database/operations';
+import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 
 type JobRow = {
   id: string;
@@ -51,6 +56,7 @@ export type JobRepository = {
   listJobs(): LatencyJob[];
   saveJob(job: LatencyJobDetail): void;
   pruneJobsOlderThan(retentionDays: number, now?: Date): number;
+  pruneRetainedData(retentionDays: number, now?: Date): SqliteRetentionResult;
   countJobs(): number;
   getProperty(id: string): Property | null;
   listProperties(): Property[];
@@ -140,11 +146,6 @@ type CheckProfileRunRow = {
   payload_json: string;
 };
 
-type PersistedPayloadRow = {
-  rowid: number;
-  payload_json: string;
-};
-
 type ExecutionJobRow = {
   id: string;
   kind: string;
@@ -162,9 +163,6 @@ type ExecutionJobRow = {
   completed_at: string | null;
 };
 
-const encryptedPayloadMigrationId = '20260722_001_encrypted_payloads_v2';
-const executionJobsMigrationId = '20260722_002_execution_jobs';
-
 type JsonSchema<T> = {
   parse(value: unknown): T;
 };
@@ -172,152 +170,54 @@ type JsonSchema<T> = {
 export const createSqliteJobRepository = ({
   databasePath,
   encryptionSecret,
-  encryptionSecretNext
+  encryptionSecretNext,
+  backupBeforeMigrations = false
 }: {
   databasePath: string;
   encryptionSecret: string;
   encryptionSecretNext?: string;
+  backupBeforeMigrations?: boolean;
 }): JobRepository => {
-  if (databasePath !== ':memory:') {
-    mkdirSync(dirname(databasePath), { recursive: true });
-  }
-
-  const db = new Database(databasePath, {
-    create: true,
-    strict: true
-  });
+  const shouldBackupBeforeMigrations = backupBeforeMigrations
+    && databasePath !== ':memory:'
+    && existsSync(databasePath)
+    && statSync(databasePath).size > 0;
+  const db = openSqliteDatabase(databasePath);
   const storageCrypto = createStorageCrypto({
     currentSecret: encryptionSecret,
     nextSecret: encryptionSecretNext
   });
+  let migrationResult: ReturnType<typeof applySqliteMigrations>;
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      id TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL
+  try {
+    migrationResult = applySqliteMigrations(
+      db,
+      { storageCrypto },
+      shouldBackupBeforeMigrations
+        ? {
+            beforeMigrate() {
+              const backupPath = defaultSqliteBackupPath(databasePath);
+              createSqliteBackupFromConnection(db, backupPath);
+              console.log(JSON.stringify({
+                service: 'webperf-api',
+                event: 'sqlite.pre_migration_backup.created',
+                backupPath
+              }));
+            }
+          }
+        : undefined
     );
-
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      status TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS jobs_requested_at_idx
-      ON jobs (requested_at DESC);
-
-    CREATE TABLE IF NOT EXISTS saved_entities (
-      kind TEXT NOT NULL,
-      id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (kind, id)
-    );
-
-    CREATE INDEX IF NOT EXISTS saved_entities_kind_updated_at_idx
-      ON saved_entities (kind, updated_at DESC);
-
-    CREATE TABLE IF NOT EXISTS check_profile_runs (
-      id TEXT PRIMARY KEY,
-      profile_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS check_profile_runs_profile_created_at_idx
-      ON check_profile_runs (profile_id, created_at DESC);
-  `);
-
-  const encryptedPayloadMigration = db
-    .query<{ id: string }, [string]>('SELECT id FROM schema_migrations WHERE id = ? LIMIT 1')
-    .get(encryptedPayloadMigrationId);
-
-  if (!encryptedPayloadMigration) {
-    const migratePayloads = db.transaction(() => {
-      for (const table of ['jobs', 'saved_entities', 'check_profile_runs'] as const) {
-        const rows = db
-          .query<PersistedPayloadRow, []>(`SELECT rowid, payload_json FROM ${table}`)
-          .all();
-        const update = db.query(`UPDATE ${table} SET payload_json = ? WHERE rowid = ?`);
-
-        for (const row of rows) {
-          const parsed = storageCrypto.parse(row.payload_json, { allowPlaintext: true });
-          update.run(storageCrypto.stringify(parsed), row.rowid);
-        }
-      }
-
-      db.query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
-        encryptedPayloadMigrationId,
-        new Date().toISOString()
-      );
-    });
-
-    migratePayloads();
+  } catch (error) {
+    db.close();
+    throw error;
   }
 
-  const executionJobsMigration = db
-    .query<{ id: string }, [string]>('SELECT id FROM schema_migrations WHERE id = ? LIMIT 1')
-    .get(executionJobsMigrationId);
-
-  if (!executionJobsMigration) {
-    const migrateExecutionJobs = db.transaction(() => {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS execution_jobs (
-          id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL CHECK (kind IN ('network_probe', 'browser_audit', 'webhook_delivery')),
-          resource_id TEXT NOT NULL,
-          status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'running', 'succeeded', 'failed', 'cancelled')),
-          lease_owner TEXT,
-          lease_expires_at TEXT,
-          attempt_count INTEGER NOT NULL,
-          max_attempts INTEGER NOT NULL CHECK (max_attempts > 0 AND max_attempts <= 20),
-          available_at TEXT NOT NULL,
-          payload_json TEXT NOT NULL,
-          error_json TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          completed_at TEXT,
-          CHECK (attempt_count >= 0 AND attempt_count <= max_attempts),
-          CHECK (
-            (
-              status IN ('leased', 'running')
-              AND lease_owner IS NOT NULL
-              AND lease_expires_at IS NOT NULL
-              AND completed_at IS NULL
-            )
-            OR (
-              status = 'queued'
-              AND lease_owner IS NULL
-              AND lease_expires_at IS NULL
-              AND completed_at IS NULL
-            )
-            OR (
-              status IN ('succeeded', 'failed', 'cancelled')
-              AND lease_owner IS NULL
-              AND lease_expires_at IS NULL
-              AND completed_at IS NOT NULL
-            )
-          )
-        );
-
-        CREATE INDEX IF NOT EXISTS execution_jobs_claim_idx
-          ON execution_jobs (status, available_at, lease_expires_at, created_at);
-
-        CREATE INDEX IF NOT EXISTS execution_jobs_resource_idx
-          ON execution_jobs (kind, resource_id, created_at DESC);
-      `);
-
-      db.query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
-        executionJobsMigrationId,
-        new Date().toISOString()
-      );
-    });
-
-    migrateExecutionJobs();
+  if (migrationResult.appliedNow.length > 0) {
+    console.log(JSON.stringify({
+      service: 'webperf-api',
+      event: 'sqlite.migrations.applied',
+      migrationIds: migrationResult.appliedNow
+    }));
   }
 
   const saveStatement = db.query(`
@@ -344,6 +244,7 @@ export const createSqliteJobRepository = ({
   const pruneStatement = db.query(`
     DELETE FROM jobs
     WHERE requested_at < ?
+      AND status IN ('succeeded', 'failed', 'partial')
   `);
   const countStatement = db.query<{ count: number }, []>(`
     SELECT COUNT(*) as count
@@ -809,6 +710,8 @@ export const createSqliteJobRepository = ({
     }
   };
 
+  let closed = false;
+
   return {
     getJob(id) {
       const row = getStatement.get(id);
@@ -839,6 +742,9 @@ export const createSqliteJobRepository = ({
       cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
       const result = pruneStatement.run(cutoff.toISOString()) as { changes?: number };
       return result.changes ?? 0;
+    },
+    pruneRetainedData(retentionDays, now = new Date()) {
+      return cleanupSqliteRetention(db, retentionDays, now);
     },
     countJobs() {
       return countStatement.get()?.count ?? 0;
@@ -1170,6 +1076,11 @@ export const createSqliteJobRepository = ({
       return cancel();
     },
     close() {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
       db.close();
     }
   };

@@ -141,6 +141,7 @@ Current repo state as of 2026-07-22:
 - `apps/executor` now provides the internal-secret-authenticated claim/start/renew/complete/fail transport, a single-concurrency lease heartbeat, safe failure logging, and graceful stop-claiming behavior
 - Fast Check network measurement, deterministic Check evaluation, and signed idempotent webhook delivery now run through leased executor handlers with atomic domain-resource creation/result persistence; webhook deliveries append atomically without whole-Run lost updates, non-loopback probe HTTP requires an explicit trusted-network opt-in, and the API no longer starts those operations in-process
 - direct Browser Audit creation now returns an atomic queued resource, while the executor owns signed runner calls, retry-safe status transitions, terminal lease/cancellation reconciliation, and secret-safe failure persistence; probe and Browser Audit HMAC secrets are no longer present in the API process
+- SQLite startup now uses ordered migration files with WAL, busy-timeout, foreign-key, forward-schema refusal, and graceful close semantics; verified backup/restore/doctor/retention/optimize/VACUUM commands share the same database core, and optional startup pre-migration backups preserve existing installs before upgrades
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -178,7 +179,7 @@ Current local URLs:
 ## Immediate Next Tasks
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. add ordered SQLite migrations and operator backup/restore/doctor/maintenance commands now that all execution uses durable leases
+2. add restart-recovery and scheduler-dispatch integration coverage now that durable execution and SQLite operations are in place
 3. keep the single-organization admin/internal authentication, encrypted persistence, rotation, and secret-redaction model covered as execution moves into the durable executor
 4. ship engine-neutral browser-audit contracts and a renamed Lighthouse reference runner
 5. persist and serve local artifacts through authenticated, traversal-safe endpoints

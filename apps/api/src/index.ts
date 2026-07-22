@@ -134,6 +134,7 @@ type SelfhostRuntime = {
   port: number;
   databasePath: string;
   retentionDays: number;
+  migrationBackup: boolean;
   adminToken: string;
   adminTokenNext?: string;
   internalSecret: string;
@@ -208,10 +209,11 @@ export const runtime = parseRuntime(process.env);
 export const repository = createSqliteJobRepository({
   databasePath: runtime.databasePath,
   encryptionSecret: runtime.internalSecret,
-  encryptionSecretNext: runtime.internalSecretNext
+  encryptionSecretNext: runtime.internalSecretNext,
+  backupBeforeMigrations: runtime.migrationBackup
 });
 
-repository.pruneJobsOlderThan(runtime.retentionDays);
+repository.pruneRetainedData(runtime.retentionDays);
 
 const buildHealthPayload = () => ({
   service: 'webperf-api',
@@ -3346,6 +3348,7 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     port: parsed.SELFHOST_API_PORT,
     databasePath: parsed.SELFHOST_DATABASE_PATH,
     retentionDays: parsed.SELFHOST_RETENTION_DAYS,
+    migrationBackup: parsed.SELFHOST_MIGRATION_BACKUP,
     adminToken: parsed.SELFHOST_ADMIN_TOKEN,
     adminTokenNext: parsed.SELFHOST_ADMIN_TOKEN_NEXT,
     internalSecret: parsed.SELFHOST_INTERNAL_SECRET,
@@ -4545,10 +4548,49 @@ const getPublicOpenApiDocument = async () => {
 
 export type SelfhostControlServer = typeof server;
 
-const shutdown = () => {
-  repository.close();
-  server.stop(true);
+let shutdownPromise: Promise<void> | undefined;
+
+export const shutdown = (signal = 'manual') => {
+  if (!shutdownPromise) {
+    shutdownPromise = (async () => {
+      console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.started', signal }));
+      let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
+      const forceStop = new Promise<void>((resolve, reject) => {
+        forceStopTimer = setTimeout(() => {
+          console.warn(JSON.stringify({
+            service: 'webperf-api',
+            event: 'shutdown.force_stop',
+            signal
+          }));
+          void server.stop(true).then(resolve, reject);
+        }, 10_000);
+      });
+
+      try {
+        await Promise.race([server.stop(false), forceStop]);
+      } finally {
+        clearTimeout(forceStopTimer);
+        repository.close();
+      }
+
+      console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.completed', signal }));
+    })();
+  }
+
+  return shutdownPromise;
 };
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+const handleShutdownSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+  void shutdown(signal).catch((error) => {
+    console.error(JSON.stringify({
+      service: 'webperf-api',
+      event: 'shutdown.failed',
+      signal,
+      error: describeSafeError(error)
+    }));
+    process.exitCode = 1;
+  });
+};
+
+process.once('SIGINT', () => handleShutdownSignal('SIGINT'));
+process.once('SIGTERM', () => handleShutdownSignal('SIGTERM'));

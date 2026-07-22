@@ -1,0 +1,174 @@
+import { Database } from 'bun:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { sqliteMigrations } from './migrations';
+import type { SqliteMigrationContext } from './migrations';
+
+const schemaMigrationsTable = 'schema_migrations';
+const migrationIds = sqliteMigrations.map((migration) => migration.id);
+
+for (let index = 1; index < migrationIds.length; index += 1) {
+  const previous = migrationIds[index - 1]!;
+  const current = migrationIds[index]!;
+
+  if (previous.localeCompare(current) >= 0) {
+    throw new Error(`SQLite migration manifest must be unique and ordered: ${previous}, ${current}`);
+  }
+}
+
+type AppliedMigrationRow = {
+  id: string;
+  applied_at: string;
+};
+
+export type SqliteMigrationState = {
+  applied: AppliedMigrationRow[];
+  pending: string[];
+  unknown: string[];
+};
+
+export type SqliteMigrationResult = SqliteMigrationState & {
+  appliedNow: string[];
+};
+
+export class IncompatibleSqliteSchemaError extends Error {
+  override readonly name = 'IncompatibleSqliteSchemaError';
+
+  constructor(migrationIds: string[]) {
+    super(`Database contains migrations unknown to this WebPerf version: ${migrationIds.join(', ')}`);
+  }
+}
+
+export class SqlitePragmaError extends Error {
+  override readonly name = 'SqlitePragmaError';
+}
+
+export const openSqliteDatabase = (
+  databasePath: string,
+  options: { readonly?: boolean; create?: boolean } = {}
+) => {
+  const readonly = options.readonly ?? false;
+
+  if (!readonly && databasePath !== ':memory:') {
+    mkdirSync(dirname(databasePath), { recursive: true });
+  }
+
+  const database = new Database(databasePath, {
+    readonly,
+    readwrite: !readonly,
+    create: readonly ? false : (options.create ?? true),
+    strict: true
+  });
+
+  try {
+    configureSqliteConnection(database, { databasePath, readonly });
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+};
+
+export const configureSqliteConnection = (
+  database: Database,
+  { databasePath, readonly = false }: { databasePath: string; readonly?: boolean }
+) => {
+  database.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
+
+  if (!readonly) {
+    if (databasePath !== ':memory:') {
+      const journalMode = database
+        .query<{ journal_mode: string }, []>('PRAGMA journal_mode = WAL')
+        .get()?.journal_mode;
+
+      if (journalMode?.toLowerCase() !== 'wal') {
+        throw new SqlitePragmaError(`Unable to enable SQLite WAL mode; current mode is ${journalMode ?? 'unknown'}`);
+      }
+    }
+
+    database.exec('PRAGMA synchronous = NORMAL;');
+  }
+
+  const foreignKeys = database
+    .query<{ foreign_keys: number }, []>('PRAGMA foreign_keys')
+    .get()?.foreign_keys;
+
+  if (foreignKeys !== 1) {
+    throw new SqlitePragmaError('Unable to enable SQLite foreign key enforcement');
+  }
+};
+
+export const getSqliteMigrationState = (database: Database): SqliteMigrationState => {
+  const hasMigrationTable = Boolean(
+    database
+      .query<{ name: string }, [string]>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1"
+      )
+      .get(schemaMigrationsTable)
+  );
+  const applied = hasMigrationTable
+    ? database
+        .query<AppliedMigrationRow, []>(
+          'SELECT id, applied_at FROM schema_migrations ORDER BY applied_at, id'
+        )
+        .all()
+    : [];
+  const knownIds = new Set(migrationIds);
+  const appliedIds = new Set(applied.map((migration) => migration.id));
+
+  return {
+    applied,
+    pending: migrationIds.filter((migrationId) => !appliedIds.has(migrationId)),
+    unknown: applied
+      .map((migration) => migration.id)
+      .filter((migrationId) => !knownIds.has(migrationId))
+  };
+};
+
+export const applySqliteMigrations = (
+  database: Database,
+  context: SqliteMigrationContext,
+  options: {
+    now?: () => Date;
+    beforeMigrate?: (pendingMigrationIds: string[]) => void;
+  } = {}
+): SqliteMigrationResult => {
+  const initialState = getSqliteMigrationState(database);
+
+  if (initialState.unknown.length > 0) {
+    throw new IncompatibleSqliteSchemaError(initialState.unknown);
+  }
+
+  if (initialState.pending.length > 0) {
+    options.beforeMigrate?.([...initialState.pending]);
+  }
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `);
+
+  const now = options.now ?? (() => new Date());
+  const appliedNow: string[] = [];
+
+  for (const migration of sqliteMigrations) {
+    if (!initialState.pending.includes(migration.id)) {
+      continue;
+    }
+
+    const apply = database.transaction(() => {
+      migration.up(database, context);
+      database
+        .query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .run(migration.id, now().toISOString());
+    });
+
+    apply.immediate();
+    appliedNow.push(migration.id);
+  }
+
+  const finalState = getSqliteMigrationState(database);
+  return { ...finalState, appliedNow };
+};

@@ -22,3 +22,31 @@ export const throwIfAborted = (signal: AbortSignal) => {
     ? signal.reason
     : new ExecutionFailure('execution_aborted', 'Execution was aborted', true, 1_000);
 };
+
+export const redactExecutionText = (
+  value: string,
+  sensitiveValues: Array<string | null | undefined>
+) => {
+  let redacted = value;
+
+  for (const sensitiveValue of sensitiveValues
+    .filter((item): item is string => typeof item === 'string' && item.length > 0)
+    .sort((left, right) => right.length - left.length)) {
+    redacted = redacted.replaceAll(sensitiveValue, '[REDACTED]');
+  }
+
+  return redacted.replace(/https?:\/\/[^\s"'<>]+/gi, redactUrlQuery);
+};
+
+const redactUrlQuery = (value: string) => {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = url.search ? '?redacted' : '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '[REDACTED_URL]';
+  }
+};

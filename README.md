@@ -128,15 +128,15 @@ See [public-api-surface.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs
 
 Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md) when the default development ports are already occupied or two self-host configurations need to run side-by-side.
 
-## Optional Browser Audit Direct-Run
+## Optional Browser Audit
 
-`apps/browser-audit-lighthouse` is the optional Lighthouse reference runner for the engine-neutral Browser Audit Protocol. The self-host API can call it directly when you configure:
+`apps/browser-audit-lighthouse` is the optional Lighthouse reference runner for the engine-neutral Browser Audit Protocol. The API queues audits and `apps/executor` calls the runner when you configure:
 
 - `SELFHOST_BROWSER_AUDIT_BASE_URL`
 - `BROWSER_AUDIT_SHARED_SECRET`
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT` for secret rotation
 
-This direct-run surface is intentionally limited to persisted summaries and artifact metadata. It does not pull managed queue, fleet, provider, or tenancy logic into OSS.
+The API returns a queued resource immediately; poll `GET /v1/browser-audits/:id` for completion. This surface is intentionally limited to persisted summaries and artifact metadata. It does not pull managed fleet, provider, or tenancy logic into OSS.
 
 ## Compose Bundle
 

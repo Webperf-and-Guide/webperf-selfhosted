@@ -6,7 +6,9 @@ import { parseSelfhostExecutorVars } from './selfhost-executor';
 
 const requiredApiSecrets = {
   SELFHOST_ADMIN_TOKEN: 'test-admin-token-value',
-  SELFHOST_INTERNAL_SECRET: 'test-internal-secret-value',
+  SELFHOST_INTERNAL_SECRET: 'test-internal-secret-value'
+};
+const executionSecrets = {
   PROBE_SHARED_SECRET: 'test-probe-secret-value',
   BROWSER_AUDIT_SHARED_SECRET: 'test-browser-secret-value'
 };
@@ -33,9 +35,10 @@ describe('strict self-host configuration', () => {
     expect(
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
-        PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET
+        ...executionSecrets
       })
     ).toMatchObject({
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: false,
       SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: false,
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
       SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000
@@ -43,7 +46,7 @@ describe('strict self-host configuration', () => {
     expect(() =>
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
-        PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET,
+        ...executionSecrets,
         SELFHOST_EXECUTOR_LEASE_DURATION_MS: 10_000,
         SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: 5_000
       })
@@ -51,9 +54,24 @@ describe('strict self-host configuration', () => {
     expect(() =>
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
-        PROBE_SHARED_SECRET: requiredApiSecrets.PROBE_SHARED_SECRET,
+        ...executionSecrets,
         SELFHOST_EXECUTOR_API_BASE_URL: 'https://operator:secret@api.example.test?token=secret'
       })
     ).toThrow('without path');
+    expect(() =>
+      parseSelfhostExecutorVars({
+        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        ...executionSecrets,
+        SELFHOST_BROWSER_AUDIT_BASE_URL: 'http://browser-audit:8080'
+      })
+    ).toThrow('allowed credential-free origin');
+    expect(
+      parseSelfhostExecutorVars({
+        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        ...executionSecrets,
+        SELFHOST_BROWSER_AUDIT_BASE_URL: 'http://browser-audit:8080',
+        SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: 'true'
+      }).SELFHOST_BROWSER_AUDIT_BASE_URL
+    ).toBe('http://browser-audit:8080');
   });
 });

@@ -429,7 +429,13 @@ export const createSqliteJobRepository = ({
     FROM execution_jobs
     ORDER BY created_at DESC, id DESC
   `);
-  const finalizeExhaustedExecutionJobsStatement = db.query(`
+  const finalizeExhaustedExecutionJobsStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    string,
+    string
+  ]>(`
     UPDATE execution_jobs
     SET status = 'failed',
         lease_owner = NULL,
@@ -442,6 +448,7 @@ export const createSqliteJobRepository = ({
         (status = 'queued' AND available_at <= ?)
         OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
       )
+    RETURNING *
   `);
   const claimExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
     UPDATE execution_jobs
@@ -692,6 +699,31 @@ export const createSqliteJobRepository = ({
       ...browserAudit,
       createdAt: browserAudit.requestedAt,
       updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
+    });
+  };
+
+  const syncTerminalExecutionResource = (
+    executionJob: ExecutionJob,
+    nowIso: string
+  ) => {
+    if (executionJob.kind !== 'browser_audit') {
+      return;
+    }
+
+    const audit = getEntity('browser_audit', executionJob.resourceId, browserAuditResourceSchema);
+
+    if (!audit || ['succeeded', 'failed', 'cancelled'].includes(audit.status)) {
+      return;
+    }
+
+    const cancelled = executionJob.status === 'cancelled';
+    persistBrowserAudit({
+      ...audit,
+      status: cancelled ? 'cancelled' : 'failed',
+      startedAt: cancelled ? audit.startedAt : audit.startedAt ?? nowIso,
+      completedAt: nowIso,
+      result: null,
+      error: cancelled ? null : 'Browser Audit execution stopped before producing a result'
     });
   };
 
@@ -970,13 +1002,20 @@ export const createSqliteJobRepository = ({
       } satisfies ExecutionJobError);
 
       const claim = db.transaction(() => {
-        finalizeExhaustedExecutionJobsStatement.run(
+        const exhaustedRows = finalizeExhaustedExecutionJobsStatement.all(
           exhaustedError,
           nowIso,
           nowIso,
           nowIso,
           nowIso
         );
+        for (const row of exhaustedRows) {
+          const executionJob = parseExecutionJob(row);
+
+          if (executionJob) {
+            syncTerminalExecutionResource(executionJob, nowIso);
+          }
+        }
 
         return claimExecutionJobStatement.get(
           input.leaseOwner,
@@ -1082,22 +1121,44 @@ export const createSqliteJobRepository = ({
           input.leaseOwner,
           nowIso
         );
-        return row ? parseExecutionJob(row) : null;
+        const failedExecutionJob = row ? parseExecutionJob(row) : null;
+
+        if (failedExecutionJob?.status === 'failed') {
+          syncTerminalExecutionResource(failedExecutionJob, nowIso);
+        }
+
+        return failedExecutionJob;
       });
 
       return fail();
     },
     cancelExecutionJob(id, now = new Date()) {
-      const nowIso = now.toISOString();
-      const row = cancelExecutionJobStatement.get(nowIso, nowIso, id);
+      const cancel = db.transaction(() => {
+        const nowIso = now.toISOString();
+        const row = cancelExecutionJobStatement.get(nowIso, nowIso, id);
 
-      if (row) {
-        return parseExecutionJob(row);
-      }
+        if (row) {
+          const executionJob = parseExecutionJob(row);
 
-      const existing = getExecutionJobStatement.get(id);
-      const executionJob = existing ? parseExecutionJob(existing) : null;
-      return executionJob?.status === 'cancelled' ? executionJob : null;
+          if (executionJob) {
+            syncTerminalExecutionResource(executionJob, nowIso);
+          }
+
+          return executionJob;
+        }
+
+        const existing = getExecutionJobStatement.get(id);
+        const executionJob = existing ? parseExecutionJob(existing) : null;
+
+        if (executionJob?.status === 'cancelled') {
+          syncTerminalExecutionResource(executionJob, nowIso);
+          return executionJob;
+        }
+
+        return null;
+      });
+
+      return cancel();
     },
     close() {
       db.close();

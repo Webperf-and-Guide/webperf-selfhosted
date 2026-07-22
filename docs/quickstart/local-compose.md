@@ -76,7 +76,7 @@ bun run smoke:compose:browser-audit
 ```
 
 - `smoke:compose` verifies the default Compose stack plus the browser-console flow.
-- `smoke:compose:browser-audit` enables the `browser-audit` profile, wires the API to the worker over the internal Compose network, and verifies a direct-run browser audit end-to-end.
+- `smoke:compose:browser-audit` enables the `browser-audit` profile, wires the executor to the worker over the internal Compose network, and verifies a queued Browser Audit end-to-end.
 
 ## Optional Browser Audit Worker
 
@@ -93,10 +93,10 @@ docker compose \
 ```
 
 When enabled, it is published on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
-When `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET` are configured in the API container, the self-host API can call it directly through `POST /v1/browser-audits`.
+When `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET` are configured, `POST /v1/browser-audits` queues work for the executor, which calls the optional runner and persists the result.
 The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
 
-Example direct-run request once the worker profile is up:
+Example queued request once the worker profile is up:
 
 ```sh
 curl -X POST http://127.0.0.1:8788/v1/browser-audits \

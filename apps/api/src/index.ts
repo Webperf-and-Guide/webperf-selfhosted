@@ -4,8 +4,6 @@ import type {
   BrowserAuditCapabilities,
   BrowserAuditListResponse,
   BrowserAuditResource,
-  BrowserAuditWorkerRequest,
-  BrowserAuditWorkerResponse,
   CheckProfileBaselineResponse,
   CheckProfileComparisonResponse,
   CheckProfile,
@@ -59,8 +57,6 @@ import {
   browserAuditCapabilitiesSchema,
   browserAuditListResponseSchema,
   browserAuditResourceSchema,
-  browserAuditWorkerRequestSchema,
-  browserAuditWorkerResponseSchema,
   checkProfileListResponseSchema,
   checkProfileRunListResponseSchema,
   comparisonListResponseSchema,
@@ -110,7 +106,6 @@ import { RPCHandler } from '@orpc/server/fetch';
 import {
   applyListQuery,
   buildRegionAvailabilityList,
-  createBrowserAuditSignature,
   dedupeRegions,
   parseListQueryFromSearchParams,
   resolveRequestedRegions,
@@ -129,7 +124,6 @@ import { describeSafeError } from './diagnostics';
 import {
   isSensitiveHeaderName,
   redactJsonResponse,
-  redactSecretValues,
   redactSensitiveData,
   redactedValue
 } from './redaction';
@@ -143,10 +137,6 @@ type SelfhostRuntime = {
   adminTokenNext?: string;
   internalSecret: string;
   internalSecretNext?: string;
-  probeSharedSecret: string;
-  probeSharedSecretNext?: string;
-  browserAuditSharedSecret: string;
-  browserAuditSharedSecretNext?: string;
   browserAuditBaseUrl?: string;
   activeRegionCodes: RegionCode[];
   regionIds: Partial<Record<RegionCode, string>>;
@@ -1788,8 +1778,13 @@ function persistExecutionResourceResult(
 
   if (result.kind === 'browser_audit') {
     const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+    const existing = repository.getBrowserAudit(payload.auditId);
 
-    if (result.audit.id !== payload.auditId) {
+    if (
+      result.audit.id !== payload.auditId
+      || !existing
+      || !browserAuditInputsMatch(existing, result.audit)
+    ) {
       throw new Error('Browser audit result does not match its payload');
     }
 
@@ -1817,6 +1812,17 @@ function persistExecutionResourceResult(
     result
   });
 }
+
+const browserAuditInputsMatch = (
+  existing: BrowserAuditResource,
+  result: BrowserAuditResource
+) =>
+  existing.targetUrl === result.targetUrl
+  && existing.region === result.region
+  && existing.requestedAt === result.requestedAt
+  && JSON.stringify(existing.policy) === JSON.stringify(result.policy)
+  && JSON.stringify(existing.customHeaders) === JSON.stringify(result.customHeaders)
+  && JSON.stringify(existing.cookies) === JSON.stringify(result.cookies);
 
 const executionLeaseConflict = () =>
   json(
@@ -2674,101 +2680,47 @@ async function handleCreateBrowserAudit(request: Request) {
   const requestedAt = new Date().toISOString();
   const executionId = `audit_${crypto.randomUUID()}`;
   const input = parsed.data;
-  const workerRequest: BrowserAuditWorkerRequest = {
-    executionId,
+  const browserAudit = browserAuditResourceSchema.parse({
+    id: executionId,
     targetUrl: input.targetUrl,
     region: input.region ?? null,
+    status: 'queued',
+    requestedAt,
+    startedAt: null,
+    completedAt: null,
     policy: input.policy,
     customHeaders: input.customHeaders,
     cookies: input.cookies,
-    artifactUpload: null,
-    timestamp: requestedAt,
-    signature: 'pending',
-    keyVersion: 'current'
-  };
-  workerRequest.signature = await createBrowserAuditSignature(runtime.browserAuditSharedSecret, workerRequest);
-
-  let browserAudit: BrowserAuditResource;
+    result: null,
+    error: null
+  });
 
   try {
-    const response = await fetch(new URL('/audit', runtime.browserAuditBaseUrl).toString(), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json'
+    repository.createExecutionResource({
+      executionJob: {
+        id: `exec_${executionId}`,
+        kind: 'browser_audit',
+        resourceId: executionId,
+        maxAttempts: runtime.maxTargetAttempts,
+        payload: browserAuditExecutionPayloadSchema.parse({
+          version: 'v1',
+          auditId: executionId
+        })
       },
-      body: JSON.stringify(browserAuditWorkerRequestSchema.parse(workerRequest))
+      result: {
+        kind: 'browser_audit',
+        audit: browserAudit
+      }
     });
-    const payload = await readResponsePayload(response);
-    const parsedWorkerResponse = browserAuditWorkerResponseSchema.safeParse(payload);
-
-    if (parsedWorkerResponse.success) {
-      browserAudit = browserAuditResourceSchema.parse({
-        id: executionId,
-        targetUrl: input.targetUrl,
-        region: input.region ?? null,
-        status: parsedWorkerResponse.data.status === 'succeeded' ? 'succeeded' : 'failed',
-        requestedAt,
-        startedAt: parsedWorkerResponse.data.result?.startedAt ?? requestedAt,
-        completedAt: parsedWorkerResponse.data.result?.completedAt ?? new Date().toISOString(),
-        policy: input.policy,
-        customHeaders: input.customHeaders,
-        cookies: input.cookies,
-        result: parsedWorkerResponse.data.result,
-        error: sanitizeBrowserAuditError(parsedWorkerResponse.data.error, input)
-      });
-    } else {
-      const message =
-        payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-          ? payload.error
-          : `Browser audit worker returned ${response.status}`;
-      browserAudit = browserAuditResourceSchema.parse({
-        id: executionId,
-        targetUrl: input.targetUrl,
-        region: input.region ?? null,
-        status: 'failed',
-        requestedAt,
-        startedAt: requestedAt,
-        completedAt: new Date().toISOString(),
-        policy: input.policy,
-        customHeaders: input.customHeaders,
-        cookies: input.cookies,
-        result: null,
-        error: sanitizeBrowserAuditError(message, input)
-      });
-    }
   } catch (error) {
-    browserAudit = browserAuditResourceSchema.parse({
-      id: executionId,
-      targetUrl: input.targetUrl,
-      region: input.region ?? null,
-      status: 'failed',
-      requestedAt,
-      startedAt: requestedAt,
-      completedAt: new Date().toISOString(),
-      policy: input.policy,
-      customHeaders: input.customHeaders,
-      cookies: input.cookies,
-      result: null,
-      error: sanitizeBrowserAuditError(
-        error instanceof Error ? error.message : 'Browser audit request failed',
-        input
-      )
-    });
+    const incidentId = logExecutionCreationFailure('browser_audit', error, executionId);
+    return json(
+      { error: 'Failed to queue Browser Audit', incidentId },
+      { status: 500 }
+    );
   }
 
-  repository.saveBrowserAudit(browserAudit);
-  return json(browserAudit, { status: 201 });
-}
-
-function sanitizeBrowserAuditError(message: string | null, input: CreateBrowserAuditInput) {
-  if (message === null) {
-    return null;
-  }
-
-  return redactSecretValues(message, [
-    ...input.customHeaders.map((header) => header.value),
-    ...input.cookies.map((cookie) => cookie.value)
-  ]);
+  return json(browserAudit, { status: 202 });
 }
 
 function handleGetBrowserAudit(auditId: string) {
@@ -2949,16 +2901,16 @@ function createNetworkExecutionResource(
 }
 
 function logExecutionCreationFailure(
-  operation: 'manual_check_run' | 'scheduled_check_run',
+  operation: 'manual_check_run' | 'scheduled_check_run' | 'browser_audit',
   error: unknown,
-  checkId: string
+  resourceId: string
 ) {
   const incidentId = crypto.randomUUID();
   console.error(JSON.stringify({
     service: 'webperf-api',
     event: 'execution_creation_failed',
     operation,
-    checkId,
+    resourceId,
     incidentId,
     ...describeSafeError(error)
   }));
@@ -3397,10 +3349,6 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     adminTokenNext: parsed.SELFHOST_ADMIN_TOKEN_NEXT,
     internalSecret: parsed.SELFHOST_INTERNAL_SECRET,
     internalSecretNext: parsed.SELFHOST_INTERNAL_SECRET_NEXT,
-    probeSharedSecret: parsed.PROBE_SHARED_SECRET,
-    probeSharedSecretNext: parsed.PROBE_SHARED_SECRET_NEXT,
-    browserAuditSharedSecret: parsed.BROWSER_AUDIT_SHARED_SECRET,
-    browserAuditSharedSecretNext: parsed.BROWSER_AUDIT_SHARED_SECRET_NEXT,
     browserAuditBaseUrl: parsed.SELFHOST_BROWSER_AUDIT_BASE_URL,
     activeRegionCodes: parseRegionCodes(parsed.SELFHOST_ACTIVE_REGION_CODES_JSON),
     regionIds: parseRegionMap(parsed.SELFHOST_REGION_IDS_JSON),

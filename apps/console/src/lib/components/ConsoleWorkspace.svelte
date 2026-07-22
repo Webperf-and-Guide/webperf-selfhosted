@@ -558,7 +558,7 @@
           <div class="grid gap-4 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
             <form class="builder-card" onsubmit={reports.submitBrowserAudit}>
               <FieldSet>
-                <FieldSetTitle class="text-base">Direct-run browser audit</FieldSetTitle>
+                <FieldSetTitle class="text-base">Queued browser audit</FieldSetTitle>
                 <FieldSetContent class="grid gap-4">
                   <label class="field">
                     <span>Target URL</span>
@@ -593,18 +593,18 @@
                     type="submit"
                     variant="secondary"
                   >
-                    {#if reportsState.browserAuditSubmitting}Running audit...{:else}Run browser audit{/if}
+                    {#if reportsState.browserAuditSubmitting}Following audit...{:else}Queue browser audit{/if}
                   </Button>
                 </FieldSetFooter>
               </FieldSet>
               <p class="card-copy mt-4">
-                This self-host surface stays direct-run only: one navigation step, persisted summary,
-                and artifact metadata without managed fleet orchestration.
+                The API queues one navigation audit for the durable executor, then persists its
+                summary and artifact metadata without managed fleet orchestration.
               </p>
               {#if !data.capabilities.browserAuditDirectRun}
                 <p class="hint mt-3">
                   Configure `SELFHOST_BROWSER_AUDIT_BASE_URL` and `BROWSER_AUDIT_SHARED_SECRET`
-                  to enable direct-run browser audits.
+                  to enable queued browser audits.
                 </p>
               {/if}
             </form>
@@ -635,7 +635,7 @@
               },
               {
                 resource: 'Browser audits',
-                purpose: 'Inspect optional direct-run browser audit summaries and artifact metadata.',
+                purpose: 'Inspect optional queued browser audit summaries and artifact metadata.',
                 path: '/api/control/browser-audits'
               }
             ]}

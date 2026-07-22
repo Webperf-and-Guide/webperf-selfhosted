@@ -177,7 +177,7 @@ The exact diff will stay small within each phase, but the expected surface is:
   domain results atomically without opening SQLite from the executor.
 - [x] Move network probe, run evaluation, and webhook handlers into
   `apps/executor` with retry and idempotent result persistence.
-- [ ] Move Browser Audit execution into `apps/executor` and make API creation
+- [x] Move Browser Audit execution into `apps/executor` and make API creation
   asynchronous.
 - [ ] Keep scheduler limited to authenticated due-check dispatch.
 - [ ] Add init/migrate/backup/restore/doctor/maintenance commands.
@@ -249,10 +249,11 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [ ] A clean host can install a tagged, digest-pinned Compose bundle.
 - [ ] Default host exposure is console-only on loopback.
 - [ ] Required production secrets have no fallback.
-- [ ] Manual Fast Check and scheduled Check execution work through the executor.
+- [x] Manual Fast Check and scheduled Check execution work through the executor.
 - [ ] Leased work recovers after API/executor restart.
 - [ ] Baseline/latest comparisons and deterministic analyses work.
-- [ ] Browser Audit is asynchronous and stores downloadable local artifacts.
+- [x] Browser Audit creation and execution are asynchronous.
+- [ ] Browser Audit stores downloadable local artifacts.
 - [ ] Secrets are absent from database API views, logs, exports, and errors.
 - [ ] Network and browser SSRF fixtures pass.
 - [ ] Canonical REST/OpenAPI surfaces agree and compatibility tests pass.

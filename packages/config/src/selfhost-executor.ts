@@ -6,8 +6,14 @@ export const selfhostExecutorEnvSchema = z
     SELFHOST_EXECUTOR_API_BASE_URL: z.string().url().default('http://127.0.0.1:8788'),
     SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
     PROBE_SHARED_SECRET: z.string().trim().min(16),
+    BROWSER_AUDIT_SHARED_SECRET: z.string().trim().min(16),
     SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
+    SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
     SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: z.preprocess(
+      (value) => value ?? 'false',
+      z.enum(['true', 'false']).transform((value) => value === 'true')
+    ),
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: z.preprocess(
       (value) => value ?? 'false',
       z.enum(['true', 'false']).transform((value) => value === 'true')
     ),
@@ -58,6 +64,33 @@ export const selfhostExecutorEnvSchema = z
         message: 'Executor API URL must be an HTTP(S) origin without path, credentials, query, or fragment',
         path: ['SELFHOST_EXECUTOR_API_BASE_URL']
       });
+    }
+
+    if (config.SELFHOST_BROWSER_AUDIT_BASE_URL) {
+      const browserAuditUrl = new URL(config.SELFHOST_BROWSER_AUDIT_BASE_URL);
+      const loopbackHostname = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(
+        browserAuditUrl.hostname.toLowerCase()
+      );
+      const protocolAllowed = browserAuditUrl.protocol === 'https:'
+        || (
+          browserAuditUrl.protocol === 'http:'
+          && (loopbackHostname || config.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP)
+        );
+
+      if (
+        !protocolAllowed
+        || browserAuditUrl.username
+        || browserAuditUrl.password
+        || browserAuditUrl.pathname !== '/'
+        || browserAuditUrl.search
+        || browserAuditUrl.hash
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Browser Audit URL must be an allowed credential-free origin',
+          path: ['SELFHOST_BROWSER_AUDIT_BASE_URL']
+        });
+      }
     }
 
     if (config.SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS * 2 >= config.SELFHOST_EXECUTOR_LEASE_DURATION_MS) {

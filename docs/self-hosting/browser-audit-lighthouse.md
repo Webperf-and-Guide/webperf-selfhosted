@@ -47,9 +47,10 @@ Useful environment variables:
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT`
 - `BROWSER_AUDIT_ALLOW_NO_SANDBOX`
 
-## Self-Hosted API Direct-Run
+## Self-Hosted Queued Execution
 
-The worker stays optional, but the self-host API can now use it directly when both of these are configured on the API side:
+The worker stays optional. Configure its origin and signing key for the
+executor:
 
 - `SELFHOST_BROWSER_AUDIT_BASE_URL`
 - `BROWSER_AUDIT_SHARED_SECRET`
@@ -60,7 +61,8 @@ That enables the public self-host resources:
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
 
-The API persists:
+`POST /v1/browser-audits` returns a queued resource. The durable executor calls
+the runner, retries transient unavailability, and persists:
 
 - execution status
 - summary metrics
@@ -89,8 +91,11 @@ docker compose \
   up --build
 ```
 
-Set `BROWSER_AUDIT_SHARED_SECRET` in `infra/docker-compose/.env` when you want the API and worker to authenticate direct-run requests against each other.
-The default `.env.example` now leaves that secret empty so the default Compose stack does not advertise browser-audit direct-run until the optional profile is deliberately enabled.
+Set `BROWSER_AUDIT_SHARED_SECRET` in `infra/docker-compose/.env` when you want
+the executor and worker to authenticate signed requests.
+The default `.env.example` leaves `SELFHOST_BROWSER_AUDIT_BASE_URL` empty, so
+the default Compose stack does not advertise Browser Audit until the optional
+profile is deliberately enabled.
 
 The profile publishes the worker on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
 The bundled Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled locally.

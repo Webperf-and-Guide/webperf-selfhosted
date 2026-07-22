@@ -53,8 +53,9 @@ Required secrets have no defaults:
 
 - `SELFHOST_ADMIN_TOKEN`
 - `SELFHOST_INTERNAL_SECRET`
-- `PROBE_SHARED_SECRET`
-- `BROWSER_AUDIT_SHARED_SECRET`
+
+Probe and Browser Audit signing secrets belong only to their runtime and the
+executor; the API does not receive them.
 
 Use `bun run selfhost:init` for a generated Compose environment or provide
 explicit values for local process mode. See

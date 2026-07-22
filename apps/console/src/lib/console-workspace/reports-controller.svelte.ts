@@ -77,11 +77,11 @@ export class ReportsController {
         id: 'browser-audits',
         label: 'Browser audits',
         value: this.browserAuditDirectRunEnabled
-          ? `${this.browserAudits.length} recent direct runs`
+          ? `${this.browserAudits.length} recent audits`
           : 'Optional runtime',
         detail: this.browserAuditDirectRunEnabled
-          ? 'Launch direct-run browser audits and review artifact metadata in one place.'
-          : 'Enable the optional worker to unlock direct-run browser audits.'
+          ? 'Queue browser audits and review their saved results in one place.'
+          : 'Enable the optional runner to unlock queued browser audits.'
       }
     ];
   }
@@ -104,7 +104,7 @@ export class ReportsController {
     }
 
     if (!this.browserAuditDirectRunEnabled) {
-      this.state.browserAuditSubmitError = 'Browser audit direct-run is not configured for this self-host install.';
+      this.state.browserAuditSubmitError = 'Browser Audit is not configured for this self-host install.';
       return;
     }
 
@@ -135,17 +135,45 @@ export class ReportsController {
       }
 
       this.state.selectedBrowserAuditId = payload.id;
-      this.state.browserAuditStatusMessage =
-        payload.status === 'succeeded'
-          ? 'Browser audit completed and was saved to the recent history.'
-          : 'Browser audit was saved with a failed result so you can inspect the artifact metadata.';
+      this.state.browserAuditStatusMessage = 'Browser Audit queued. Waiting for the executor result.';
       await this.accessors.refreshControlData();
+
+      try {
+        const completed = await this.waitForBrowserAudit(payload.id);
+        this.state.browserAuditStatusMessage = completed
+          ? completed.status === 'succeeded'
+            ? 'Browser Audit completed and was saved to recent history.'
+            : `Browser Audit finished with status ${completed.status}; inspect the saved details.`
+          : 'Browser Audit is still queued or running and will continue in the background.';
+      } catch {
+        this.state.browserAuditStatusMessage =
+          'Browser Audit was queued; refresh Reports to follow its latest status.';
+      }
     } catch (error) {
       this.state.browserAuditSubmitError =
         error instanceof Error ? error.message : 'Failed to start a browser audit.';
     } finally {
       this.state.browserAuditSubmitting = false;
     }
+  };
+
+  private waitForBrowserAudit = async (
+    auditId: string,
+    timeoutMs = 180_000
+  ): Promise<BrowserAuditResource | null> => {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await this.accessors.refreshControlData();
+      const audit = this.browserAudits.find((candidate) => candidate.id === auditId);
+
+      if (audit && ['succeeded', 'failed', 'cancelled'].includes(audit.status)) {
+        return audit;
+      }
+    }
+
+    return null;
   };
 }
 

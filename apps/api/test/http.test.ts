@@ -7,6 +7,7 @@ import { appContract, opsContract, publicContract } from '@webperf/contracts';
 import { controlContract } from '@webperf/contracts/control-contract';
 import type { CheckProfileReportResponse } from '@webperf/contracts';
 import { createBrowserAuditSignature } from '@webperf/domain-core';
+import { createBrowserAuditExecutionHandler } from '../../executor/src/browser-audit-handler';
 import { createExecutorApiClient } from '../../executor/src/client';
 import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
 import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
@@ -118,10 +119,13 @@ describe('api service monitoring expansion', () => {
         },
         browserAuditRequests
       );
+      const browserAuditExecutor = {
+        baseUrl: `http://127.0.0.1:${browserAuditWorker.port}`,
+        sharedSecret: 'browser-audit-secret'
+      };
       const webhook = startWebhookServer(webhookPayloads);
       const harness = await startSelfhostHarness(probe.port, {
-        browserAuditBaseUrl: `http://127.0.0.1:${browserAuditWorker.port}`,
-        browserAuditSharedSecret: 'browser-audit-secret'
+        browserAuditBaseUrl: browserAuditExecutor.baseUrl
       });
       const client = createORPCClient(
         new RPCLink({
@@ -422,13 +426,16 @@ describe('api service monitoring expansion', () => {
         customHeaders: Array<{ name: string; value: string }>;
         cookies: Array<{ name: string; value: string }>;
       };
-      expect(browserAuditCreateResponse.status).toBe(201);
-      expect(createdBrowserAudit.status).toBe('succeeded');
+      expect(browserAuditCreateResponse.status).toBe(202);
+      expect(createdBrowserAudit.status).toBe('queued');
       expect(createdBrowserAudit.error).toBeNull();
-      expect(createdBrowserAudit.result?.summary.performanceScore).toBe(0.91);
-      expect(createdBrowserAudit.result?.artifacts.some((artifact) => artifact.kind === 'html')).toBe(true);
+      expect(createdBrowserAudit.result).toBeNull();
       expect(createdBrowserAudit.customHeaders[0]?.value).toBe('[REDACTED]');
       expect(createdBrowserAudit.cookies[0]?.value).toBe('[REDACTED]');
+      expect(browserAuditRequests).toHaveLength(0);
+
+      await drainExecutions(harness.baseUrl, probe.port, browserAuditExecutor);
+
       expect(browserAuditRequests).toHaveLength(1);
       expect(browserAuditRequests[0]?.customHeaders[0]?.value).toBe('Bearer smoke-token');
       expect(browserAuditRequests[0]?.cookies[0]?.value).toBe('cookie-value');
@@ -451,11 +458,19 @@ describe('api service monitoring expansion', () => {
       const browserAuditGetResponse = await fetch(`${harness.baseUrl}/v1/browser-audits/${createdBrowserAudit.id}`);
       const browserAuditDetail = await browserAuditGetResponse.json() as {
         id: string;
-        result: { summary: { performanceScore: number | null } } | null;
+        status: string;
+        result: {
+          summary: { performanceScore: number | null };
+          artifacts: Array<{ kind: string }>;
+        } | null;
       };
       expect(browserAuditGetResponse.status).toBe(200);
       expect(browserAuditDetail.id).toBe(createdBrowserAudit.id);
+      expect(browserAuditDetail.status).toBe('succeeded');
       expect(browserAuditDetail.result?.summary.performanceScore).toBe(0.91);
+      expect(
+        browserAuditDetail.result?.artifacts.some((artifact) => artifact.kind === 'html')
+      ).toBe(true);
 
       browserAuditWorker.setScenario({
         status: 'failed',
@@ -483,10 +498,22 @@ describe('api service monitoring expansion', () => {
         error: string | null;
         result: unknown;
       };
-      expect(failedBrowserAuditResponse.status).toBe(201);
-      expect(failedBrowserAudit.status).toBe('failed');
-      expect(failedBrowserAudit.error).toBe('Lighthouse run failed');
+      expect(failedBrowserAuditResponse.status).toBe(202);
+      expect(failedBrowserAudit.status).toBe('queued');
+      expect(failedBrowserAudit.error).toBeNull();
       expect(failedBrowserAudit.result).toBeNull();
+
+      await drainExecutions(harness.baseUrl, probe.port, browserAuditExecutor);
+      const failedBrowserAuditDetail = await (
+        await fetch(`${harness.baseUrl}/v1/browser-audits/${failedBrowserAudit.id}`)
+      ).json() as {
+        status: string;
+        error: string | null;
+        result: unknown;
+      };
+      expect(failedBrowserAuditDetail.status).toBe('failed');
+      expect(failedBrowserAuditDetail.error).toBe('Lighthouse run failed');
+      expect(failedBrowserAuditDetail.result).toBeNull();
 
       const failedBrowserAuditListResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=10`);
       const failedBrowserAuditListPayload = await failedBrowserAuditListResponse.json() as {
@@ -704,7 +731,7 @@ describe('api service monitoring expansion', () => {
           }
         })
       });
-      expect(alphaAuditResponse.status).toBe(201);
+      expect(alphaAuditResponse.status).toBe(202);
 
       const betaAuditResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
         method: 'POST',
@@ -722,7 +749,7 @@ describe('api service monitoring expansion', () => {
           }
         })
       });
-      expect(betaAuditResponse.status).toBe(201);
+      expect(betaAuditResponse.status).toBe(202);
 
       const browserAuditsPageResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=1`);
       const browserAuditsPagePayload = await browserAuditsPageResponse.json() as {
@@ -1107,7 +1134,6 @@ const startSelfhostHarness = async (
   probePort: number,
   options?: {
     browserAuditBaseUrl?: string;
-    browserAuditSharedSecret?: string;
   }
 ) => {
   const controlPort = await openPort();
@@ -1120,16 +1146,12 @@ const startSelfhostHarness = async (
   process.env.SELFHOST_ADMIN_TOKEN_NEXT = '';
   process.env.SELFHOST_INTERNAL_SECRET = testInternalSecret;
   process.env.SELFHOST_INTERNAL_SECRET_NEXT = '';
-  process.env.PROBE_SHARED_SECRET = testProbeSecret;
-  process.env.PROBE_SHARED_SECRET_NEXT = '';
-  process.env.BROWSER_AUDIT_SHARED_SECRET = options?.browserAuditSharedSecret ?? defaultBrowserAuditSecret;
-  process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT = '';
   process.env.SELFHOST_ACTIVE_REGION_CODES_JSON = '["tokyo"]';
   process.env.SELFHOST_REGION_IDS_JSON = '{"tokyo":"JP"}';
   process.env.SELFHOST_PROBE_BASE_URLS_JSON = `{"tokyo":"http://127.0.0.1:${probePort}"}`;
   process.env.SELFHOST_MAX_TARGET_ATTEMPTS = '1';
 
-  if (options?.browserAuditBaseUrl && options.browserAuditSharedSecret) {
+  if (options?.browserAuditBaseUrl) {
     process.env.SELFHOST_BROWSER_AUDIT_BASE_URL = options.browserAuditBaseUrl;
   } else {
     delete process.env.SELFHOST_BROWSER_AUDIT_BASE_URL;
@@ -1170,7 +1192,11 @@ const waitForHealth = async (baseUrl: string) => {
   throw new Error(`Timed out waiting for ${baseUrl}/health`);
 };
 
-const drainExecutions = async (baseUrl: string, probePort: number) => {
+const drainExecutions = async (
+  baseUrl: string,
+  probePort: number,
+  browserAudit?: { baseUrl: string; sharedSecret: string }
+) => {
   const leaseOwner = `executor-http-${crypto.randomUUID()}`;
   const client = createExecutorApiClient({
     baseUrl,
@@ -1186,6 +1212,12 @@ const drainExecutions = async (baseUrl: string, probePort: number) => {
     client,
     leaseOwner,
     validateUrl: () => {}
+  });
+  const browserAuditHandler = createBrowserAuditExecutionHandler({
+    client,
+    leaseOwner,
+    browserAuditSharedSecret: browserAudit?.sharedSecret ?? defaultBrowserAuditSecret,
+    ...(browserAudit ? { browserAuditBaseUrl: browserAudit.baseUrl } : {})
   });
   const logger: ExecutorLogger = {
     info: () => {},
@@ -1209,6 +1241,11 @@ const drainExecutions = async (baseUrl: string, probePort: number) => {
 
         if (job.kind === 'webhook_delivery') {
           await webhookHandler(job, signal);
+          return;
+        }
+
+        if (job.kind === 'browser_audit') {
+          await browserAuditHandler(job, signal);
           return;
         }
 

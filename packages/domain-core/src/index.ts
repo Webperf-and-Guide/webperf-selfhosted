@@ -383,7 +383,9 @@ const normalizeBrowserAuditHeaders = (headers: BrowserAuditWorkerRequest['custom
 const normalizeBrowserAuditCookies = (cookies: BrowserAuditWorkerRequest['cookies']) =>
   [...cookies].sort((left, right) => left.name.localeCompare(right.name) || left.value.localeCompare(right.value));
 
-export const toBrowserAuditSignaturePayload = (request: BrowserAuditWorkerRequest) =>
+export type BrowserAuditSignatureRequest = Omit<BrowserAuditWorkerRequest, 'signature'>;
+
+export const toBrowserAuditSignaturePayload = (request: BrowserAuditSignatureRequest) =>
   JSON.stringify({
     executionId: request.executionId,
     targetUrl: request.targetUrl,
@@ -403,7 +405,7 @@ export const toBrowserAuditSignaturePayload = (request: BrowserAuditWorkerReques
 
 export const createBrowserAuditSignature = async (
   sharedSecret: string,
-  request: BrowserAuditWorkerRequest
+  request: BrowserAuditSignatureRequest
 ) => {
   const key = await crypto.subtle.importKey(
     'raw',

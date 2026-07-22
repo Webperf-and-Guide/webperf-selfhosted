@@ -6,4 +6,4 @@ export const GET: RequestHandler = async ({ platform, url }) =>
   proxyControlResponse(getControlPlaneClient(platform).app.browserAudits.list(toListInput(readListQuery(url))));
 
 export const POST: RequestHandler = async ({ request, platform }) =>
-  proxyControlResponse(getControlPlaneClient(platform).app.browserAudits.create(await request.json()), 201);
+  proxyControlResponse(getControlPlaneClient(platform).app.browserAudits.create(await request.json()), 202);

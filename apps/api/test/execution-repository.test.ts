@@ -5,6 +5,7 @@ import type {
   CheckProfileRun,
   LatencyJobDetail
 } from '@webperf/contracts';
+import { browserAuditResourceSchema } from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +95,24 @@ const createDelivery = (targetId: string): CheckProfileAlertDelivery => ({
   deliveredAt: '2026-07-22T00:00:02.000Z',
   status: 'sent',
   responseStatus: 204,
+  error: null
+});
+
+const createBrowserAudit = (id: string) => browserAuditResourceSchema.parse({
+  id,
+  targetUrl: 'https://example.com/',
+  region: 'tokyo',
+  status: 'queued',
+  requestedAt: '2026-07-22T00:00:00.000Z',
+  startedAt: null,
+  completedAt: null,
+  policy: {
+    preset: 'mobile',
+    flow: { steps: [{ type: 'navigate', url: 'https://example.com/' }] }
+  },
+  customHeaders: [],
+  cookies: [],
+  result: null,
   error: null
 });
 
@@ -267,6 +286,80 @@ describe('durable execution repository', () => {
     expect(failed?.status).toBe('failed');
     expect(failed?.error?.code).toBe('lease_attempts_exhausted');
     expect(failed?.completedAt).toBe('2026-07-22T00:00:04.000Z');
+
+    repository.close();
+  });
+
+  test('keeps Browser Audit resources aligned with terminal queue outcomes', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    const queuedAt = new Date('2026-07-22T00:00:00.000Z');
+
+    for (const [id, maxAttempts] of [
+      ['audit_1_failed_queue', 1],
+      ['audit_2_expired_queue', 1],
+      ['audit_3_cancelled_queue', 3]
+    ] as const) {
+      repository.createExecutionResource({
+        executionJob: {
+          id: `exec_${id}`,
+          kind: 'browser_audit',
+          resourceId: id,
+          maxAttempts,
+          payload: { version: 'v1', auditId: id }
+        },
+        result: { kind: 'browser_audit', audit: createBrowserAudit(id) }
+      }, queuedAt);
+    }
+
+    const failedLease = repository.claimExecutionJob(
+      { leaseOwner: 'executor-failed', leaseDurationMs: 10_000 },
+      queuedAt
+    )!;
+    repository.markExecutionJobRunning({
+      id: failedLease.id,
+      leaseOwner: 'executor-failed',
+      leaseDurationMs: 10_000
+    }, queuedAt);
+    expect(repository.failExecutionJob({
+      id: failedLease.id,
+      leaseOwner: 'executor-failed',
+      error: {
+        code: 'execution_timeout',
+        message: 'Execution exceeded the configured time limit',
+        retryable: true
+      }
+    }, new Date('2026-07-22T00:00:01.000Z'))?.status).toBe('failed');
+    expect(repository.getBrowserAudit(failedLease.resourceId)).toMatchObject({
+      status: 'failed',
+      completedAt: '2026-07-22T00:00:01.000Z',
+      error: 'Browser Audit execution stopped before producing a result'
+    });
+
+    const expiredLease = repository.claimExecutionJob(
+      { leaseOwner: 'executor-expired', leaseDurationMs: 1_000 },
+      queuedAt
+    )!;
+    expect(expiredLease.resourceId).toBe('audit_2_expired_queue');
+    expect(repository.claimExecutionJob(
+      { leaseOwner: 'executor-next', leaseDurationMs: 1_000 },
+      new Date('2026-07-22T00:00:02.000Z')
+    )?.resourceId).toBe('audit_3_cancelled_queue');
+    expect(repository.getBrowserAudit('audit_2_expired_queue')).toMatchObject({
+      status: 'failed',
+      completedAt: '2026-07-22T00:00:02.000Z'
+    });
+
+    expect(repository.cancelExecutionJob(
+      'exec_audit_3_cancelled_queue',
+      new Date('2026-07-22T00:00:03.000Z')
+    )?.status).toBe('cancelled');
+    expect(repository.getBrowserAudit('audit_3_cancelled_queue')).toMatchObject({
+      status: 'cancelled',
+      startedAt: null,
+      completedAt: '2026-07-22T00:00:03.000Z',
+      error: null
+    });
 
     repository.close();
   });

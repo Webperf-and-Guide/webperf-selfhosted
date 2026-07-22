@@ -84,10 +84,31 @@ if [[ "$profile" == "browser-audit" ]]; then
 
   bun -e '
     const payload = JSON.parse(process.argv[1]);
+    if (payload.status !== "queued") {
+      throw new Error(`Expected queued browser audit, got ${payload.status}`);
+    }
+  ' "$audit_response"
+
+  audit_id="$(bun -e 'console.log(JSON.parse(process.argv[1]).id)' "$audit_response")"
+  audit_detail="$audit_response"
+  for _ in {1..60}; do
+    audit_detail="$(
+      curl -fsS "http://127.0.0.1:8788/v1/browser-audits/${audit_id}" \
+        -H 'authorization: Bearer smoke-admin-token-value'
+    )"
+    audit_status="$(bun -e 'console.log(JSON.parse(process.argv[1]).status)' "$audit_detail")"
+    if [[ "$audit_status" == "succeeded" || "$audit_status" == "failed" ]]; then
+      break
+    fi
+    sleep 2
+  done
+
+  bun -e '
+    const payload = JSON.parse(process.argv[1]);
     if (payload.status !== "succeeded") {
       throw new Error(`Expected succeeded browser audit, got ${payload.status}`);
     }
-  ' "$audit_response"
+  ' "$audit_detail"
 fi
 
 echo "{\"ok\":true,\"profile\":\"$profile\"}"

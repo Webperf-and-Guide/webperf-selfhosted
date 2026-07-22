@@ -43,16 +43,16 @@ Use the console to:
 3. define reusable sites, route groups, region sets, and checks
 4. review reports and region coverage
 
-## Optional Browser Audit Direct-Run
+## Optional Browser Audit
 
 The browser-audit Lighthouse runner is optional and not part of the default `bun run dev` path.
 
-Run the API with browser-audit wiring:
+Run the self-host stack with Browser Audit executor wiring:
 
 ```bash
 BROWSER_AUDIT_SHARED_SECRET=dev-browser-audit-shared-secret \
 SELFHOST_BROWSER_AUDIT_BASE_URL=http://127.0.0.1:8081 \
-bun run dev:api
+bun run dev
 ```
 
 Run the worker in a second shell:
@@ -68,7 +68,7 @@ That enables:
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
 
-See [browser-audit-lighthouse.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md) for the runtime profile and current direct-run limits.
+See [browser-audit-lighthouse.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-lighthouse.md) for the runtime profile and current queued-execution limits.
 
 ## Notes
 

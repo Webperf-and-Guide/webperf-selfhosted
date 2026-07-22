@@ -259,7 +259,7 @@
 
 {#if audits.length === 0}
   <OperatorEmptyState
-    detail="Start a direct-run browser audit to persist the summary, artifact metadata, and failure reason here."
+    detail="Queue a browser audit to persist the summary, artifact metadata, and failure reason here."
     title="No browser audits yet."
   />
 {:else}

@@ -1,6 +1,7 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { parseSelfhostExecutorVars } from '@webperf/config/selfhost-executor';
+import { createBrowserAuditExecutionHandler } from './browser-audit-handler';
 import { createExecutorApiClient } from './client';
 import { describeSafeError } from './diagnostics';
 import { createDefaultLeaseOwner } from './identity';
@@ -13,9 +14,13 @@ const main = async () => {
     SELFHOST_EXECUTOR_API_BASE_URL: process.env.SELFHOST_EXECUTOR_API_BASE_URL,
     SELFHOST_INTERNAL_SECRET: process.env.SELFHOST_INTERNAL_SECRET,
     PROBE_SHARED_SECRET: process.env.PROBE_SHARED_SECRET,
+    BROWSER_AUDIT_SHARED_SECRET: process.env.BROWSER_AUDIT_SHARED_SECRET,
     SELFHOST_PROBE_BASE_URLS_JSON: process.env.SELFHOST_PROBE_BASE_URLS_JSON,
+    SELFHOST_BROWSER_AUDIT_BASE_URL: process.env.SELFHOST_BROWSER_AUDIT_BASE_URL,
     SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP:
       process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP,
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP:
+      process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP,
     SELFHOST_EXECUTOR_ID: process.env.SELFHOST_EXECUTOR_ID,
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: process.env.SELFHOST_EXECUTOR_POLL_INTERVAL_MS,
     SELFHOST_EXECUTOR_LEASE_DURATION_MS: process.env.SELFHOST_EXECUTOR_LEASE_DURATION_MS,
@@ -69,11 +74,29 @@ const main = async () => {
     allowInsecureProbeHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP
   });
   const webhookHandler = createWebhookExecutionHandler({ client, leaseOwner });
+  const browserAuditHandler = createBrowserAuditExecutionHandler({
+    client,
+    leaseOwner,
+    browserAuditSharedSecret: runtime.BROWSER_AUDIT_SHARED_SECRET,
+    browserAuditBaseUrl: runtime.SELFHOST_BROWSER_AUDIT_BASE_URL,
+    allowInsecureBrowserAuditHttp:
+      runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP
+  });
 
   if (runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP) {
     console.warn(JSON.stringify({
       service: 'webperf-executor',
       warning: 'insecure_probe_http_enabled'
+    }));
+  }
+
+  if (
+    runtime.SELFHOST_BROWSER_AUDIT_BASE_URL
+    && runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP
+  ) {
+    console.warn(JSON.stringify({
+      service: 'webperf-executor',
+      warning: 'insecure_browser_audit_http_enabled'
     }));
   }
 
@@ -88,6 +111,11 @@ const main = async () => {
 
         if (executionJob.kind === 'webhook_delivery') {
           await webhookHandler(executionJob, signal);
+          return;
+        }
+
+        if (executionJob.kind === 'browser_audit') {
+          await browserAuditHandler(executionJob, signal);
           return;
         }
 

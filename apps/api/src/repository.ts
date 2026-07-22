@@ -32,7 +32,11 @@ import {
 } from '@webperf/contracts';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createStorageCrypto } from './storage-crypto';
+import {
+  createStorageCrypto,
+  InvalidEncryptedPayloadEnvelopeError,
+  UnencryptedPersistedPayloadError
+} from './storage-crypto';
 import { redactUrlQuery } from './redaction';
 
 type JobRow = {
@@ -1006,13 +1010,12 @@ const describePersistedPayloadError = (error: unknown) => {
     return { type: 'invalid_json' };
   }
 
-  if (error instanceof Error) {
-    if (error.message === 'Refusing to parse an unencrypted persisted payload') {
-      return { type: 'unencrypted_payload' };
-    }
-    if (error.message === 'Invalid encrypted payload envelope') {
-      return { type: 'invalid_envelope' };
-    }
+  if (error instanceof UnencryptedPersistedPayloadError) {
+    return { type: 'unencrypted_payload' };
+  }
+
+  if (error instanceof InvalidEncryptedPayloadEnvelopeError) {
+    return { type: 'invalid_envelope' };
   }
 
   const issues = (error as { issues?: unknown } | null)?.issues;

@@ -16,6 +16,22 @@ export type StorageCrypto = {
   parse(value: string, options?: { allowPlaintext?: boolean }): unknown;
 };
 
+export class UnencryptedPersistedPayloadError extends Error {
+  override name = 'UnencryptedPersistedPayloadError';
+
+  constructor() {
+    super('Refusing to parse an unencrypted persisted payload');
+  }
+}
+
+export class InvalidEncryptedPayloadEnvelopeError extends Error {
+  override name = 'InvalidEncryptedPayloadEnvelopeError';
+
+  constructor() {
+    super('Invalid encrypted payload envelope');
+  }
+}
+
 export const createStorageCrypto = ({
   currentSecret,
   nextSecret
@@ -42,7 +58,7 @@ export const createStorageCrypto = ({
     parse(value, options = {}) {
       if (!isEncryptedEnvelope(value)) {
         if (!options.allowPlaintext) {
-          throw new Error('Refusing to parse an unencrypted persisted payload');
+          throw new UnencryptedPersistedPayloadError();
         }
         return JSON.parse(value);
       }
@@ -96,7 +112,7 @@ const parseEnvelope = (value: string) => {
   const prefix = parts.slice(0, 3).join(':');
 
   if (parts.length !== 6 || (prefix !== currentEnvelopePrefix && prefix !== legacyEnvelopePrefix)) {
-    throw new Error('Invalid encrypted payload envelope');
+    throw new InvalidEncryptedPayloadEnvelopeError();
   }
 
   const iv = Buffer.from(parts[3] ?? '', 'base64url');
@@ -104,7 +120,7 @@ const parseEnvelope = (value: string) => {
   const ciphertext = Buffer.from(parts[5] ?? '', 'base64url');
 
   if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0) {
-    throw new Error('Invalid encrypted payload envelope');
+    throw new InvalidEncryptedPayloadEnvelopeError();
   }
 
   return { prefix, iv, tag, ciphertext };

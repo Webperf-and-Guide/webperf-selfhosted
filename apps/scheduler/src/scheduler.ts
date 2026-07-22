@@ -19,6 +19,9 @@ export type SchedulerDispatchResult = {
 };
 
 export const defaultSchedulerRequestTimeoutMs = 30_000;
+export const maxSchedulerRequestTimeoutMs = 5 * 60_000;
+export const maxSchedulerBackoffMs = 2 * 86_400_000;
+const minimumSchedulerBackoffCeilingMs = 15 * 60_000;
 
 const buildDispatchErrorMessage = (
   code: 'request_failed' | 'response_invalid',
@@ -68,9 +71,11 @@ export const dispatchScheduledChecks = async ({
   if (
     !Number.isSafeInteger(requestTimeoutMs)
     || requestTimeoutMs < 1
-    || requestTimeoutMs > 300_000
+    || requestTimeoutMs > maxSchedulerRequestTimeoutMs
   ) {
-    throw new Error('Scheduler request timeout must be an integer between 1 and 300000ms');
+    throw new Error(
+      `Scheduler request timeout must be an integer between 1 and ${maxSchedulerRequestTimeoutMs}ms`
+    );
   }
 
   let apiUrl: URL;
@@ -128,21 +133,13 @@ export const dispatchScheduledChecks = async ({
     let payload: unknown;
 
     try {
-      payload = await response.json();
+      payload = await raceWithAbort(response.json(), requestSignal);
     } catch (error) {
       if (signal?.aborted) {
         throw signal.reason ?? error;
       }
 
-      if (timeoutController.signal.aborted) {
-        throw new SchedulerDispatchError('request_failed', null);
-      }
-
       throw new SchedulerDispatchError('response_invalid', response.status);
-    }
-
-    if (timeoutController.signal.aborted) {
-      throw new SchedulerDispatchError('request_failed', null);
     }
 
     const parsed = schedulerDispatchResponseSchema.safeParse(payload);
@@ -169,7 +166,7 @@ export const runScheduler = async ({
   signal,
   logger,
   now = () => new Date(),
-  maxBackoffMs = Math.max(pollIntervalMs, 15 * 60_000),
+  maxBackoffMs = calculateDefaultSchedulerMaxBackoffMs(pollIntervalMs),
   wait = waitForNextPoll
 }: {
   dispatch: (signal: AbortSignal) => Promise<SchedulerDispatchResult>;
@@ -190,10 +187,12 @@ export const runScheduler = async ({
 
   if (
     !Number.isSafeInteger(maxBackoffMs)
-    || maxBackoffMs < pollIntervalMs
-    || maxBackoffMs > 86_400_000
+    || maxBackoffMs <= pollIntervalMs
+    || maxBackoffMs > maxSchedulerBackoffMs
   ) {
-    throw new Error('Scheduler maximum backoff must be an integer between the poll interval and 86400000ms');
+    throw new Error(
+      `Scheduler maximum backoff must be an integer greater than the poll interval and no more than ${maxSchedulerBackoffMs}ms`
+    );
   }
 
   let consecutiveFailures = 0;
@@ -252,6 +251,12 @@ export const calculateSchedulerPollDelay = (
   return Math.min(maxBackoffMs, pollIntervalMs * 2 ** exponent);
 };
 
+const calculateDefaultSchedulerMaxBackoffMs = (pollIntervalMs: number) =>
+  Math.min(
+    maxSchedulerBackoffMs,
+    Math.max(minimumSchedulerBackoffCeilingMs, pollIntervalMs * 2)
+  );
+
 export const describeSchedulerError = (error: unknown) => {
   if (error instanceof SchedulerDispatchError) {
     return {
@@ -285,3 +290,23 @@ const waitForNextPoll = (durationMs: number, signal: AbortSignal) =>
     };
     signal.addEventListener('abort', onAbort, { once: true });
   });
+
+const raceWithAbort = async <Result>(operation: Promise<Result>, signal: AbortSignal) => {
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
+};

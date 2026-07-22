@@ -7,8 +7,8 @@ on a fixed interval. The API selects due Checks and creates queued Runs; this
 process never claims execution work, calls probes, runs Browser Audits, or
 delivers webhooks. Responses are contract-validated and error bodies are not
 reflected into logs. Each dispatch is bounded to 30 seconds, and consecutive
-failures use exponential backoff capped at 15 minutes (or the configured poll
-interval when it is longer).
+failures use exponential backoff capped at the larger of 15 minutes or twice
+the configured poll interval, with an absolute 48-hour ceiling.
 
 ## Local Run
 

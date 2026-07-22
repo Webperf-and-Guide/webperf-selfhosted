@@ -97,6 +97,31 @@ describe('self-host scheduler boundary', () => {
     expect(caught).toMatchObject({ code: 'request_failed', status: null });
   });
 
+  test('bounds response body reads while preserving the HTTP status', async () => {
+    let caught: unknown;
+
+    try {
+      await dispatchScheduledChecks({
+        apiBaseUrl: 'https://api.example.test',
+        internalSecret: 'scheduler-internal-secret',
+        requestTimeoutMs: 10,
+        fetchImpl: async () => new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"triggeredCount":'));
+          }
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SchedulerDispatchError);
+    expect(caught).toMatchObject({ code: 'response_invalid', status: 200 });
+  });
+
   test('rejects a credential-bearing or pathful API base URL before fetch', async () => {
     let fetchCalled = false;
 

@@ -16,6 +16,9 @@ Today the default execution path is:
 
 Optional runtimes may live alongside that path without becoming a default dependency.
 Today that includes `apps/browser-audit-lighthouse`, which remains a standalone runtime surface.
+Its output follows the engine-neutral
+[Browser Audit Protocol](./browser-audit-protocol.md), so Lighthouse remains a
+replaceable reference engine rather than a public-contract dependency.
 
 ## Design Rule
 

@@ -143,6 +143,7 @@ Current repo state as of 2026-07-22:
 - direct Browser Audit creation now returns an atomic queued resource, while the executor owns signed runner calls, retry-safe status transitions, terminal lease/cancellation reconciliation, and secret-safe failure persistence; probe and Browser Audit HMAC secrets are no longer present in the API process
 - SQLite startup now uses ordered migration files with WAL, busy-timeout, foreign-key, forward-schema refusal, and graceful close semantics; verified backup/restore/doctor/retention/optimize/VACUUM commands share the same database core, and optional startup pre-migration backups preserve existing installs before upgrades
 - the scheduler is now a testable internal-token-only dispatch loop with contract-validated responses, a 30-second request-and-body bound, capped outage backoff with headroom above every valid poll interval, abort-aware polling, and safe diagnostics; the real API integration uses that client, while a process-level recovery test restarts the API three times against one SQLite file and proves an expired running lease is reclaimed by a new executor identity exactly once
+- Browser Audit Protocol v1 now normalizes core metrics, scores, open extended metrics, checkpoints, issues, artifacts, timestamps, and engine/browser/runtime/component toolchains; artifact registry v1 keeps standard kinds while accepting safe extensions, legacy Lighthouse-shaped SQLite records normalize on read, and checked-in Lighthouse plus sitespeed.io fixtures prove the public contract is engine-neutral
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -180,10 +181,10 @@ Current local URLs:
 ## Immediate Next Tasks
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. ship the engine-neutral Browser Audit Protocol contracts and compatibility fixtures now that the durable execution phase is complete
-3. adapt the Lighthouse reference runner to the engine-neutral normalized result and toolchain model
-4. persist and serve local artifacts through authenticated, traversal-safe endpoints
-5. keep authentication, encrypted persistence, rotation, and redaction covered as artifacts are added
+2. persist and serve local Browser Audit artifacts through authenticated, traversal-safe endpoints
+3. keep authentication, encrypted persistence, rotation, and redaction covered as artifacts are added
+4. align the Lighthouse reference runner upload client with the authenticated local artifact store
+5. add artifact upload/download/traversal/retention integration coverage
 6. ship versioned production/development Compose bundles with internal-only services
 7. gate release images, SBOM, provenance, and digest metadata on complete CI
 8. complete the operator install, backup, upgrade, security, and troubleshooting documentation

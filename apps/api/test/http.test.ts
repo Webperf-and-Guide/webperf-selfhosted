@@ -430,7 +430,7 @@ describe('api service monitoring expansion', () => {
         id: string;
         status: string;
         error: string | null;
-        result: { summary: { performanceScore: number | null }; artifacts: Array<{ kind: string }> } | null;
+        result: { scores: { performance: number | null }; artifacts: Array<{ kind: string }> } | null;
         customHeaders: Array<{ name: string; value: string }>;
         cookies: Array<{ name: string; value: string }>;
       };
@@ -468,16 +468,18 @@ describe('api service monitoring expansion', () => {
         id: string;
         status: string;
         result: {
-          summary: { performanceScore: number | null };
+          scores: { performance: number | null };
           artifacts: Array<{ kind: string }>;
         } | null;
       };
       expect(browserAuditGetResponse.status).toBe(200);
       expect(browserAuditDetail.id).toBe(createdBrowserAudit.id);
       expect(browserAuditDetail.status).toBe('succeeded');
-      expect(browserAuditDetail.result?.summary.performanceScore).toBe(0.91);
+      expect(browserAuditDetail.result?.scores.performance).toBe(0.91);
       expect(
-        browserAuditDetail.result?.artifacts.some((artifact) => artifact.kind === 'html')
+        browserAuditDetail.result?.artifacts.some(
+          (artifact) => artifact.kind === 'lighthouse-html'
+        )
       ).toBe(true);
 
       browserAuditWorker.setScenario({
@@ -1035,16 +1037,22 @@ const startBrowserAuditWorkerServer = (
 
       if (url.pathname === '/capabilities') {
         return Response.json({
+          protocolVersion: 'v1',
           flowDslVersion: 'v1',
+          artifactRegistryVersion: 'v1',
           toolchain: {
-            flowDslVersion: 'v1',
-            bunVersion: '1.3.11',
-            chromeVersion: '136.0.0.0',
-            puppeteerVersion: '24.7.1',
-            lighthouseVersion: '12.6.0'
+            engine: { id: 'lighthouse', version: '12.6.0' },
+            browser: { name: 'Chrome', version: '136.0.0.0' },
+            runtime: { name: 'Bun', version: '1.3.11' },
+            components: [{ name: 'puppeteer-core', version: '24.7.1' }]
           },
           supportedCheckpointModes: ['navigation', 'snapshot', 'timespan'],
-          supportedArtifactKinds: ['json', 'html', 'screenshot', 'trace'],
+          supportedArtifactKinds: [
+            'lighthouse-json',
+            'lighthouse-html',
+            'screenshot',
+            'trace'
+          ],
           unsupportedFeatures: [],
           limits: {
             maxSteps: 20,
@@ -1074,13 +1082,7 @@ const startBrowserAuditWorkerServer = (
         result:
           current.status === 'succeeded'
             ? {
-                summary: {
-                  finalUrl: payload.targetUrl,
-                  statusCode: 200,
-                  performanceScore: 0.91,
-                  accessibilityScore: 0.96,
-                  bestPracticesScore: 0.89,
-                  seoScore: 0.94,
+                coreMetrics: {
                   fcpMs: 1_120,
                   lcpMs: 1_820,
                   cls: 0.02,
@@ -1088,12 +1090,40 @@ const startBrowserAuditWorkerServer = (
                   tbtMs: 88,
                   speedIndexMs: 1_540
                 },
-                checkpoints: [],
+                scores: {
+                  performance: 0.91,
+                  accessibility: 0.96,
+                  bestPractices: 0.89,
+                  seo: 0.94
+                },
+                extendedMetrics: [],
+                checkpoints: [{
+                  id: 'navigation',
+                  mode: 'navigation',
+                  label: 'Navigation',
+                  finalUrl: payload.targetUrl,
+                  statusCode: 200,
+                  coreMetrics: {
+                    fcpMs: 1_120,
+                    lcpMs: 1_820,
+                    cls: 0.02,
+                    inpMs: 145,
+                    tbtMs: 88,
+                    speedIndexMs: 1_540
+                  },
+                  scores: {
+                    performance: 0.91,
+                    accessibility: 0.96,
+                    bestPractices: 0.89,
+                    seo: 0.94
+                  },
+                  extendedMetrics: []
+                }],
                 issues: [],
                 artifacts: [
                   {
                     id: `${payload.executionId}_json`,
-                    kind: 'json',
+                    kind: 'lighthouse-json',
                     url: `https://artifacts.test/${payload.executionId}.json`,
                     contentType: 'application/json',
                     byteSize: 4096,
@@ -1101,7 +1131,7 @@ const startBrowserAuditWorkerServer = (
                   },
                   {
                     id: `${payload.executionId}_html`,
-                    kind: 'html',
+                    kind: 'lighthouse-html',
                     url: `https://artifacts.test/${payload.executionId}.html`,
                     contentType: 'text/html',
                     byteSize: 6144,
@@ -1109,11 +1139,10 @@ const startBrowserAuditWorkerServer = (
                   }
                 ],
                 toolchain: {
-                  flowDslVersion: 'v1',
-                  bunVersion: '1.3.11',
-                  chromeVersion: '136.0.0.0',
-                  puppeteerVersion: '24.7.1',
-                  lighthouseVersion: '12.6.0'
+                  engine: { id: 'lighthouse', version: '12.6.0' },
+                  browser: { name: 'Chrome', version: '136.0.0.0' },
+                  runtime: { name: 'Bun', version: '1.3.11' },
+                  components: [{ name: 'puppeteer-core', version: '24.7.1' }]
                 },
                 startedAt,
                 completedAt

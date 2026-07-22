@@ -51,6 +51,17 @@
     }
   };
 
+  const formatExtendedMetric = (
+    metric: NonNullable<BrowserAuditResource['result']>['extendedMetrics'][number]
+  ) => {
+    if (metric.value == null) {
+      return 'n/a';
+    }
+
+    const value = String(metric.value);
+    return metric.unit ? `${value} ${metric.unit}` : value;
+  };
+
   const summaryRows = $derived.by(() =>
     selectedAudit
       ? [
@@ -67,16 +78,22 @@
   const metricRows = $derived.by(() =>
     selectedAudit?.result
       ? [
-          { label: 'Performance', value: formatPercentScore(selectedAudit.result.summary.performanceScore) },
-          { label: 'Accessibility', value: formatPercentScore(selectedAudit.result.summary.accessibilityScore) },
-          { label: 'Best practices', value: formatPercentScore(selectedAudit.result.summary.bestPracticesScore) },
-          { label: 'SEO', value: formatPercentScore(selectedAudit.result.summary.seoScore) },
-          { label: 'FCP', value: formatTiming(selectedAudit.result.summary.fcpMs) },
-          { label: 'LCP', value: formatTiming(selectedAudit.result.summary.lcpMs) },
-          { label: 'CLS', value: formatText(selectedAudit.result.summary.cls?.toString()) },
-          { label: 'INP', value: formatTiming(selectedAudit.result.summary.inpMs) },
-          { label: 'TBT', value: formatTiming(selectedAudit.result.summary.tbtMs) },
-          { label: 'Speed index', value: formatTiming(selectedAudit.result.summary.speedIndexMs) }
+          { label: 'Performance', value: formatPercentScore(selectedAudit.result.scores.performance) },
+          { label: 'Accessibility', value: formatPercentScore(selectedAudit.result.scores.accessibility) },
+          { label: 'Best practices', value: formatPercentScore(selectedAudit.result.scores.bestPractices) },
+          { label: 'SEO', value: formatPercentScore(selectedAudit.result.scores.seo) },
+          { label: 'FCP', value: formatTiming(selectedAudit.result.coreMetrics.fcpMs) },
+          { label: 'LCP', value: formatTiming(selectedAudit.result.coreMetrics.lcpMs) },
+          { label: 'CLS', value: formatText(selectedAudit.result.coreMetrics.cls?.toString()) },
+          { label: 'INP', value: formatTiming(selectedAudit.result.coreMetrics.inpMs) },
+          { label: 'TBT', value: formatTiming(selectedAudit.result.coreMetrics.tbtMs) },
+          { label: 'Speed index', value: formatTiming(selectedAudit.result.coreMetrics.speedIndexMs) },
+          ...selectedAudit.result.extendedMetrics.map(
+            (metric: NonNullable<BrowserAuditResource['result']>['extendedMetrics'][number]) => ({
+              label: metric.label ?? metric.id,
+              value: formatExtendedMetric(metric)
+            })
+          )
         ]
       : []
   );
@@ -117,10 +134,28 @@
   const toolchainRows = $derived.by(() =>
     selectedAudit?.result
       ? [
-          { label: 'Bun', value: selectedAudit.result.toolchain.bunVersion },
-          { label: 'Chrome', value: selectedAudit.result.toolchain.chromeVersion },
-          { label: 'Puppeteer', value: selectedAudit.result.toolchain.puppeteerVersion },
-          { label: 'Lighthouse', value: selectedAudit.result.toolchain.lighthouseVersion }
+          {
+            label: 'Engine',
+            value: `${selectedAudit.result.toolchain.engine.id} ${selectedAudit.result.toolchain.engine.version}`
+          },
+          {
+            label: 'Browser',
+            value: `${selectedAudit.result.toolchain.browser.name} ${selectedAudit.result.toolchain.browser.version}`
+          },
+          {
+            label: 'Runtime',
+            value: `${selectedAudit.result.toolchain.runtime.name} ${selectedAudit.result.toolchain.runtime.version}`
+          },
+          {
+            label: 'Components',
+            value:
+              selectedAudit.result.toolchain.components
+                .map(
+                  (component: NonNullable<BrowserAuditResource['result']>['toolchain']['components'][number]) =>
+                    `${component.name} ${component.version}`
+                )
+                .join(', ') || 'none'
+          }
         ]
       : []
   );
@@ -172,8 +207,8 @@
       id: checkpoint.id,
       mode: checkpoint.mode,
       label: checkpoint.label ?? 'Untitled checkpoint',
-      performance: formatPercentScore(checkpoint.summary.performanceScore),
-      lcp: formatTiming(checkpoint.summary.lcpMs)
+      performance: formatPercentScore(checkpoint.scores.performance),
+      lcp: formatTiming(checkpoint.coreMetrics.lcpMs)
     })) ?? []
   );
 
@@ -287,7 +322,7 @@
                   {formatText(audit.region)} · {formatDateTime(audit.completedAt ?? audit.requestedAt)}
                 </p>
                 <p class="text-xs text-muted">
-                  {audit.policy.preset} · Perf {formatPercentScore(audit.result?.summary.performanceScore)}
+                  {audit.policy.preset} · Perf {formatPercentScore(audit.result?.scores.performance)}
                 </p>
                 <p class={audit.error ? 'truncate text-[0.72rem] text-danger/85' : 'truncate text-[0.72rem] text-muted'}>
                   {summarizeRecentAudit(audit)}

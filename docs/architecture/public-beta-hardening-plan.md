@@ -187,15 +187,15 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### 4. Browser Audit Protocol
 
-- [ ] Replace fixed Lighthouse toolchain fields with engine/browser/runtime and
+- [x] Replace fixed Lighthouse toolchain fields with engine/browser/runtime and
   component records.
-- [ ] Normalize core metrics, scores, extended metrics, checkpoints, issues,
+- [x] Normalize core metrics, scores, extended metrics, checkpoints, issues,
   artifacts, toolchain, and timestamps.
-- [ ] Make artifact kinds extensible while registering standard kinds.
-- [ ] Preserve Lighthouse user-flow support and add engine-neutral fixtures.
+- [x] Make artifact kinds extensible while registering standard kinds.
+- [x] Preserve Lighthouse user-flow support and add engine-neutral fixtures.
 - [x] Report Fast Check capabilities truthfully; unsupported TCP/TLS fields stay
   null with capability flags false.
-- [ ] Add a Sampo changeset for the public contract version.
+- [x] Add a Sampo changeset for the public contract version.
 
 ### 5. Artifact storage
 

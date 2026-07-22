@@ -1,0 +1,113 @@
+{
+  "protocolVersion": "v1",
+  "coreMetrics": {
+    "fcpMs": 910,
+    "lcpMs": 1720,
+    "cls": 0.024,
+    "inpMs": 138,
+    "tbtMs": 91,
+    "speedIndexMs": 1490
+  },
+  "scores": {
+    "performance": 0.91,
+    "coach": 0.88
+  },
+  "extendedMetrics": [
+    {
+      "id": "request-count",
+      "label": "Network requests",
+      "value": 42,
+      "unit": "count"
+    },
+    {
+      "id": "transfer-size-bytes",
+      "label": "Transfer size",
+      "value": 512040,
+      "unit": "byte"
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "browsertime-navigation",
+      "mode": "navigation",
+      "label": "Browsertime navigation",
+      "finalUrl": "https://example.com/catalog",
+      "statusCode": 200,
+      "coreMetrics": {
+        "fcpMs": 910,
+        "lcpMs": 1720,
+        "cls": 0.024,
+        "inpMs": 138,
+        "tbtMs": 91,
+        "speedIndexMs": 1490
+      },
+      "scores": {
+        "performance": 0.91,
+        "coach": 0.88
+      },
+      "extendedMetrics": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "large-document",
+      "severity": "warning",
+      "message": "The transferred document exceeded the fixture budget."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact_waterfall",
+      "registryVersion": "v1",
+      "kind": "waterfall",
+      "url": "/v1/browser-audits/audit_sitespeed/artifacts/artifact_waterfall",
+      "contentType": "image/png",
+      "byteSize": 28740,
+      "createdAt": "2026-07-22T00:01:05.000Z"
+    },
+    {
+      "id": "artifact_har",
+      "registryVersion": "v1",
+      "kind": "har",
+      "url": "/v1/browser-audits/audit_sitespeed/artifacts/artifact_har",
+      "contentType": "application/json",
+      "byteSize": 68420,
+      "createdAt": "2026-07-22T00:01:05.000Z"
+    },
+    {
+      "id": "artifact_sitespeed_summary",
+      "registryVersion": "v1",
+      "kind": "sitespeed-summary",
+      "url": "/v1/browser-audits/audit_sitespeed/artifacts/artifact_sitespeed_summary",
+      "contentType": "application/json",
+      "byteSize": 7400,
+      "createdAt": "2026-07-22T00:01:05.000Z"
+    }
+  ],
+  "toolchain": {
+    "engine": {
+      "id": "sitespeed.io",
+      "version": "35.0.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "128.0"
+    },
+    "runtime": {
+      "name": "Node.js",
+      "version": "22.17.0"
+    },
+    "components": [
+      {
+        "name": "browsertime",
+        "version": "24.0.0"
+      },
+      {
+        "name": "coach-core",
+        "version": "8.0.0"
+      }
+    ]
+  },
+  "startedAt": "2026-07-22T00:01:00.000Z",
+  "completedAt": "2026-07-22T00:01:05.000Z"
+}

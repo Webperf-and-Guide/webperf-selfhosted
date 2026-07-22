@@ -1,6 +1,8 @@
-# Browser Audit Worker
+# Browser Audit Lighthouse Reference Runner
 
-Bun-first optional browser audit Lighthouse runner for `webperf-selfhosted`.
+Bun-first optional Lighthouse reference implementation of the public,
+engine-neutral Browser Audit Protocol. It is not the only supported engine;
+other runners can emit the same normalized contract.
 
 It runs:
 
@@ -8,8 +10,10 @@ It runs:
 - Chrome for Testing
 - `puppeteer-core`
 - Lighthouse user flows through the Lighthouse module API
+- normalized core metrics, scores, extended metrics, checkpoints, and issues
+- `lighthouse-json`, `lighthouse-html`, `screenshot`, and `trace` artifacts
 
-The worker exposes:
+The reference runner exposes:
 
 - `GET /healthz`
 - `GET /capabilities`

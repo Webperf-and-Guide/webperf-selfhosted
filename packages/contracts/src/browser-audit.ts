@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { regionCodeSchema } from './regions';
 
 export const browserAuditDslVersion = 'v1' as const;
+export const browserAuditProtocolVersion = 'v1' as const;
+export const browserAuditArtifactRegistryVersion = 'v1' as const;
 
 export const browserAuditPresetSchema = z.enum(['mobile', 'desktop']);
 export type BrowserAuditPreset = z.infer<typeof browserAuditPresetSchema>;
@@ -9,7 +11,44 @@ export type BrowserAuditPreset = z.infer<typeof browserAuditPresetSchema>;
 export const browserAuditProviderClassSchema = z.enum(['best_effort', 'fixed']);
 export type BrowserAuditProviderClass = z.infer<typeof browserAuditProviderClassSchema>;
 
-export const browserAuditArtifactKindSchema = z.enum(['json', 'html', 'screenshot', 'trace']);
+export const standardBrowserAuditArtifactKinds = [
+  'lighthouse-json',
+  'lighthouse-html',
+  'screenshot',
+  'trace',
+  'har',
+  'filmstrip',
+  'video',
+  'waterfall',
+  'log'
+] as const;
+export const browserAuditStandardArtifactKindSchema = z.enum(
+  standardBrowserAuditArtifactKinds
+);
+export type BrowserAuditStandardArtifactKind =
+  (typeof standardBrowserAuditArtifactKinds)[number];
+
+const browserAuditArtifactKindValueSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/);
+
+export const browserAuditArtifactKindSchema = z.preprocess(
+  (value) => {
+    if (value === 'json') {
+      return 'lighthouse-json';
+    }
+
+    if (value === 'html') {
+      return 'lighthouse-html';
+    }
+
+    return value;
+  },
+  browserAuditArtifactKindValueSchema
+);
 export type BrowserAuditArtifactKind = z.infer<typeof browserAuditArtifactKindSchema>;
 
 export const browserAuditCheckpointModeSchema = z.enum(['navigation', 'snapshot', 'timespan']);
@@ -225,6 +264,7 @@ export const browserAuditPolicySchema = z.object({
 });
 export type BrowserAuditPolicy = z.infer<typeof browserAuditPolicySchema>;
 
+/** @deprecated Compatibility input for pre-v1 persisted results. */
 export const browserAuditMetricSummarySchema = z.object({
   finalUrl: z.string().url().nullable().default(null),
   statusCode: z.number().int().min(100).max(599).nullable().default(null),
@@ -241,6 +281,62 @@ export const browserAuditMetricSummarySchema = z.object({
 });
 export type BrowserAuditMetricSummary = z.infer<typeof browserAuditMetricSummarySchema>;
 
+export const browserAuditCoreMetricsSchema = z.object({
+  fcpMs: z.number().nonnegative().nullable().default(null),
+  lcpMs: z.number().nonnegative().nullable().default(null),
+  cls: z.number().nonnegative().nullable().default(null),
+  inpMs: z.number().nonnegative().nullable().default(null),
+  tbtMs: z.number().nonnegative().nullable().default(null),
+  speedIndexMs: z.number().nonnegative().nullable().default(null)
+});
+export type BrowserAuditCoreMetrics = z.infer<typeof browserAuditCoreMetricsSchema>;
+
+const browserAuditScoreValueSchema = z.number().min(0).max(1).nullable();
+
+export const browserAuditScoresSchema = z
+  .object({
+    performance: browserAuditScoreValueSchema.default(null),
+    accessibility: browserAuditScoreValueSchema.default(null),
+    bestPractices: browserAuditScoreValueSchema.default(null),
+    seo: browserAuditScoreValueSchema.default(null)
+  })
+  .catchall(browserAuditScoreValueSchema);
+export type BrowserAuditScores = z.infer<typeof browserAuditScoresSchema>;
+
+export const browserAuditExtendedMetricSchema = z.object({
+  id: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[a-z0-9][a-z0-9._-]*$/),
+  label: z.string().trim().min(1).max(200).nullable().default(null),
+  value: z.union([z.number().finite(), z.string().max(1_000), z.boolean(), z.null()]),
+  unit: z.string().trim().min(1).max(40).nullable().default(null)
+});
+export type BrowserAuditExtendedMetric = z.infer<typeof browserAuditExtendedMetricSchema>;
+
+export const browserAuditExtendedMetricsSchema = z
+  .array(browserAuditExtendedMetricSchema)
+  .max(200)
+  .default([])
+  .superRefine((metrics, context) => {
+    const seen = new Set<string>();
+
+    metrics.forEach((metric, index) => {
+      if (seen.has(metric.id)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Extended metric id must be unique: ${metric.id}`,
+          path: [index, 'id']
+        });
+      }
+
+      seen.add(metric.id);
+    });
+  });
+export type BrowserAuditExtendedMetrics = z.infer<typeof browserAuditExtendedMetricsSchema>;
+
 export const browserAuditIssueSchema = z.object({
   code: z.string().min(1).max(120),
   severity: browserAuditIssueSeveritySchema,
@@ -250,6 +346,9 @@ export type BrowserAuditIssue = z.infer<typeof browserAuditIssueSchema>;
 
 export const browserAuditArtifactRefSchema = z.object({
   id: z.string().min(1),
+  registryVersion: z
+    .literal(browserAuditArtifactRegistryVersion)
+    .default(browserAuditArtifactRegistryVersion),
   kind: browserAuditArtifactKindSchema,
   url: z.string().min(1),
   contentType: z.string().min(1).max(200),
@@ -258,32 +357,85 @@ export const browserAuditArtifactRefSchema = z.object({
 });
 export type BrowserAuditArtifactRef = z.infer<typeof browserAuditArtifactRefSchema>;
 
-export const browserAuditToolchainSchema = z.object({
-  flowDslVersion: z.literal(browserAuditDslVersion).default(browserAuditDslVersion),
-  bunVersion: z.string().min(1),
-  chromeVersion: z.string().min(1),
-  puppeteerVersion: z.string().min(1),
-  lighthouseVersion: z.string().min(1)
+export const browserAuditToolchainComponentSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  version: z.string().trim().min(1).max(200)
 });
+export type BrowserAuditToolchainComponent = z.infer<
+  typeof browserAuditToolchainComponentSchema
+>;
+
+const browserAuditNormalizedToolchainSchema = z.object({
+  engine: z.object({
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/),
+    version: z.string().trim().min(1).max(200)
+  }),
+  browser: z.object({
+    name: z.string().trim().min(1).max(120),
+    version: z.string().trim().min(1).max(200)
+  }),
+  runtime: z.object({
+    name: z.string().trim().min(1).max(120),
+    version: z.string().trim().min(1).max(200)
+  }),
+  components: z.array(browserAuditToolchainComponentSchema).max(50).default([])
+});
+
+export const browserAuditToolchainSchema = z.preprocess(
+  normalizeLegacyBrowserAuditToolchain,
+  browserAuditNormalizedToolchainSchema
+);
 export type BrowserAuditToolchain = z.infer<typeof browserAuditToolchainSchema>;
 
-export const browserAuditCheckpointResultSchema = z.object({
+const browserAuditNormalizedCheckpointResultSchema = z.object({
   id: z.string().min(1),
   mode: browserAuditCheckpointModeSchema,
   label: z.string().min(1).max(120).nullable().default(null),
-  summary: browserAuditMetricSummarySchema
+  finalUrl: z.string().url().nullable().default(null),
+  statusCode: z.number().int().min(100).max(599).nullable().default(null),
+  coreMetrics: browserAuditCoreMetricsSchema,
+  scores: browserAuditScoresSchema,
+  extendedMetrics: browserAuditExtendedMetricsSchema
 });
+
+export const browserAuditCheckpointResultSchema = z.preprocess(
+  normalizeLegacyBrowserAuditCheckpoint,
+  browserAuditNormalizedCheckpointResultSchema
+);
 export type BrowserAuditCheckpointResult = z.infer<typeof browserAuditCheckpointResultSchema>;
 
-export const browserAuditResultSchema = z.object({
-  summary: browserAuditMetricSummarySchema,
-  checkpoints: z.array(browserAuditCheckpointResultSchema).max(3).default([]),
-  issues: z.array(browserAuditIssueSchema).default([]),
-  artifacts: z.array(browserAuditArtifactRefSchema).default([]),
-  toolchain: browserAuditToolchainSchema,
-  startedAt: z.string().datetime(),
-  completedAt: z.string().datetime()
-});
+const browserAuditNormalizedResultSchema = z
+  .object({
+    protocolVersion: z.literal(browserAuditProtocolVersion).default(browserAuditProtocolVersion),
+    coreMetrics: browserAuditCoreMetricsSchema,
+    scores: browserAuditScoresSchema,
+    extendedMetrics: browserAuditExtendedMetricsSchema,
+    checkpoints: z.array(browserAuditCheckpointResultSchema).max(3).default([]),
+    issues: z.array(browserAuditIssueSchema).default([]),
+    artifacts: z.array(browserAuditArtifactRefSchema).default([]),
+    toolchain: browserAuditToolchainSchema,
+    startedAt: z.string().datetime(),
+    completedAt: z.string().datetime()
+  })
+  .superRefine((result, context) => {
+    if (Date.parse(result.completedAt) < Date.parse(result.startedAt)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Browser Audit completedAt must not precede startedAt',
+        path: ['completedAt']
+      });
+    }
+  });
+
+export const browserAuditResultSchema = z.preprocess(
+  normalizeLegacyBrowserAuditResult,
+  browserAuditNormalizedResultSchema
+);
 export type BrowserAuditResult = z.infer<typeof browserAuditResultSchema>;
 
 export const browserAuditRunSummarySchema = z.object({
@@ -335,19 +487,20 @@ export const browserAuditWorkerResponseSchema = z.object({
 export type BrowserAuditWorkerResponse = z.infer<typeof browserAuditWorkerResponseSchema>;
 
 export const browserAuditCapabilitiesSchema = z.object({
+  protocolVersion: z.literal(browserAuditProtocolVersion).default(browserAuditProtocolVersion),
   flowDslVersion: z.literal(browserAuditDslVersion).default(browserAuditDslVersion),
+  artifactRegistryVersion: z
+    .literal(browserAuditArtifactRegistryVersion)
+    .default(browserAuditArtifactRegistryVersion),
   toolchain: browserAuditToolchainSchema,
   supportedCheckpointModes: z.array(browserAuditCheckpointModeSchema).default([
     'navigation',
     'snapshot',
     'timespan'
   ]),
-  supportedArtifactKinds: z.array(browserAuditArtifactKindSchema).default([
-    'json',
-    'html',
-    'screenshot',
-    'trace'
-  ]),
+  supportedArtifactKinds: z
+    .array(browserAuditArtifactKindSchema)
+    .default([]),
   unsupportedFeatures: z.array(z.string().min(1)).default([]),
   limits: z.object({
     maxSteps: z.number().int().positive().default(20),
@@ -360,3 +513,99 @@ export const browserAuditCapabilitiesSchema = z.object({
   })
 });
 export type BrowserAuditCapabilities = z.infer<typeof browserAuditCapabilitiesSchema>;
+
+function normalizeLegacyBrowserAuditToolchain(value: unknown) {
+  const toolchain = asRecord(value);
+
+  if (!toolchain || asRecord(toolchain.engine)) {
+    return value;
+  }
+
+  if (
+    typeof toolchain.bunVersion !== 'string'
+    || typeof toolchain.chromeVersion !== 'string'
+    || typeof toolchain.puppeteerVersion !== 'string'
+    || typeof toolchain.lighthouseVersion !== 'string'
+  ) {
+    return value;
+  }
+
+  return {
+    engine: { id: 'lighthouse', version: toolchain.lighthouseVersion },
+    browser: { name: 'Chrome', version: toolchain.chromeVersion },
+    runtime: { name: 'Bun', version: toolchain.bunVersion },
+    components: [{ name: 'puppeteer-core', version: toolchain.puppeteerVersion }]
+  };
+}
+
+function normalizeLegacyBrowserAuditCheckpoint(value: unknown) {
+  const checkpoint = asRecord(value);
+  const summary = asRecord(checkpoint?.summary);
+
+  if (!checkpoint || !summary || asRecord(checkpoint.coreMetrics)) {
+    return value;
+  }
+
+  return {
+    ...checkpoint,
+    finalUrl: summary.finalUrl ?? null,
+    statusCode: summary.statusCode ?? null,
+    coreMetrics: coreMetricsFromLegacySummary(summary),
+    scores: scoresFromLegacySummary(summary),
+    extendedMetrics: []
+  };
+}
+
+function normalizeLegacyBrowserAuditResult(value: unknown) {
+  const result = asRecord(value);
+  const summary = asRecord(result?.summary);
+
+  if (!result || !summary || asRecord(result.coreMetrics)) {
+    return value;
+  }
+
+  const existingCheckpoints = Array.isArray(result.checkpoints) ? result.checkpoints : [];
+  const checkpoints = existingCheckpoints.length > 0
+    ? existingCheckpoints
+    : [{
+        id: 'primary',
+        mode: 'navigation',
+        label: null,
+        summary
+      }];
+
+  return {
+    ...result,
+    protocolVersion: browserAuditProtocolVersion,
+    coreMetrics: coreMetricsFromLegacySummary(summary),
+    scores: scoresFromLegacySummary(summary),
+    extendedMetrics: [],
+    checkpoints
+  };
+}
+
+function coreMetricsFromLegacySummary(summary: Record<string, unknown>) {
+  return {
+    fcpMs: summary.fcpMs ?? null,
+    lcpMs: summary.lcpMs ?? null,
+    cls: summary.cls ?? null,
+    inpMs: summary.inpMs ?? null,
+    tbtMs: summary.tbtMs ?? null,
+    speedIndexMs: summary.speedIndexMs ?? null
+  };
+}
+
+function scoresFromLegacySummary(summary: Record<string, unknown>) {
+  return {
+    performance: summary.performanceScore ?? null,
+    accessibility: summary.accessibilityScore ?? null,
+    bestPractices: summary.bestPracticesScore ?? null,
+    seo: summary.seoScore ?? null
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}

@@ -42,11 +42,22 @@ export const buildStartupCheck = async (config: BrowserAuditWorkerConfig): Promi
   }
 
   const toolchain = {
-    flowDslVersion: browserAuditDslVersion,
-    bunVersion: Bun.version,
-    chromeVersion: chromeVersion ?? 'unavailable',
-    puppeteerVersion: puppeteerPackage.version,
-    lighthouseVersion: lighthousePackage.version
+    engine: {
+      id: 'lighthouse',
+      version: lighthousePackage.version
+    },
+    browser: {
+      name: 'Chrome',
+      version: chromeVersion ?? 'unavailable'
+    },
+    runtime: {
+      name: 'Bun',
+      version: Bun.version
+    },
+    components: [
+      { name: 'puppeteer-core', version: puppeteerPackage.version },
+      { name: 'webperf-browser-audit-lighthouse', version: workerPackage.version }
+    ]
   } satisfies BrowserAuditToolchain;
 
   return {
@@ -62,7 +73,7 @@ export const buildCapabilities = (toolchain: BrowserAuditToolchain): BrowserAudi
     flowDslVersion: browserAuditDslVersion,
     toolchain,
     supportedCheckpointModes: ['navigation', 'snapshot', 'timespan'],
-    supportedArtifactKinds: ['json', 'html', 'screenshot', 'trace'],
+    supportedArtifactKinds: ['lighthouse-json', 'lighthouse-html', 'screenshot', 'trace'],
     unsupportedFeatures: [
       'arbitrary_js_eval',
       'file_upload',

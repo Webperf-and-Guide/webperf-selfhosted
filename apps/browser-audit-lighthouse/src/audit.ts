@@ -179,7 +179,7 @@ export const runBrowserAudit = async ({
       artifacts.push(
         ...(await uploadArtifact(
           input,
-          'json',
+          'lighthouse-json',
           'flow-result.json',
           'application/json',
           new TextEncoder().encode(redactBrowserAuditText(JSON.stringify(rawFlowResult, null, 2), input))
@@ -191,7 +191,7 @@ export const runBrowserAudit = async ({
       artifacts.push(
         ...(await uploadArtifact(
           input,
-          'html',
+          'lighthouse-html',
           'report.html',
           'text/html; charset=utf-8',
           new TextEncoder().encode(redactBrowserAuditText(reportHtml, input))
@@ -213,10 +213,13 @@ export const runBrowserAudit = async ({
 
     const completedAt = new Date().toISOString();
     const checkpoints = extractCheckpointResults(rawFlowResult, responseStatusCode, finalUrl, input);
+    const primaryCheckpoint =
+      checkpoints[0]
+      ?? extractNormalizedMetrics(rawFlowResult?.steps?.[0], responseStatusCode, finalUrl, input);
     const result = browserAuditResultSchema.parse({
-      summary:
-        checkpoints[0]?.summary
-        ?? extractSummaryFromStep(rawFlowResult?.steps?.[0], responseStatusCode, finalUrl, input),
+      coreMetrics: primaryCheckpoint.coreMetrics,
+      scores: primaryCheckpoint.scores,
+      extendedMetrics: primaryCheckpoint.extendedMetrics,
       checkpoints,
       issues,
       artifacts,
@@ -381,7 +384,7 @@ const extractCheckpointResults = (
       id: step?.name ?? `checkpoint-${index + 1}`,
       mode: normalizeStepMode(step?.mode),
       label: typeof step?.name === 'string' ? step.name : null,
-      summary: extractSummaryFromStep(step, statusCode, finalUrl, input)
+      ...extractNormalizedMetrics(step, statusCode, finalUrl, input)
     }))
     .slice(0, 3);
 };
@@ -394,7 +397,7 @@ const normalizeStepMode = (value: unknown): 'navigation' | 'snapshot' | 'timespa
   return 'navigation';
 };
 
-const extractSummaryFromStep = (
+const extractNormalizedMetrics = (
   step: any,
   statusCode: number | null,
   finalUrl: string | null,
@@ -410,18 +413,72 @@ const extractSummaryFromStep = (
         ? redactBrowserAuditUrl(lhr.finalDisplayedUrl, input)
         : finalUrl,
     statusCode,
-    performanceScore: toNullableScore(categories.performance?.score),
-    accessibilityScore: toNullableScore(categories.accessibility?.score),
-    bestPracticesScore: toNullableScore(categories['best-practices']?.score),
-    seoScore: toNullableScore(categories.seo?.score),
-    fcpMs: toNullableNumber(audits['first-contentful-paint']?.numericValue),
-    lcpMs: toNullableNumber(audits['largest-contentful-paint']?.numericValue),
-    cls: toNullableNumber(audits['cumulative-layout-shift']?.numericValue),
-    inpMs: toNullableNumber(audits['interaction-to-next-paint']?.numericValue),
-    tbtMs: toNullableNumber(audits['total-blocking-time']?.numericValue),
-    speedIndexMs: toNullableNumber(audits['speed-index']?.numericValue)
+    scores: {
+      performance: toNullableScore(categories.performance?.score),
+      accessibility: toNullableScore(categories.accessibility?.score),
+      bestPractices: toNullableScore(categories['best-practices']?.score),
+      seo: toNullableScore(categories.seo?.score)
+    },
+    coreMetrics: {
+      fcpMs: toNullableNumber(audits['first-contentful-paint']?.numericValue),
+      lcpMs: toNullableNumber(audits['largest-contentful-paint']?.numericValue),
+      cls: toNullableNumber(audits['cumulative-layout-shift']?.numericValue),
+      inpMs: toNullableNumber(audits['interaction-to-next-paint']?.numericValue),
+      tbtMs: toNullableNumber(audits['total-blocking-time']?.numericValue),
+      speedIndexMs: toNullableNumber(audits['speed-index']?.numericValue)
+    },
+    extendedMetrics: extractExtendedMetrics(audits)
   };
 };
+
+const extractExtendedMetrics = (audits: Record<string, unknown>) => {
+  const metrics: Array<{
+    id: string;
+    label: string;
+    value: number;
+    unit: string;
+  }> = [];
+  const addMetric = (id: string, label: string, value: unknown, unit: string) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      metrics.push({ id, label, value, unit });
+    }
+  };
+  const numericAuditValue = (id: string) => {
+    const audit = asAuditRecord(audits[id]);
+    return audit?.numericValue;
+  };
+  const networkRequestDetails = asAuditRecord(
+    asAuditRecord(audits['network-requests'])?.details
+  );
+
+  addMetric(
+    'server-response-time-ms',
+    'Server response time',
+    numericAuditValue('server-response-time'),
+    'ms'
+  );
+  addMetric(
+    'transfer-size-bytes',
+    'Transfer size',
+    numericAuditValue('total-byte-weight'),
+    'byte'
+  );
+  addMetric(
+    'request-count',
+    'Network requests',
+    Array.isArray(networkRequestDetails?.items)
+      ? networkRequestDetails.items.length
+      : null,
+    'count'
+  );
+
+  return metrics;
+};
+
+const asAuditRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 
 const toNullableScore = (value: unknown) => (typeof value === 'number' ? value : null);
 const toNullableNumber = (value: unknown) => (typeof value === 'number' ? value : null);

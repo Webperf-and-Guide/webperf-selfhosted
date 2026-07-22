@@ -70,20 +70,22 @@ const createClient = (savedResults: ExecutionResourceResultRequest[]): ExecutorA
 });
 
 const successfulResult = {
-  summary: {
-    finalUrl: 'https://example.com/',
-    statusCode: 200,
-    performanceScore: 0.92
+  coreMetrics: {
+    lcpMs: 1_480,
+    cls: 0.02
   },
+  scores: {
+    performance: 0.92
+  },
+  extendedMetrics: [],
   checkpoints: [],
   issues: [],
   artifacts: [],
   toolchain: {
-    flowDslVersion: 'v1',
-    bunVersion: '1.3.13',
-    chromeVersion: '136.0.0.0',
-    puppeteerVersion: '24.7.1',
-    lighthouseVersion: '12.6.0'
+    engine: { id: 'lighthouse', version: '12.6.0' },
+    browser: { name: 'Chrome', version: '136.0.0.0' },
+    runtime: { name: 'Bun', version: '1.3.13' },
+    components: [{ name: 'puppeteer-core', version: '24.7.1' }]
   },
   startedAt: '2026-07-22T00:00:01.000Z',
   completedAt: '2026-07-22T00:00:03.000Z'

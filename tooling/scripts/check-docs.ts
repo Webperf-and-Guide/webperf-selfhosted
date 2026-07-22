@@ -97,7 +97,7 @@ for (const relativePath of (await files).sort()) {
 
 for (const requiredPath of [...requiredUserGuides, ...requiredContributorGuides]) {
   if (!existsSync(resolve(repositoryRoot, requiredPath))) {
-    errors.push(`${requiredPath}: required public-beta guide is missing`);
+    errors.push(`${requiredPath}: required guide is missing`);
   }
 }
 
@@ -105,8 +105,9 @@ let readme = '';
 try {
   readme = await Bun.file(resolve(repositoryRoot, 'README.md')).text();
 } catch {
-  errors.push('README.md: unable to read public entrypoint');
+  errors.push('README.md: unable to read entrypoint');
 }
+const readmeLines = readme.split(/\r?\n/);
 const readmeHeadings = [
   '## Screenshots',
   '## Docker quick start',
@@ -117,20 +118,24 @@ const readmeHeadings = [
   '## Upgrade and backup',
   '## Contributor setup'
 ];
-let previousHeadingIndex = -1;
+let previousHeadingLine = -1;
 for (const heading of readmeHeadings) {
-  const index = readme.indexOf(heading);
-  if (index === -1) {
+  const line = readmeLines.findIndex((candidate) => candidate.trimEnd() === heading);
+  if (line === -1) {
     errors.push(`README.md: required section is missing: ${heading}`);
-  } else if (index <= previousHeadingIndex) {
+    continue;
+  }
+  if (line <= previousHeadingLine) {
     errors.push(`README.md: section is out of operator-first order: ${heading}`);
   } else {
-    previousHeadingIndex = index;
+    previousHeadingLine = line;
   }
 }
-const sourceDevIndex = readme.indexOf('bun run dev');
-const contributorIndex = readme.indexOf('## Contributor setup');
-if (sourceDevIndex !== -1 && sourceDevIndex < contributorIndex) {
+const sourceDevLine = readmeLines.findIndex((line) => line.includes('bun run dev'));
+const contributorLine = readmeLines.findIndex(
+  (line) => line.trimEnd() === '## Contributor setup'
+);
+if (sourceDevLine !== -1 && contributorLine !== -1 && sourceDevLine < contributorLine) {
   errors.push('README.md: source development instructions must follow operator guidance');
 }
 

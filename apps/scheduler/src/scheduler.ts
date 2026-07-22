@@ -33,7 +33,7 @@ const buildDispatchErrorMessage = (
   status: number | null
 ) => {
   if (code === 'request_timeout') {
-    if (status == null) {
+    if (status === null) {
       return 'Scheduler dispatch request timed out';
     }
 
@@ -44,7 +44,7 @@ const buildDispatchErrorMessage = (
     return 'Scheduler dispatch response was invalid';
   }
 
-  if (status == null) {
+  if (status === null) {
     return 'Scheduler dispatch request failed';
   }
 

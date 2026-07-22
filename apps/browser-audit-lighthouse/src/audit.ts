@@ -12,7 +12,11 @@ import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
-import { redactBrowserAuditText } from './redaction';
+import {
+  redactBrowserAuditBytes,
+  redactBrowserAuditText,
+  redactBrowserAuditUrl
+} from './redaction';
 
 const presetViewport = {
   mobile: {
@@ -122,11 +126,11 @@ export const runBrowserAudit = async ({
             }
           );
         } catch (error) {
-          networkGuard.throwIfBlocked();
+          networkGuard.throwIfBlocked(error);
           throw error;
         }
         networkGuard.throwIfBlocked();
-        finalUrl = page.url();
+        finalUrl = redactBrowserAuditUrl(page.url(), input);
         navigationSeen = true;
         continue;
       }
@@ -202,15 +206,17 @@ export const runBrowserAudit = async ({
           'trace',
           'trace.json',
           'application/json',
-          new TextEncoder().encode(redactBrowserAuditText(new TextDecoder().decode(traceBuffer), input))
+          redactBrowserAuditBytes(traceBuffer, input)
         ))
       );
     }
 
     const completedAt = new Date().toISOString();
-    const checkpoints = extractCheckpointResults(rawFlowResult, responseStatusCode, finalUrl);
+    const checkpoints = extractCheckpointResults(rawFlowResult, responseStatusCode, finalUrl, input);
     const result = browserAuditResultSchema.parse({
-      summary: checkpoints[0]?.summary ?? extractSummaryFromStep(rawFlowResult?.steps?.[0], responseStatusCode, finalUrl),
+      summary:
+        checkpoints[0]?.summary
+        ?? extractSummaryFromStep(rawFlowResult?.steps?.[0], responseStatusCode, finalUrl, input),
       checkpoints,
       issues,
       artifacts,
@@ -362,7 +368,12 @@ export const launchBrowser = async (config: BrowserAuditWorkerConfig): Promise<B
   });
 };
 
-const extractCheckpointResults = (flowResult: any, statusCode: number | null, finalUrl: string | null) => {
+const extractCheckpointResults = (
+  flowResult: any,
+  statusCode: number | null,
+  finalUrl: string | null,
+  input: BrowserAuditWorkerRequest
+) => {
   const steps = Array.isArray(flowResult?.steps) ? flowResult.steps : [];
 
   return steps
@@ -370,7 +381,7 @@ const extractCheckpointResults = (flowResult: any, statusCode: number | null, fi
       id: step?.name ?? `checkpoint-${index + 1}`,
       mode: normalizeStepMode(step?.mode),
       label: typeof step?.name === 'string' ? step.name : null,
-      summary: extractSummaryFromStep(step, statusCode, finalUrl)
+      summary: extractSummaryFromStep(step, statusCode, finalUrl, input)
     }))
     .slice(0, 3);
 };
@@ -383,13 +394,21 @@ const normalizeStepMode = (value: unknown): 'navigation' | 'snapshot' | 'timespa
   return 'navigation';
 };
 
-const extractSummaryFromStep = (step: any, statusCode: number | null, finalUrl: string | null) => {
+const extractSummaryFromStep = (
+  step: any,
+  statusCode: number | null,
+  finalUrl: string | null,
+  input: BrowserAuditWorkerRequest
+) => {
   const lhr = step?.lhr ?? step;
   const audits = lhr?.audits ?? {};
   const categories = lhr?.categories ?? {};
 
   return {
-    finalUrl: typeof lhr?.finalDisplayedUrl === 'string' ? lhr.finalDisplayedUrl : finalUrl,
+    finalUrl:
+      typeof lhr?.finalDisplayedUrl === 'string'
+        ? redactBrowserAuditUrl(lhr.finalDisplayedUrl, input)
+        : finalUrl,
     statusCode,
     performanceScore: toNullableScore(categories.performance?.score),
     accessibilityScore: toNullableScore(categories.accessibility?.score),

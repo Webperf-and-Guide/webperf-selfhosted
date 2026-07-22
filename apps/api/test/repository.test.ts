@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import type { CheckProfile, CheckProfileRun, LatencyJobDetail, Property, RegionPack, RouteSet } from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -241,7 +242,7 @@ describe('sqlite control repository', () => {
 
     const database = new Database(databasePath, { readonly: true });
     const row = database.query<{ payload_json: string; url: string }, []>('SELECT payload_json, url FROM jobs LIMIT 1').get();
-    expect(row?.payload_json.startsWith('webperf:enc:v1:')).toBe(true);
+    expect(row?.payload_json.startsWith('webperf:enc:v2:')).toBe(true);
     expect(row?.payload_json).not.toContain(secretValue);
     expect(row?.payload_json).not.toContain(querySecret);
     expect(row?.url).toBe('https://example.com/?redacted');
@@ -266,6 +267,65 @@ describe('sqlite control repository', () => {
       expect(repository.getJob(job.id)?.request?.headers[0]?.value).toBe(secretValue);
       repository.close();
     }
+  });
+
+  test('migrates legacy plaintext and v1 envelopes once, then rejects plaintext downgrades', () => {
+    const databasePath = createTempDatabasePath();
+    const encryptionSecret = 'legacy-migration-encryption-secret';
+    const plaintextJob = createJob({ id: 'job_plaintext' });
+    const legacyJob = createJob({ id: 'job_legacy_v1' });
+    const database = new Database(databasePath, { create: true });
+    database.exec(`
+      CREATE TABLE jobs (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL
+      );
+    `);
+    const insert = database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insert.run(
+      plaintextJob.id,
+      plaintextJob.url,
+      plaintextJob.status,
+      plaintextJob.requestedAt,
+      plaintextJob.requestedAt,
+      JSON.stringify(plaintextJob)
+    );
+    insert.run(
+      legacyJob.id,
+      legacyJob.url,
+      legacyJob.status,
+      legacyJob.requestedAt,
+      legacyJob.requestedAt,
+      createLegacyV1Envelope(legacyJob, encryptionSecret)
+    );
+    database.close();
+
+    const repository = createSqliteJobRepository({ databasePath, encryptionSecret });
+    expect(repository.getJob(plaintextJob.id)?.id).toBe(plaintextJob.id);
+    expect(repository.getJob(legacyJob.id)?.id).toBe(legacyJob.id);
+    repository.close();
+
+    const migratedDatabase = new Database(databasePath);
+    const migratedRows = migratedDatabase
+      .query<{ payload_json: string }, []>('SELECT payload_json FROM jobs ORDER BY id')
+      .all();
+    expect(migratedRows.every((row) => row.payload_json.startsWith('webperf:enc:v2:'))).toBe(true);
+    migratedDatabase
+      .query('UPDATE jobs SET payload_json = ? WHERE id = ?')
+      .run(JSON.stringify(plaintextJob), plaintextJob.id);
+    migratedDatabase.close();
+
+    const strictRepository = createSqliteJobRepository({ databasePath, encryptionSecret });
+    expect(strictRepository.getJob(plaintextJob.id)).toBeNull();
+    expect(strictRepository.getJob(legacyJob.id)?.id).toBe(legacyJob.id);
+    strictRepository.close();
   });
 
   test('persists jobs across repository instances', () => {
@@ -369,3 +429,17 @@ describe('sqlite control repository', () => {
     repository.close();
   });
 });
+
+const createLegacyV1Envelope = (value: unknown, secret: string) => {
+  const iv = randomBytes(12);
+  const key = createHash('sha256').update(secret, 'utf8').digest();
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from('webperf-selfhosted/sqlite-payload/v1', 'utf8'));
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
+  return [
+    'webperf:enc:v1',
+    iv.toString('base64url'),
+    cipher.getAuthTag().toString('base64url'),
+    ciphertext.toString('base64url')
+  ].join(':');
+};

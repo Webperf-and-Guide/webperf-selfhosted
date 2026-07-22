@@ -15,7 +15,6 @@ export const buildControlOpenApiDocument = (options: ControlOpenApiOptions) =>
     tags: [...CONTROL_OPENAPI_TAG_DEFINITIONS],
     bearerAuth: {
       schemeName: 'selfhostAdminToken',
-      publicPaths: ['/health'],
       description: 'SELFHOST_ADMIN_TOKEN for protected compatibility operations.'
     }
   });

@@ -36,13 +36,21 @@ impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let shared_secret = env::var("PROBE_SHARED_SECRET")
             .ok()
-            .filter(|value| value.trim().len() >= 16)
+            .map(|value| value.trim().to_string())
+            .filter(|value| value.len() >= 16)
             .ok_or(ConfigError::InvalidSharedSecret)?;
 
         let shared_secret_next = match env::var("PROBE_SHARED_SECRET_NEXT") {
-            Ok(value) if value.trim().is_empty() => None,
-            Ok(value) if value.trim().len() >= 16 => Some(value),
-            Ok(_) => return Err(ConfigError::InvalidSharedSecretNext),
+            Ok(value) => {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else if trimmed.len() >= 16 {
+                    Some(trimmed)
+                } else {
+                    return Err(ConfigError::InvalidSharedSecretNext);
+                }
+            }
             Err(_) => None,
         };
 

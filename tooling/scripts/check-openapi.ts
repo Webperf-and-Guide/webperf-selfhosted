@@ -62,8 +62,26 @@ if (publicDoc.paths['/v1/capabilities']?.get?.security) {
   throw new Error('public capabilities must remain unauthenticated in OpenAPI');
 }
 
-if (!publicDoc.paths['/v1/sites']?.get?.security) {
-  throw new Error('protected public API operations must declare bearer authentication');
+for (const [path, methods] of Object.entries(publicDoc.paths)) {
+  for (const operation of Object.values(methods)) {
+    const shouldBePublic = path === '/v1/capabilities';
+
+    if (shouldBePublic && operation.security) {
+      throw new Error(`public path ${path} must remain unauthenticated in OpenAPI`);
+    }
+
+    if (!shouldBePublic && !operation.security) {
+      throw new Error(`protected path ${path} must declare bearer authentication`);
+    }
+  }
+}
+
+for (const [path, methods] of Object.entries(controlDoc.paths)) {
+  for (const operation of Object.values(methods)) {
+    if (!operation.security) {
+      throw new Error(`compatibility path ${path} must declare bearer authentication`);
+    }
+  }
 }
 
 console.log(

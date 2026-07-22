@@ -92,6 +92,13 @@ type CheckProfileRunRow = {
   payload_json: string;
 };
 
+type PersistedPayloadRow = {
+  rowid: number;
+  payload_json: string;
+};
+
+const encryptedPayloadMigrationId = '20260722_001_encrypted_payloads_v2';
+
 type JsonSchema<T> = {
   parse(value: unknown): T;
 };
@@ -119,6 +126,11 @@ export const createSqliteJobRepository = ({
   });
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       url TEXT NOT NULL,
@@ -153,6 +165,33 @@ export const createSqliteJobRepository = ({
     CREATE INDEX IF NOT EXISTS check_profile_runs_profile_created_at_idx
       ON check_profile_runs (profile_id, created_at DESC);
   `);
+
+  const encryptedPayloadMigration = db
+    .query<{ id: string }, [string]>('SELECT id FROM schema_migrations WHERE id = ? LIMIT 1')
+    .get(encryptedPayloadMigrationId);
+
+  if (!encryptedPayloadMigration) {
+    const migratePayloads = db.transaction(() => {
+      for (const table of ['jobs', 'saved_entities', 'check_profile_runs'] as const) {
+        const rows = db
+          .query<PersistedPayloadRow, []>(`SELECT rowid, payload_json FROM ${table}`)
+          .all();
+        const update = db.query(`UPDATE ${table} SET payload_json = ? WHERE rowid = ?`);
+
+        for (const row of rows) {
+          const parsed = storageCrypto.parse(row.payload_json, { allowPlaintext: true });
+          update.run(storageCrypto.stringify(parsed), row.rowid);
+        }
+      }
+
+      db.query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
+        encryptedPayloadMigrationId,
+        new Date().toISOString()
+      );
+    });
+
+    migratePayloads();
+  }
 
   const saveStatement = db.query(`
     INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)

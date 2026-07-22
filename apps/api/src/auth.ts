@@ -45,7 +45,7 @@ const matchesBearerToken = (
   authorization: string | null,
   candidates: Array<string | undefined>
 ) => {
-  const match = authorization?.match(/^Bearer ([^\s]+)$/);
+  const match = authorization?.match(/^Bearer\s+([^\s]+)$/i);
 
   if (!match?.[1]) {
     return false;
@@ -55,14 +55,14 @@ const matchesBearerToken = (
   let matched = false;
 
   for (const candidate of candidates) {
-    if (candidate !== undefined) {
-      matched = constantTimeEqual(suppliedToken, candidate) || matched;
-    }
+    matched = constantTimeEqual(suppliedToken, candidate ?? '') || matched;
   }
 
   return matched;
 };
 
+// Hashing normalizes token lengths because timingSafeEqual rejects buffers of
+// different sizes. A raw length check would make token length observable.
 const constantTimeEqual = (left: string, right: string) => {
   const leftDigest = createHash('sha256').update(left, 'utf8').digest();
   const rightDigest = createHash('sha256').update(right, 'utf8').digest();

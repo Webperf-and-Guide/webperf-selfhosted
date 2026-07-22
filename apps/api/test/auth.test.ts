@@ -26,6 +26,14 @@ describe('single-organization API authentication', () => {
   test('accepts current and next admin tokens on protected API routes', () => {
     expect(authorizeApiRequest(request('/v1/sites', secrets.adminToken), secrets)).toBeNull();
     expect(authorizeApiRequest(request('/rpc/app', secrets.adminTokenNext, 'POST'), secrets)).toBeNull();
+    expect(
+      authorizeApiRequest(
+        new Request('http://api.test/v1/sites', {
+          headers: { authorization: `bearer ${secrets.adminToken}` }
+        }),
+        secrets
+      )
+    ).toBeNull();
   });
 
   test('reserves internal routes for current and next service secrets', () => {

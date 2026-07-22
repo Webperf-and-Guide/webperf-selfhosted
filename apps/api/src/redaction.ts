@@ -11,8 +11,17 @@ const exactSensitiveHeaderNames = new Set([
 
 export const isSensitiveHeaderName = (name: string) => {
   const normalized = name.trim().toLowerCase();
-  return exactSensitiveHeaderNames.has(normalized) || /(?:^|[-_])(token|secret|key)(?:$|[-_])/.test(normalized);
+  return exactSensitiveHeaderNames.has(normalized)
+    || /(?:^|[-_])(token|secret|key|password|passwd|credential|bearer)(?:$|[-_])/.test(normalized);
 };
+
+const isSensitivePropertyName = (name: string) =>
+  /^(?:(?:client|webhook|upload|artifact|auth|bearer|access|refresh)[-_]?)?(?:secret|token|password|passwd|credentials?)$/i
+    .test(name)
+  || /^(?:api|secret|private|signing|encryption)[-_]?key$/i.test(name);
+
+const isUrlPropertyName = (name: string) =>
+  /url$/i.test(name) || /^(?:href|uri|endpoint|callback|redirect|webhook|target)$/i.test(name);
 
 export const redactSensitiveData = (value: unknown, parentKey?: string): unknown => {
   if (Array.isArray(value)) {
@@ -34,7 +43,7 @@ export const redactSensitiveData = (value: unknown, parentKey?: string): unknown
       continue;
     }
 
-    if (key === 'secret' && typeof item === 'string') {
+    if (typeof item === 'string' && isSensitivePropertyName(key)) {
       result[key] = redactedValue;
       continue;
     }
@@ -44,7 +53,7 @@ export const redactSensitiveData = (value: unknown, parentKey?: string): unknown
       continue;
     }
 
-    if (typeof item === 'string' && /url$/i.test(key)) {
+    if (typeof item === 'string' && isUrlPropertyName(key)) {
       result[key] = redactUrlQuery(item);
       continue;
     }
@@ -72,13 +81,19 @@ export const redactUrlQuery = (value: string) => {
   try {
     const url = new URL(value);
 
+    url.username = '';
+    url.password = '';
+
     if (url.search.length > 0) {
       url.search = '?redacted';
     }
     url.hash = '';
     return url.toString();
   } catch {
-    return value;
+    const fragmentIndex = value.indexOf('#');
+    const withoutFragment = fragmentIndex >= 0 ? value.slice(0, fragmentIndex) : value;
+    const queryIndex = withoutFragment.indexOf('?');
+    return queryIndex >= 0 ? `${withoutFragment.slice(0, queryIndex)}?redacted` : withoutFragment;
   }
 };
 
@@ -92,7 +107,7 @@ export const redactJsonResponse = async (response: Response) => {
   const body = await response.text();
 
   if (body.length === 0) {
-    return new Response(null, response);
+    return rebuildResponse(null, response);
   }
 
   try {
@@ -104,6 +119,16 @@ export const redactJsonResponse = async (response: Response) => {
       headers
     });
   } catch {
-    return new Response(body, response);
+    return rebuildResponse(body, response);
   }
+};
+
+const rebuildResponse = (body: BodyInit | null, response: Response) => {
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 };

@@ -39,11 +39,15 @@ supplied token.
 
 ## Persistence and display
 
-SQLite JSON payloads are encrypted with AES-256-GCM. New writes use the current
-internal secret; reads accept the current and optional next secret so operators
-can rotate without taking the service offline. API, RPC, SSE, export, and
-Browser Audit artifact text paths mask sensitive headers, cookie values,
-webhook secrets, upload tokens, and URL query values.
+SQLite JSON payloads are encrypted with AES-256-GCM using an HKDF-derived,
+domain-separated key. On the first upgraded start, legacy plaintext and v1
+envelopes are transactionally rewritten and recorded in `schema_migrations`;
+after that marker exists, plaintext payloads are rejected rather than silently
+accepted. New writes use the current internal secret; reads accept the current
+and optional next secret so operators can rotate without taking the service
+offline. API, RPC, SSE, export, and Browser Audit artifact text paths mask
+sensitive headers, cookie values, webhook secrets, upload tokens, and URL query
+values.
 
 Sensitive header matching includes `authorization`, `cookie`, `set-cookie`,
 `proxy-authorization`, `x-api-key`, `api-key`, and custom names containing a

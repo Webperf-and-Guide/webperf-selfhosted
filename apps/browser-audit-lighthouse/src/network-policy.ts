@@ -144,9 +144,11 @@ export const installBrowserNetworkGuard = async (
   await session.send('Browser.setDownloadBehavior', { behavior: 'deny' });
 
   return {
-    throwIfBlocked() {
+    throwIfBlocked(cause?: unknown) {
       if (blockedError) {
-        throw blockedError;
+        throw cause === undefined
+          ? blockedError
+          : new Error(blockedError.message, { cause });
       }
     }
   };

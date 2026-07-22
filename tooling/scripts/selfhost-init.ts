@@ -22,13 +22,13 @@ const secretKeys = [
   'PROBE_SHARED_SECRET',
   'BROWSER_AUDIT_SHARED_SECRET'
 ];
-const nextSecretKeys = [
-  'SELFHOST_ADMIN_TOKEN_NEXT',
-  'SELFHOST_INTERNAL_SECRET_NEXT',
-  'PROBE_SHARED_SECRET_NEXT',
-  'BROWSER_AUDIT_SHARED_SECRET_NEXT'
-];
+const nextSecretKeys = secretKeys.map((key) => `${key}_NEXT`);
 const generated = new Map(secretKeys.map((key) => [key, randomBytes(32).toString('base64url')]));
+
+if (!existsSync(examplePath)) {
+  throw new Error(`Required self-host environment template not found: ${examplePath}`);
+}
+
 const content = readFileSync(examplePath, 'utf8')
   .split('\n')
   .map((line) => {

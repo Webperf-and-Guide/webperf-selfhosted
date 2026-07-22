@@ -8,15 +8,7 @@ probe_base_url="${SELFHOST_PARALLEL_PROBE_BASE_URL:-http://127.0.0.1:${probe_por
 api_base_url="${SELFHOST_PARALLEL_CONTROL_BASE_URL:-http://127.0.0.1:8788}"
 
 cd "$root_dir"
-
-random_secret() {
-  bun -e 'console.log(crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", ""))'
-}
-
-export SELFHOST_ADMIN_TOKEN="${SELFHOST_ADMIN_TOKEN:-$(random_secret)}"
-export SELFHOST_INTERNAL_SECRET="${SELFHOST_INTERNAL_SECRET:-$(random_secret)}"
-export PROBE_SHARED_SECRET="${PROBE_SHARED_SECRET:-$(random_secret)}"
-export BROWSER_AUDIT_SHARED_SECRET="${BROWSER_AUDIT_SHARED_SECRET:-$(random_secret)}"
+source "$root_dir/tooling/scripts/dev-secrets.sh"
 
 bash "$root_dir/tooling/scripts/ensure-port-free.sh" \
   "$console_port" \

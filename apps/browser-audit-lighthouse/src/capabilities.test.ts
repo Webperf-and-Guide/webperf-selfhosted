@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { BrowserAuditToolchain } from '@webperf/contracts';
-import { buildCapabilities } from './capabilities';
+import { buildCapabilities, buildStartupCheck } from './capabilities';
 
 const lighthouseToolchain = {
   engine: { id: 'lighthouse', version: '13.1.0' },
@@ -30,5 +30,24 @@ describe('Lighthouse Browser Audit capabilities', () => {
       'snapshot',
       'timespan'
     ]);
+  });
+
+  test('reports the configured runtime release instead of an unpublished package version', async () => {
+    const startupCheck = await buildStartupCheck({
+      host: '127.0.0.1',
+      port: 8080,
+      sharedSecret: 'test-browser-audit-secret',
+      allowNoSandbox: false,
+      runtimeVersion: '0.2.0-beta.1',
+      chromeInstallDir: '/missing-chrome',
+      chromeExecutablePath: null,
+      hostAllowlist: []
+    });
+
+    expect(startupCheck.toolchain.components).toContainEqual({
+      name: 'webperf-browser-audit-lighthouse',
+      version: '0.2.0-beta.1'
+    });
+    expect(() => buildCapabilities(startupCheck.toolchain)).not.toThrow();
   });
 });

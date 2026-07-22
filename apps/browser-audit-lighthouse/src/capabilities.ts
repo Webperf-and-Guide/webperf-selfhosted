@@ -18,8 +18,7 @@ type StartupCheck = {
 const readJson = async <T>(specifier: string) => (await import(specifier, { with: { type: 'json' } })).default as T;
 
 export const buildStartupCheck = async (config: BrowserAuditWorkerConfig): Promise<StartupCheck> => {
-  const [workerPackage, lighthousePackage, puppeteerPackage] = await Promise.all([
-    readJson<{ version: string }>('../package.json'),
+  const [lighthousePackage, puppeteerPackage] = await Promise.all([
     readJson<{ version: string }>('lighthouse/package.json'),
     readJson<{ version: string }>('puppeteer-core/package.json')
   ]);
@@ -58,7 +57,7 @@ export const buildStartupCheck = async (config: BrowserAuditWorkerConfig): Promi
     },
     components: [
       { name: 'puppeteer-core', version: puppeteerPackage.version },
-      { name: 'webperf-browser-audit-lighthouse', version: workerPackage.version }
+      { name: 'webperf-browser-audit-lighthouse', version: config.runtimeVersion }
     ]
   } satisfies BrowserAuditToolchain;
 

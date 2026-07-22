@@ -58,6 +58,7 @@ describe('release bundle generation', () => {
     expect(result.imageCount).toBe(6);
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
+    expect(compose).toContain('WEBPERF_RUNTIME_VERSION: "0.2.0"');
     expect(validateReleaseComposeImages(compose)).toHaveLength(8);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);

@@ -177,6 +177,7 @@ export function renderReleaseBundle({
     }
     compose = compose.replace(dynamicReference, entry.reference);
   }
+  compose = compose.replace(/\$\{WEBPERF_VERSION:[^}]+\}/g, version);
   validateReleaseComposeImages(compose);
   writeFileSync(join(outputDirectory, 'compose.yml'), compose);
 

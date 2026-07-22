@@ -7,6 +7,7 @@ export type BrowserAuditWorkerConfig = {
   sharedSecret: string;
   sharedSecretNext?: string;
   allowNoSandbox: boolean;
+  runtimeVersion: string;
   chromeInstallDir: string;
   chromeExecutablePath: string | null;
   hostAllowlist: string[];
@@ -29,6 +30,7 @@ export const getConfig = (): BrowserAuditWorkerConfig => {
     sharedSecret: requireSecret('BROWSER_AUDIT_SHARED_SECRET'),
     sharedSecretNext: optionalSecret('BROWSER_AUDIT_SHARED_SECRET_NEXT'),
     allowNoSandbox: process.env.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'true',
+    runtimeVersion: readRuntimeVersion(),
     chromeInstallDir: process.env.CHROME_INSTALL_DIR?.trim() || '/opt/chrome',
     chromeExecutablePath,
     hostAllowlist: (process.env.BROWSER_AUDIT_HOST_ALLOWLIST ?? '')
@@ -36,6 +38,16 @@ export const getConfig = (): BrowserAuditWorkerConfig => {
       .map((entry) => entry.trim())
       .filter(Boolean)
   };
+};
+
+const readRuntimeVersion = () => {
+  const value = process.env.WEBPERF_RUNTIME_VERSION?.trim() || 'development';
+
+  if (value.length > 200) {
+    throw new Error('WEBPERF_RUNTIME_VERSION must contain at most 200 characters');
+  }
+
+  return value;
 };
 
 const normalizeSecret = (value: string | undefined) => {

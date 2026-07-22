@@ -122,6 +122,10 @@ assert(
   browser.environment?.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'false',
   'Browser Audit sandbox must be enabled by default'
 );
+assert(
+  browser.environment?.WEBPERF_RUNTIME_VERSION === '0.1.0',
+  'Browser Audit runner must receive the selected WebPerf runtime version'
+);
 assertLoopbackPort(productionWithProfiles.services['api-debug'], 8789, 'API debug proxy');
 assertLoopbackPort(
   productionWithProfiles.services['browser-audit-debug'],

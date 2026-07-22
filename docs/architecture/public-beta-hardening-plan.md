@@ -179,9 +179,9 @@ The exact diff will stay small within each phase, but the expected surface is:
   `apps/executor` with retry and idempotent result persistence.
 - [x] Move Browser Audit execution into `apps/executor` and make API creation
   asynchronous.
-- [ ] Keep scheduler limited to authenticated due-check dispatch.
+- [x] Keep scheduler limited to authenticated due-check dispatch.
 - [x] Add init/migrate/backup/restore/doctor/maintenance commands.
-- [ ] Add restart-recovery and scheduler-dispatch integration tests.
+- [x] Add restart-recovery and scheduler-dispatch integration tests.
 - [x] Add a Sampo changeset for durable execution; extend it with database
   operations before this phase closes.
 
@@ -250,7 +250,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [ ] Default host exposure is console-only on loopback.
 - [ ] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.
-- [ ] Leased work recovers after API/executor restart.
+- [x] Leased work recovers after API/executor restart.
 - [ ] Baseline/latest comparisons and deterministic analyses work.
 - [x] Browser Audit creation and execution are asynchronous.
 - [ ] Browser Audit stores downloadable local artifacts.

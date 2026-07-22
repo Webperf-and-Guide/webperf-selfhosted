@@ -2,8 +2,11 @@
 
 Thin polling worker for scheduled self-host checks.
 
-It calls the self-host API dispatch endpoint on a fixed interval and does not
-introduce queues, tenancy, or managed orchestration assumptions.
+It makes one internal-token-authenticated `POST /v1/scheduler/dispatch` request
+on a fixed interval. The API selects due Checks and creates queued Runs; this
+process never claims execution work, calls probes, runs Browser Audits, or
+delivers webhooks. Responses are contract-validated and error bodies are not
+reflected into logs.
 
 ## Local Run
 

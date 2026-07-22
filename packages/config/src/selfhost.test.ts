@@ -39,6 +39,10 @@ describe('strict self-host configuration', () => {
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET
       }).SELFHOST_SCHEDULER_API_BASE_URL
     ).toBe('http://127.0.0.1:8788');
+    expect(() => parseSelfhostSchedulerVars({
+      SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+      SELFHOST_SCHEDULER_API_BASE_URL: 'https://operator:secret@api.example.test/path?token=x'
+    })).toThrow('without path');
     expect(
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,

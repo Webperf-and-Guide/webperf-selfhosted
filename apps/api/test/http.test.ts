@@ -12,6 +12,7 @@ import { createExecutorApiClient } from '../../executor/src/client';
 import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
 import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
 import { createWebhookExecutionHandler } from '../../executor/src/webhook-handler';
+import { dispatchScheduledChecks } from '../../scheduler/src/scheduler';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -327,13 +328,20 @@ describe('api service monitoring expansion', () => {
         scheduleIntervalMinutes: 5
       });
 
-      const dispatchResponse = await fetch(
-        `${harness.baseUrl}/v1/scheduler/dispatch?now=2099-01-01T00:00:00.000Z`,
-        {
-          method: 'POST'
-        }
-      );
-      expect(dispatchResponse.ok).toBe(true);
+      const scheduledProfile = harness.repository.getCheckProfile(thresholdProfile.id)!;
+      harness.repository.saveCheckProfile({
+        ...scheduledProfile,
+        schedule: scheduledProfile.schedule
+          ? { ...scheduledProfile.schedule, nextRunAt: '2000-01-01T00:00:00.000Z' }
+          : null
+      });
+      const dispatchResult = await dispatchScheduledChecks({
+        apiBaseUrl: harness.baseUrl,
+        internalSecret: testInternalSecret,
+        fetchImpl: nativeFetch
+      });
+      expect(dispatchResult.payload.triggeredCount).toBe(1);
+      expect(dispatchResult.createdJobCount).toBe(1);
       await drainExecutions(harness.baseUrl, probe.port);
 
       const thresholdReport = await waitForReport(

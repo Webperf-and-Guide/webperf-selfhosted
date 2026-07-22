@@ -23,6 +23,7 @@
     "check": "bun run check:boundaries && bun run check:openapi && bun run --cwd apps/console check && bun run --cwd apps/api check && bun run --cwd apps/scheduler check && bun run --cwd apps/executor check && bun run --cwd apps/browser-audit-lighthouse check && bunx tsc -p packages/contracts/tsconfig.json --noEmit && bunx tsc -p packages/domain-core/tsconfig.json --noEmit && bunx tsc -p packages/report-core/tsconfig.json --noEmit && bunx tsc -p packages/config/tsconfig.json --noEmit && bun run --cwd apps/console check:ui-package",
     "test:report-core": "bun test packages/report-core/test/*.test.ts",
     "test:probe": "cargo test --workspace --manifest-path apps/probe-rs/Cargo.toml",
+    "test:integration:recovery": "bun test apps/api/test/restart-recovery.test.ts apps/api/test/http.test.ts apps/scheduler/src/scheduler.test.ts",
     "smoke:console": "bash tooling/scripts/smoke-web.sh",
     "smoke:console:parallel": "SELFHOST_CONSOLE_PORT=${SELFHOST_PARALLEL_CONSOLE_PORT:-4174} bash tooling/scripts/smoke-web.sh",
     "smoke:web": "bun run smoke:console",

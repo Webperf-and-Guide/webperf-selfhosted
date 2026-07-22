@@ -4570,6 +4570,7 @@ export const shutdown = (signal = 'manual') => {
         await Promise.race([server.stop(false), forceStop]);
       } finally {
         clearTimeout(forceStopTimer);
+        removeShutdownSignalHandlers();
         repository.close();
       }
 
@@ -4592,5 +4593,12 @@ const handleShutdownSignal = (signal: 'SIGINT' | 'SIGTERM') => {
   });
 };
 
-process.once('SIGINT', () => handleShutdownSignal('SIGINT'));
-process.once('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+const onSigint = () => handleShutdownSignal('SIGINT');
+const onSigterm = () => handleShutdownSignal('SIGTERM');
+process.once('SIGINT', onSigint);
+process.once('SIGTERM', onSigterm);
+
+function removeShutdownSignalHandlers() {
+  process.off('SIGINT', onSigint);
+  process.off('SIGTERM', onSigterm);
+}

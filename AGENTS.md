@@ -142,6 +142,7 @@ Current repo state as of 2026-07-22:
 - Fast Check network measurement, deterministic Check evaluation, and signed idempotent webhook delivery now run through leased executor handlers with atomic domain-resource creation/result persistence; webhook deliveries append atomically without whole-Run lost updates, non-loopback probe HTTP requires an explicit trusted-network opt-in, and the API no longer starts those operations in-process
 - direct Browser Audit creation now returns an atomic queued resource, while the executor owns signed runner calls, retry-safe status transitions, terminal lease/cancellation reconciliation, and secret-safe failure persistence; probe and Browser Audit HMAC secrets are no longer present in the API process
 - SQLite startup now uses ordered migration files with WAL, busy-timeout, foreign-key, forward-schema refusal, and graceful close semantics; verified backup/restore/doctor/retention/optimize/VACUUM commands share the same database core, and optional startup pre-migration backups preserve existing installs before upgrades
+- the scheduler is now a testable internal-token-only dispatch loop with contract-validated responses, abort-aware polling, and safe diagnostics; the real API integration uses that client, while a process-level recovery test restarts the API three times against one SQLite file and proves an expired running lease is reclaimed by a new executor identity exactly once
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -179,10 +180,10 @@ Current local URLs:
 ## Immediate Next Tasks
 
 1. execute the staged checklist in `docs/architecture/public-beta-hardening-plan.md`
-2. add restart-recovery and scheduler-dispatch integration coverage now that durable execution and SQLite operations are in place
-3. keep the single-organization admin/internal authentication, encrypted persistence, rotation, and secret-redaction model covered as execution moves into the durable executor
-4. ship engine-neutral browser-audit contracts and a renamed Lighthouse reference runner
-5. persist and serve local artifacts through authenticated, traversal-safe endpoints
+2. ship the engine-neutral Browser Audit Protocol contracts and compatibility fixtures now that the durable execution phase is complete
+3. adapt the Lighthouse reference runner to the engine-neutral normalized result and toolchain model
+4. persist and serve local artifacts through authenticated, traversal-safe endpoints
+5. keep authentication, encrypted persistence, rotation, and redaction covered as artifacts are added
 6. ship versioned production/development Compose bundles with internal-only services
 7. gate release images, SBOM, provenance, and digest metadata on complete CI
 8. complete the operator install, backup, upgrade, security, and troubleshooting documentation

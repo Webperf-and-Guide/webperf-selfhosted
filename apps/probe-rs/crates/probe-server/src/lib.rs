@@ -24,7 +24,10 @@ use tracing::{Level, info};
 
 const MAX_BODY_SIZE_BYTES: usize = 32 * 1024;
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
-const HEALTHCHECK_STATUS_PREFIX_BYTES: usize = 12;
+const HEALTH_STATUS_PREFIX: &[u8] = b"HTTP/1.1 200";
+const HEALTH_STATUS_PREFIX_ALT: &[u8] = b"HTTP/1.0 200";
+const HEALTHCHECK_STATUS_PREFIX_BYTES: usize = HEALTH_STATUS_PREFIX.len();
+const _: () = assert!(HEALTH_STATUS_PREFIX.len() == HEALTH_STATUS_PREFIX_ALT.len());
 
 #[derive(Clone)]
 pub struct AppState {
@@ -99,7 +102,7 @@ pub fn run_local_healthcheck(listen_addr: &str) -> Result<()> {
         bytes_read += count;
     }
 
-    if response_prefix != *b"HTTP/1.1 200" && response_prefix != *b"HTTP/1.0 200" {
+    if response_prefix != HEALTH_STATUS_PREFIX && response_prefix != HEALTH_STATUS_PREFIX_ALT {
         anyhow::bail!(
             "probe healthcheck returned unexpected status prefix: {}",
             String::from_utf8_lossy(&response_prefix)

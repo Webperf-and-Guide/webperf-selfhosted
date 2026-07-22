@@ -209,7 +209,7 @@ services:
     image: "ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     user: "1000:1000"
     read_only: true
-    shm_size: "1gb"
+    shm_size: 1073741824
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=1g,uid=1000,gid=1000
       - /home/bun:rw,nosuid,nodev,size=256m,uid=1000,gid=1000

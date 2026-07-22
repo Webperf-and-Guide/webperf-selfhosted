@@ -5,14 +5,18 @@ use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--healthcheck") {
         return run_local_healthcheck(
             &std::env::var("PROBE_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
         );
     }
 
+    run_server()
+}
+
+#[tokio::main]
+async fn run_server() -> Result<()> {
     init_tracing();
 
     let config = Config::from_env()?;

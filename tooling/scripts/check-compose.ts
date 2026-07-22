@@ -115,6 +115,9 @@ assert(
   parseSizeToBytes(browser.shm_size) >= 1024 ** 3,
   'Browser Audit runner must have at least 1 GiB of shared memory'
 );
+assert(parseSizeToBytes('1gb') === 1000 ** 3, 'decimal Compose sizes must use base 1000');
+assert(parseSizeToBytes('1gib') === 1024 ** 3, 'binary Compose sizes must use base 1024');
+assert(Number.isNaN(parseSizeToBytes('1i')), 'malformed Compose sizes must be rejected');
 assert(
   browser.environment?.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'false',
   'Browser Audit sandbox must be enabled by default'
@@ -172,7 +175,7 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
     return JSON.parse(stdout) as ComposeModel;
   } catch (error) {
     throw new Error(
-      `docker compose config returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+      `docker compose config returned invalid JSON: ${error instanceof Error ? error.message : String(error)}\nOutput (truncated): ${stdout.slice(0, 500)}`
     );
   }
 }
@@ -195,15 +198,20 @@ function parseSizeToBytes(value: string | number | undefined) {
     return direct;
   }
 
-  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([kmgt]?i?b?)$/i);
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(b|[kmgt](?:i?b)?)$/i);
   if (!match) {
     return Number.NaN;
   }
 
   const amount = Number(match[1]);
-  const unit = match[2].toLowerCase().replace('i', '').replace(/b$/, '');
-  const exponent = ['', 'k', 'm', 'g', 't'].indexOf(unit);
-  return exponent < 0 ? Number.NaN : amount * 1024 ** exponent;
+  const unit = match[2].toLowerCase();
+  const baseUnit = unit.replace('i', '').replace(/b$/, '');
+  const exponent = ['', 'k', 'm', 'g', 't'].indexOf(baseUnit);
+  if (exponent < 0) {
+    return Number.NaN;
+  }
+
+  return amount * (unit.includes('i') ? 1024 : 1000) ** exponent;
 }
 
 function assertStringArrayEqual(

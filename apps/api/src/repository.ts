@@ -337,7 +337,7 @@ export const createSqliteJobRepository = ({
       id, audit_id, registry_version, kind, filename, content_type,
       byte_size, sha256, storage_key, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `);
   const getBrowserAuditArtifactStatement = db.query<BrowserAuditArtifactRow, [string, string]>(`
     SELECT *
@@ -581,14 +581,18 @@ export const createSqliteJobRepository = ({
     row: BrowserAuditArtifactRow
   ): BrowserAuditArtifactRecord | null => {
     if (
-      row.registry_version !== 'v1'
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(row.id)
+      || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(row.audit_id)
+      || row.registry_version !== 'v1'
       || !/^[a-z0-9][a-z0-9._-]*$/.test(row.kind)
       || row.filename.length < 1
+      || row.filename.length > 255
       || row.content_type.length < 1
+      || row.content_type.length > 200
       || !Number.isSafeInteger(row.byte_size)
       || row.byte_size < 0
       || !/^[a-f0-9]{64}$/.test(row.sha256)
-      || row.storage_key.length < 3
+      || row.storage_key !== `${row.audit_id}/${row.id}`
       || Number.isNaN(Date.parse(row.created_at))
     ) {
       console.warn(JSON.stringify({

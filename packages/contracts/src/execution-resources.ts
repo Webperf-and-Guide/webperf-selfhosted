@@ -66,8 +66,7 @@ const browserAuditExecutionContextSchema = z.object({
   kind: z.literal('browser_audit'),
   executionJob: executionJobSchema,
   payload: browserAuditExecutionPayloadSchema,
-  audit: browserAuditResourceSchema,
-  artifactUpload: browserAuditArtifactUploadConfigSchema
+  audit: browserAuditResourceSchema
 });
 
 const webhookDeliveryExecutionContextSchema = z.object({
@@ -83,6 +82,12 @@ export const executionResourceContextSchema = z.discriminatedUnion('kind', [
   webhookDeliveryExecutionContextSchema
 ]);
 export type ExecutionResourceContext = z.infer<typeof executionResourceContextSchema>;
+
+export const browserAuditArtifactUploadGrantRequestSchema = executionJobOwnerRequestSchema;
+export type BrowserAuditArtifactUploadGrantRequest = z.infer<
+  typeof browserAuditArtifactUploadGrantRequestSchema
+>;
+export const browserAuditArtifactUploadGrantSchema = browserAuditArtifactUploadConfigSchema;
 
 const networkProbeExecutionResultSchema = z.object({
   kind: z.literal('network_probe'),

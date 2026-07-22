@@ -138,6 +138,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     const hash = createHash('sha256');
     let byteSize = 0;
     let published = false;
+    let closed = false;
 
     try {
       const reader = body?.getReader();
@@ -180,6 +181,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
 
       await handle.sync();
       await handle.close();
+      closed = true;
       await link(temporaryPath, destinationPath);
       published = true;
       await rm(temporaryPath, { force: true });
@@ -191,7 +193,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         sha256: hash.digest('hex')
       };
     } finally {
-      await handle.close().catch(() => undefined);
+      if (!closed) {
+        await handle.close().catch(() => undefined);
+      }
       if (!published) {
         await rm(temporaryPath, { force: true });
       }
@@ -232,7 +236,11 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
 
       if (!auditEntry.isDirectory() || auditEntry.isSymbolicLink() || !safeStorageSegment.test(auditEntry.name)) {
         await rm(auditPath, { recursive: true, force: true });
-        removedFiles += 1;
+        if (auditEntry.isDirectory()) {
+          removedDirectories += 1;
+        } else {
+          removedFiles += 1;
+        }
         continue;
       }
 

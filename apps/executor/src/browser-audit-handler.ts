@@ -12,7 +12,7 @@ import {
   createBrowserAuditSignature,
   type BrowserAuditSignatureRequest
 } from '@webperf/domain-core';
-import type { ExecutorApiClient } from './client';
+import type { BrowserAuditExecutorApiClient } from './client';
 import {
   isRetryableHttpStatus,
   redactExecutionText,
@@ -22,7 +22,7 @@ import {
 import { ExecutionFailure } from './runner';
 
 export type BrowserAuditHandlerOptions = {
-  client: ExecutorApiClient;
+  client: BrowserAuditExecutorApiClient;
   leaseOwner: string;
   browserAuditSharedSecret: string;
   browserAuditBaseUrl?: string;
@@ -75,6 +75,10 @@ export const createBrowserAuditExecutionHandler = ({
       return;
     }
 
+    const artifactUpload = await client.artifactUploadGrant(executionJob.id, {
+      leaseOwner
+    });
+
     const unsignedRequest = {
       executionId: audit.id,
       targetUrl: audit.targetUrl,
@@ -82,7 +86,7 @@ export const createBrowserAuditExecutionHandler = ({
       policy: audit.policy,
       customHeaders: audit.customHeaders,
       cookies: audit.cookies,
-      artifactUpload: context.artifactUpload,
+      artifactUpload,
       timestamp: new Date().toISOString(),
       keyVersion: 'current' as const
     } satisfies BrowserAuditSignatureRequest;

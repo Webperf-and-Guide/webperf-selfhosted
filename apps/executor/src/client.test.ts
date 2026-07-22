@@ -107,6 +107,36 @@ describe('executor API client', () => {
     expect((error as ExecutorApiError).cause).toBe(networkError);
   });
 
+  test('retrieves a transient artifact grant through its dedicated lease-bound route', async () => {
+    let request: Request | undefined;
+    const grant = {
+      baseUrl: 'http://api.test:8788',
+      bearerToken: 'scoped-artifact-upload-token',
+      expiresAt: '2099-07-22T00:15:00.000Z',
+      maxArtifactBytes: 25_000_000,
+      allowedContentTypes: ['application/json', 'text/html']
+    };
+    const client = createExecutorApiClient({
+      baseUrl: 'http://api.test:8788',
+      internalSecret: 'executor-client-internal-secret',
+      fetchImpl: (async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1]
+      ) => {
+        request = new Request(input, init);
+        return Response.json(grant, { headers: { 'cache-control': 'no-store' } });
+      }) as unknown as typeof fetch
+    });
+
+    expect(await client.artifactUploadGrant('exec_client', {
+      leaseOwner: 'executor-client'
+    })).toEqual(grant);
+    expect(new URL(request!.url).pathname).toBe(
+      '/internal/execution-jobs/exec_client/artifact-upload-grant'
+    );
+    expect(await request!.json()).toEqual({ leaseOwner: 'executor-client' });
+  });
+
   test('persists results and enqueues follow-ups through lease-bound routes', async () => {
     const requests: Request[] = [];
     const client = createExecutorApiClient({

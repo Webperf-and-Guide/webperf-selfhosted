@@ -247,6 +247,17 @@ describe('api service monitoring expansion', () => {
       expect(startExecutionResponse.status).toBe(200);
       expect((await startExecutionResponse.json()).status).toBe('running');
 
+      const nonBrowserGrantResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/artifact-upload-grant`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http' })
+        }
+      );
+      expect(nonBrowserGrantResponse.status).toBe(409);
+      expect(nonBrowserGrantResponse.headers.get('cache-control')).toBe('no-store');
+
       const staleCompletionResponse = await fetch(
         `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/complete`,
         {

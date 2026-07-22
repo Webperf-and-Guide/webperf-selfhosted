@@ -1,4 +1,5 @@
 import type {
+  BrowserAuditArtifactUploadConfig,
   ExecutionFollowupsRequest,
   ExecutionFollowupsResponse,
   ExecutionJob,
@@ -9,6 +10,7 @@ import type {
   ExecutionResourceResultRequest
 } from '@webperf/contracts';
 import {
+  browserAuditArtifactUploadGrantSchema,
   executionFollowupsResponseSchema,
   executionJobSchema,
   executionResourceContextSchema
@@ -26,6 +28,13 @@ export type ExecutorApiClient = ExecutorLeaseClient & {
   context(id: string, input: ExecutionJobOwnerRequest): Promise<ExecutionResourceContext>;
   saveResult(id: string, input: ExecutionResourceResultRequest): Promise<void>;
   enqueueFollowups(id: string, input: ExecutionFollowupsRequest): Promise<ExecutionFollowupsResponse>;
+};
+
+export type BrowserAuditExecutorApiClient = ExecutorApiClient & {
+  artifactUploadGrant(
+    id: string,
+    input: ExecutionJobOwnerRequest
+  ): Promise<BrowserAuditArtifactUploadConfig>;
 };
 
 type ResponseSchema<T> = {
@@ -56,7 +65,7 @@ export const createExecutorApiClient = ({
   internalSecret: string;
   requestTimeoutMs?: number;
   fetchImpl?: typeof globalThis.fetch;
-}): ExecutorApiClient => {
+}): BrowserAuditExecutorApiClient => {
   if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 100 || requestTimeoutMs > 300_000) {
     throw new Error('Executor API timeout must be an integer between 100 and 300000ms');
   }
@@ -195,6 +204,20 @@ export const createExecutorApiClient = ({
       }
 
       return context;
+    },
+    artifactUploadGrant: async (id, input) => {
+      const grant = await request(
+        `/internal/execution-jobs/${encodeURIComponent(id)}/artifact-upload-grant`,
+        input,
+        browserAuditArtifactUploadGrantSchema,
+        false
+      );
+
+      if (!grant) {
+        throw new ExecutorApiError('Executor API returned an empty artifact upload grant', null);
+      }
+
+      return grant;
     },
     saveResult: async (id, input) => {
       await request(

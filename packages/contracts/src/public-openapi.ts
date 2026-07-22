@@ -9,13 +9,15 @@ type PublicOpenApiOptions = {
   serverUrl?: string;
 };
 
+const selfhostAdminSchemeName = 'selfhostAdminToken';
+
 export const buildPublicOpenApiDocument = (options: PublicOpenApiOptions) => {
   const document = buildOpenApiSkeletonDocument({
     ...options,
     contract: publicContract,
     tags: [...PUBLIC_OPENAPI_TAG_DEFINITIONS],
     bearerAuth: {
-      schemeName: 'selfhostAdminToken',
+      schemeName: selfhostAdminSchemeName,
       publicPaths: ['/v1/capabilities'],
       description: 'SELFHOST_ADMIN_TOKEN for protected self-host API operations.'
     }
@@ -27,7 +29,7 @@ export const buildPublicOpenApiDocument = (options: PublicOpenApiOptions) => {
       summary: browserAuditArtifactDownloadRoute.summary,
       description: browserAuditArtifactDownloadRoute.description,
       tags: [...browserAuditArtifactDownloadRoute.tags],
-      security: [{ selfhostAdminToken: [] }],
+      security: [{ [selfhostAdminSchemeName]: [] }],
       responses: {
         '200': { description: 'Artifact byte stream' }
       }

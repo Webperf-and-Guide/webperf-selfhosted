@@ -30,6 +30,8 @@ Execution details should stay behind a small boundary:
 - the scheduler requests due-work dispatch on its configured interval; the API
   atomically creates Runs and queue rows
 - the executor owns execution leases and calls probe runtimes
+- Browser Audit upload credentials use a dedicated lease-bound grant endpoint;
+  they are not embedded in the general execution context or persisted queue payload
 - probe runtimes decide how to perform an individual measurement
 - optional runtimes can expose extra capabilities without forcing them into the default self-host stack
 

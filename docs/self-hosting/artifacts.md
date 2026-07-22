@@ -16,8 +16,10 @@ creation time. Artifact bytes are never stored in a SQLite BLOB.
 - `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS` defaults to `900` and is capped at one
   hour.
 
-The API issues the runner a signed upload token scoped to one audit, one
-execution job, and the current lease owner. Uploads also require a live lease,
+The executor retrieves a transient grant from a dedicated internal endpoint;
+the general execution context does not contain upload credentials. The API
+issues the runner a signed upload token scoped to one audit, one execution job,
+and the current lease owner. Uploads also require a live lease,
 lease attempt, an allowed kind-specific content type, an exact declared byte
 size, a normalized filename, and a traversal-safe generated storage key. A
 stale, reclaimed, tampered, or cross-audit token is rejected. One audit may

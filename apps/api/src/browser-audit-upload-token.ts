@@ -89,10 +89,13 @@ export const verifyBrowserAuditUploadToken = ({
       parts[0],
       candidateIsConfigured ? secret : `${tokenDomain}-unconfigured-key`
     );
+    const suppliedHasExpectedLength = suppliedSignature.byteLength === expected.byteLength;
+    const suppliedToCompare = suppliedHasExpectedLength
+      ? suppliedSignature
+      : Buffer.alloc(expected.byteLength);
+    const candidateMatches = timingSafeEqual(suppliedToCompare, expected);
     signatureMatches = (
-      candidateIsConfigured
-      && suppliedSignature.byteLength === expected.byteLength
-      && timingSafeEqual(suppliedSignature, expected)
+      candidateIsConfigured && suppliedHasExpectedLength && candidateMatches
     ) || signatureMatches;
   }
 
@@ -137,14 +140,16 @@ function assertClaims(
     || typeof claims.leaseOwner !== 'string'
     || claims.leaseOwner.length < 1
     || claims.leaseOwner.length > 200
+    || typeof claims.attemptCount !== 'number'
     || !Number.isSafeInteger(claims.attemptCount)
-    || (claims.attemptCount ?? 0) < 1
-    || (claims.attemptCount ?? 0) > 20
+    || claims.attemptCount < 1
+    || claims.attemptCount > 20
     || !Number.isSafeInteger(claims.issuedAt)
     || !Number.isSafeInteger(claims.expiresAt)
+    || typeof claims.maxArtifactBytes !== 'number'
     || !Number.isSafeInteger(claims.maxArtifactBytes)
-    || (claims.maxArtifactBytes ?? 0) < 1
-    || (claims.maxArtifactBytes ?? 0) > 250_000_000
+    || claims.maxArtifactBytes < 1
+    || claims.maxArtifactBytes > 250_000_000
     || typeof claims.nonce !== 'string'
     || !/^[a-f0-9-]{36}$/.test(claims.nonce)
   ) {

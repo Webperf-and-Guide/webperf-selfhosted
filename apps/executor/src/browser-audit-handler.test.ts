@@ -11,7 +11,7 @@ import {
   createBrowserAuditExecutionHandler,
   resolveBrowserAuditEndpoint
 } from './browser-audit-handler';
-import type { ExecutorApiClient } from './client';
+import type { BrowserAuditExecutorApiClient } from './client';
 import { ExecutionFailure } from './runner';
 
 const executionJob: ExecutionJob = {
@@ -53,23 +53,25 @@ const context = (): ExecutionResourceContext => ({
   kind: 'browser_audit',
   executionJob,
   payload: { version: 'v1', auditId: 'audit_handler' },
-  audit: queuedAudit(),
-  artifactUpload: {
-    baseUrl: 'http://127.0.0.1:8788',
-    bearerToken: 'scoped-artifact-upload-token',
-    expiresAt: '2099-07-22T00:15:00.000Z',
-    maxArtifactBytes: 25_000_000,
-    allowedContentTypes: ['application/json', 'text/html']
-  }
+  audit: queuedAudit()
 });
 
-const createClient = (savedResults: ExecutionResourceResultRequest[]): ExecutorApiClient => ({
+const createClient = (
+  savedResults: ExecutionResourceResultRequest[]
+): BrowserAuditExecutorApiClient => ({
   claim: async () => null,
   start: async () => executionJob,
   renew: async () => executionJob,
   complete: async () => executionJob,
   fail: async () => executionJob,
   context: async () => context(),
+  artifactUploadGrant: async () => ({
+    baseUrl: 'http://127.0.0.1:8788',
+    bearerToken: 'scoped-artifact-upload-token',
+    expiresAt: '2099-07-22T00:15:00.000Z',
+    maxArtifactBytes: 25_000_000,
+    allowedContentTypes: ['application/json', 'text/html']
+  }),
   saveResult: async (_id, result) => {
     savedResults.push(structuredClone(result));
   },

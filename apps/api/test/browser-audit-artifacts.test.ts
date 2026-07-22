@@ -263,4 +263,33 @@ describe('Browser Audit artifact indexes', () => {
     await expect(store.openDownload(stored.storageKey, stored.byteSize))
       .rejects.toThrow();
   });
+
+  test('does not surface malformed artifact index identifiers or metadata', () => {
+    const databasePath = join(createTempDirectory(), 'webperf.sqlite');
+    createSqliteJobRepository({
+      databasePath,
+      encryptionSecret: 'artifact-corruption-encryption-secret'
+    }).close();
+    const database = new Database(databasePath);
+    database.query(`
+      INSERT INTO browser_audit_artifacts (
+        id, audit_id, registry_version, kind, filename, content_type,
+        byte_size, sha256, storage_key, created_at
+      ) VALUES ('bad/id', 'audit_corrupt', 'v1', 'lighthouse-json', ?,
+        'application/json', 1, ?, 'audit_corrupt/bad/id', ?)
+    `).run(
+      'x'.repeat(256),
+      'a'.repeat(64),
+      '2026-07-22T00:00:00.000Z'
+    );
+    database.close();
+
+    const repository = createSqliteJobRepository({
+      databasePath,
+      encryptionSecret: 'artifact-corruption-encryption-secret'
+    });
+    expect(repository.getBrowserAuditArtifact('audit_corrupt', 'bad/id')).toBeNull();
+    expect(repository.listBrowserAuditArtifacts('audit_corrupt')).toEqual([]);
+    repository.close();
+  });
 });

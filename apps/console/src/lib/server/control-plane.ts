@@ -217,10 +217,21 @@ export const proxyBrowserAuditArtifactDownload = async (
 ) => {
   const runtime = resolveRuntime(platform);
   const path = `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactId)}`;
-  const response = await fetch(new URL(path, runtime.CONTROL_BASE_URL), {
-    headers: buildHeaders(runtime.SELFHOST_ADMIN_TOKEN),
-    redirect: 'manual'
-  });
+  const [, response, , isSuccess] = await safe(
+    fetch(new URL(path, runtime.CONTROL_BASE_URL), {
+      headers: buildHeaders(runtime.SELFHOST_ADMIN_TOKEN),
+      redirect: 'manual'
+    })
+  );
+
+  if (!isSuccess) {
+    return toErrorResponse(
+      new ORPCError('SERVICE_UNAVAILABLE', {
+        message: 'Browser Audit artifact service is unavailable'
+      })
+    );
+  }
+
   return proxyResponse(response);
 };
 

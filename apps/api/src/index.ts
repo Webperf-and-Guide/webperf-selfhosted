@@ -56,6 +56,8 @@ import {
   analysisResourceSchema,
   appContract,
   browserAuditCapabilitiesSchema,
+  browserAuditArtifactUploadGrantRequestSchema,
+  browserAuditArtifactUploadGrantSchema,
   browserAuditArtifactKindSchema,
   browserAuditArtifactLimit,
   browserAuditArtifactRefSchema,
@@ -169,11 +171,15 @@ type SelfhostRuntime = {
 type MutableTarget = LatencyJobTarget;
 type MutableJob = LatencyJobDetail;
 type ExecutionJobMutationAction = 'start' | 'renew' | 'complete' | 'fail';
-type ExecutionJobResourceAction = 'context' | 'result' | 'followups';
+type ExecutionJobResourceAction =
+  | 'context'
+  | 'artifact-upload-grant'
+  | 'result'
+  | 'followups';
 const executionJobMutationPathPattern =
   /^\/internal\/execution-jobs\/([^/]+)\/(start|renew|complete|fail)$/;
 const executionJobResourcePathPattern =
-  /^\/internal\/execution-jobs\/([^/]+)\/(context|result|followups)$/;
+  /^\/internal\/execution-jobs\/([^/]+)\/(context|artifact-upload-grant|result|followups)$/;
 const browserAuditArtifactUploadPathPattern =
   /^\/internal\/browser-audits\/([^/]+)\/artifacts$/;
 const browserAuditArtifactDownloadPathPattern =
@@ -1622,10 +1628,39 @@ async function handleExecutionResourceOperation(
 
     const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
     return executionJob
-      ? json(buildExecutionResourceContext(executionJob, request), {
+      ? json(buildExecutionResourceContext(executionJob), {
           headers: { 'cache-control': 'no-store' }
         })
       : executionLeaseConflict();
+  }
+
+  if (action === 'artifact-upload-grant') {
+    const body = await parseExecutionTransportBody(
+      request,
+      browserAuditArtifactUploadGrantRequestSchema,
+      'Invalid Browser Audit artifact upload grant request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+    if (!executionJob) {
+      return executionLeaseConflict();
+    }
+
+    if (executionJob.kind !== 'browser_audit') {
+      return json(
+        { error: 'Artifact upload grants are only available for Browser Audit executions' },
+        { status: 409, headers: { 'cache-control': 'no-store' } }
+      );
+    }
+
+    return json(
+      buildBrowserAuditArtifactUploadGrant(executionJob, request),
+      { headers: { 'cache-control': 'no-store' } }
+    );
   }
 
   if (action === 'result') {
@@ -1739,8 +1774,7 @@ function getOwnedRunningExecutionJob(executionJobId: string, leaseOwner: string)
 }
 
 function buildExecutionResourceContext(
-  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
-  request: Request
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>
 ): ExecutionResourceContext {
   if (executionJob.kind === 'network_probe') {
     const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
@@ -1794,39 +1828,15 @@ function buildExecutionResourceContext(
     const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
     const audit = repository.getBrowserAudit(payload.auditId);
 
-    if (executionJob.resourceId !== payload.auditId || !audit || !executionJob.leaseOwner) {
+    if (executionJob.resourceId !== payload.auditId || !audit) {
       throw new Error('Browser audit execution references a missing resource');
     }
-
-    const issuedAt = new Date();
-    const expiresAt = new Date(
-      issuedAt.getTime() + runtime.artifactUploadTtlSeconds * 1_000
-    );
-    const artifactUploadBaseUrl = resolveArtifactUploadBaseUrl(
-      runtime.artifactUploadBaseUrl ?? new URL(request.url).origin
-    );
 
     return executionResourceContextSchema.parse({
       kind: 'browser_audit',
       executionJob,
       payload,
-      audit,
-      artifactUpload: {
-        baseUrl: artifactUploadBaseUrl,
-        bearerToken: issueBrowserAuditUploadToken({
-          secret: runtime.internalSecret,
-          auditId: audit.id,
-          executionJobId: executionJob.id,
-          leaseOwner: executionJob.leaseOwner,
-          attemptCount: executionJob.attemptCount,
-          expiresAt,
-          maxArtifactBytes: runtime.maxArtifactBytes,
-          now: issuedAt
-        }),
-        expiresAt: expiresAt.toISOString(),
-        maxArtifactBytes: runtime.maxArtifactBytes,
-        allowedContentTypes: [...defaultBrowserAuditArtifactContentTypes]
-      }
+      audit
     });
   }
 
@@ -1842,6 +1852,45 @@ function buildExecutionResourceContext(
     executionJob,
     payload,
     run
+  });
+}
+
+function buildBrowserAuditArtifactUploadGrant(
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  request: Request
+) {
+  const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+  if (
+    executionJob.kind !== 'browser_audit'
+    || executionJob.resourceId !== payload.auditId
+    || !executionJob.leaseOwner
+    || !repository.getBrowserAudit(payload.auditId)
+  ) {
+    throw new Error('Browser Audit artifact grant references a missing resource');
+  }
+
+  const issuedAt = new Date();
+  const expiresAt = new Date(
+    issuedAt.getTime() + runtime.artifactUploadTtlSeconds * 1_000
+  );
+  const artifactUploadBaseUrl = resolveArtifactUploadBaseUrl(
+    runtime.artifactUploadBaseUrl ?? new URL(request.url).origin
+  );
+  return browserAuditArtifactUploadGrantSchema.parse({
+    baseUrl: artifactUploadBaseUrl,
+    bearerToken: issueBrowserAuditUploadToken({
+      secret: runtime.internalSecret,
+      auditId: payload.auditId,
+      executionJobId: executionJob.id,
+      leaseOwner: executionJob.leaseOwner,
+      attemptCount: executionJob.attemptCount,
+      expiresAt,
+      maxArtifactBytes: runtime.maxArtifactBytes,
+      now: issuedAt
+    }),
+    expiresAt: expiresAt.toISOString(),
+    maxArtifactBytes: runtime.maxArtifactBytes,
+    allowedContentTypes: [...defaultBrowserAuditArtifactContentTypes]
   });
 }
 
@@ -1929,9 +1978,12 @@ const browserAuditArtifactsMatch = (
     && artifact.registryVersion === indexed.registryVersion
     && artifact.kind === indexed.kind
     && artifact.url === `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(indexed.id)}`
+    && artifact.filename != null
     && artifact.filename === indexed.filename
     && artifact.contentType === indexed.contentType
+    && artifact.byteSize != null
     && artifact.byteSize === indexed.byteSize
+    && artifact.sha256 != null
     && artifact.sha256 === indexed.sha256
     && artifact.createdAt === indexed.createdAt
   );
@@ -2996,7 +3048,14 @@ async function handleBrowserAuditArtifactUpload(
     return artifactUploadError('Artifact upload failed', 500, incidentId);
   } finally {
     if (storedStorageKey && !indexed) {
-      await artifactStore.delete(storedStorageKey).catch(() => undefined);
+      await artifactStore.delete(storedStorageKey).catch((error) => {
+        console.warn(JSON.stringify({
+          service: 'webperf-api',
+          warning: 'browser_audit_artifact_cleanup_failed',
+          storageKey: storedStorageKey,
+          ...describeSafeError(error)
+        }));
+      });
     }
   }
 }

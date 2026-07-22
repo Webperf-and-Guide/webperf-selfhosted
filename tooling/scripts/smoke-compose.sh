@@ -128,6 +128,9 @@ if [[ "$profile" == "browser-audit" ]]; then
     }
     console.log(artifact.url);
   ' "$audit_detail")"
+  expected_sha256="$(bun -e '
+    console.log(JSON.parse(process.argv[1]).result.artifacts[0].sha256);
+  ' "$audit_detail")"
   unauthenticated_status="$(
     curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8788${artifact_url}"
   )"
@@ -140,6 +143,14 @@ if [[ "$profile" == "browser-audit" ]]; then
     -o "$temp_artifact"
   if [[ ! -s "$temp_artifact" ]]; then
     echo "Expected a non-empty Browser Audit artifact download" >&2
+    exit 1
+  fi
+  downloaded_sha256="$(bun -e '
+    const bytes = await Bun.file(process.argv[1]).arrayBuffer();
+    console.log(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
+  ' "$temp_artifact")"
+  if [[ "$downloaded_sha256" != "$expected_sha256" ]]; then
+    echo "Artifact SHA-256 mismatch: expected ${expected_sha256}, got ${downloaded_sha256}" >&2
     exit 1
   fi
 fi

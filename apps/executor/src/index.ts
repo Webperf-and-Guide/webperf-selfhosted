@@ -2,6 +2,7 @@ import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { parseSelfhostExecutorVars } from '@webperf/config/selfhost-executor';
 import { createExecutorApiClient } from './client';
+import { describeSafeError } from './diagnostics';
 import { createDefaultLeaseOwner } from './identity';
 import { ExecutionFailure, runExecutor } from './runner';
 
@@ -81,14 +82,13 @@ const main = async () => {
 try {
   await main();
 } catch (error) {
-  const errorType = error instanceof Error && /^[A-Za-z0-9_.-]{1,80}$/.test(error.name)
-    ? error.name
-    : 'UnknownError';
+  const incidentId = randomUUID();
   console.error(
     JSON.stringify({
       service: 'webperf-executor',
       event: 'fatal_error',
-      errorType
+      incidentId,
+      ...describeSafeError(error)
     })
   );
   process.exitCode = 1;

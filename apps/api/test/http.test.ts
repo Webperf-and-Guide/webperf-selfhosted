@@ -287,7 +287,11 @@ describe('api service monitoring expansion', () => {
 
       expect(failedTransportResponse.status).toBe(500);
       expect(failedTransportResponse.headers.get('cache-control')).toBe('no-store');
-      expect(await failedTransportResponse.text()).not.toContain('raw-sensitive-repository-error');
+      const failedTransportBody = await failedTransportResponse.json();
+      expect(failedTransportBody.incidentId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
+      expect(JSON.stringify(failedTransportBody)).not.toContain('raw-sensitive-repository-error');
 
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);

@@ -20,6 +20,24 @@ const leasedJob: ExecutionJob = {
 };
 
 describe('executor API client', () => {
+  test('uses configuration errors consistently for invalid base URLs', () => {
+    const createWithBaseUrl = (baseUrl: string) => () => createExecutorApiClient({
+      baseUrl,
+      internalSecret: 'executor-client-internal-secret'
+    });
+
+    expect(createWithBaseUrl('not-a-url')).toThrow('Executor API base URL is invalid');
+    expect(createWithBaseUrl('ftp://api.test')).toThrow(
+      'Executor API base URL must be a credential-free HTTP(S) origin'
+    );
+
+    try {
+      createWithBaseUrl('not-a-url')();
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(ExecutorApiError);
+    }
+  });
+
   test('sends the internal bearer credential and validates claim responses', async () => {
     let request: Request | undefined;
     const client = createExecutorApiClient({

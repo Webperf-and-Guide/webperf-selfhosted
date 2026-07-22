@@ -52,7 +52,7 @@ export const createExecutorApiClient = ({
   try {
     apiUrl = new URL(baseUrl);
   } catch (cause) {
-    throw new ExecutorApiError('Executor API base URL is invalid', null, { cause });
+    throw new Error('Executor API base URL is invalid', { cause });
   }
 
   if (

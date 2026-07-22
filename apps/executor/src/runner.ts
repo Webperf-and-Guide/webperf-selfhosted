@@ -1,5 +1,6 @@
 import type { ExecutionJob, ExecutionJobError } from '@webperf/contracts';
 import { ExecutorApiError, type ExecutorApiClient } from './client';
+import { describeSafeError } from './diagnostics';
 
 export type ExecutionHandler = (job: ExecutionJob, signal: AbortSignal) => Promise<void>;
 
@@ -71,7 +72,7 @@ export const runExecutor = async ({
         event: 'claim_failed',
         consecutiveFailures: consecutiveClaimFailures,
         retryInMs: backoffMs,
-        ...describeError(error)
+        ...describeSafeError(error)
       });
       await waitForNextPoll(backoffMs, signal);
       continue;
@@ -120,7 +121,7 @@ export const processExecutionJob = async ({
       event: 'execution_start_failed',
       executionJobId: executionJob.id,
       kind: executionJob.kind,
-      ...describeError(error)
+      ...describeSafeError(error)
     });
     return;
   }
@@ -138,7 +139,7 @@ export const processExecutionJob = async ({
         event: 'execution_lease_lost',
         executionJobId: running.id,
         kind: running.kind,
-        ...describeError(error)
+        ...describeSafeError(error)
       });
       workController.abort();
     }
@@ -207,7 +208,7 @@ export const processExecutionJob = async ({
         executionJobId: running.id,
         kind: running.kind,
         code: failure.error.code,
-        ...describeError(persistError)
+        ...describeSafeError(persistError)
       });
     }
   } finally {
@@ -266,7 +267,7 @@ const normalizeExecutionFailure = (error: unknown): {
     };
   }
 
-  const diagnostic = describeError(error);
+  const diagnostic = describeSafeError(error);
   const systemCode = typeof diagnostic.systemCode === 'string'
     ? diagnostic.systemCode
     : null;
@@ -308,9 +309,19 @@ const runHandlerWithTimeout = async ({
     }, maxExecutionMs);
   });
 
+  const handlerCompleted = Promise.resolve()
+    .then(() => handler(executionJob, workController.signal))
+    .catch((error) => {
+      if (workController.signal.aborted) {
+        return;
+      }
+
+      throw error;
+    });
+
   try {
     await Promise.race([
-      handler(executionJob, workController.signal),
+      handlerCompleted,
       timedOut
     ]);
   } finally {
@@ -333,36 +344,10 @@ const calculateClaimBackoff = (
   const boundedRandom = Number.isFinite(randomValue)
     ? Math.min(1, Math.max(0, randomValue))
     : 0;
-  return Math.min(60_000, exponential + Math.floor(exponential * 0.1 * boundedRandom));
+  const minimum = Math.max(pollIntervalMs, Math.floor(exponential * 0.9));
+  const maximum = Math.min(60_000, Math.ceil(exponential * 1.1));
+  return Math.round(minimum + (maximum - minimum) * boundedRandom);
 };
-
-const describeError = (error: unknown) => {
-  const diagnosticSource = error instanceof ExecutorApiError ? error.cause : error;
-  const systemCode = (diagnosticSource as { code?: unknown } | null)?.code;
-  const safeSystemCode = typeof systemCode === 'string' && /^[A-Z0-9_]{1,64}$/.test(systemCode)
-    ? systemCode
-    : undefined;
-
-  if (error instanceof ExecutorApiError) {
-    return {
-      errorType: error.name,
-      ...(error.status === null ? {} : { status: error.status }),
-      ...(diagnosticSource instanceof Error
-        ? { causeType: normalizeErrorName(diagnosticSource.name) }
-        : {}),
-      ...(safeSystemCode ? { systemCode: safeSystemCode } : {})
-    };
-  }
-
-  const errorName = error instanceof Error ? normalizeErrorName(error.name) : 'UnknownError';
-  return {
-    errorType: errorName,
-    ...(safeSystemCode ? { systemCode: safeSystemCode } : {})
-  };
-};
-
-const normalizeErrorName = (value: string) =>
-  /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value : 'UnknownError';
 
 const normalizeRetryDelay = (value: number | undefined) =>
   value != null && Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000

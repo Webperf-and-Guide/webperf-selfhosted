@@ -123,6 +123,7 @@ import {
 } from '@webperf/report-core';
 import { createSqliteJobRepository } from './repository';
 import { authorizeApiRequest } from './auth';
+import { describeSafeError } from './diagnostics';
 import {
   isSensitiveHeaderName,
   redactJsonResponse,
@@ -1571,16 +1572,19 @@ const withExecutionTransportErrors = async (
 ) => {
   try {
     return await execute();
-  } catch {
+  } catch (error) {
+    const incidentId = crypto.randomUUID();
     console.error(
       JSON.stringify({
         service: 'webperf-api',
         event: 'execution_transport_failed',
-        operation
+        operation,
+        incidentId,
+        ...describeSafeError(error)
       })
     );
     return json(
-      { error: 'Execution transport failed' },
+      { error: 'Execution transport failed', incidentId },
       { status: 500, headers: { 'cache-control': 'no-store' } }
     );
   }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ExecutionJob } from '@webperf/contracts';
-import type { ExecutorApiClient } from './client';
-import { runExecutor, type ExecutorLogger } from './runner';
+import { ExecutorApiError, type ExecutorApiClient } from './client';
+import { processExecutionJob, runExecutor, type ExecutorLogger } from './runner';
 
 const queuedJob: ExecutionJob = {
   id: 'exec_runner',
@@ -90,6 +90,7 @@ describe('executor runner', () => {
       leaseOwner: 'executor-test',
       leaseDurationMs: 60_000,
       heartbeatIntervalMs: 1,
+      maxExecutionMs: 60_000,
       pollIntervalMs: 5,
       signal: controller.signal,
       logger: testLogger
@@ -133,6 +134,7 @@ describe('executor runner', () => {
       leaseOwner: 'executor-test',
       leaseDurationMs: 60_000,
       heartbeatIntervalMs: 5,
+      maxExecutionMs: 60_000,
       pollIntervalMs: 5,
       signal: controller.signal,
       logger: testLogger
@@ -140,5 +142,125 @@ describe('executor runner', () => {
 
     expect(persistedMessage).toBe('Execution handler failed');
     expect(JSON.stringify(testLogger.events)).not.toContain('raw-sensitive-handler-error');
+  });
+
+  test('does not fail a job after completion is rejected for a stale lease', async () => {
+    const testLogger = logger();
+    let failCalled = false;
+    const client: ExecutorApiClient = {
+      claim: async () => null,
+      start: async () => runningJob,
+      renew: async () => runningJob,
+      complete: async () => {
+        throw new ExecutorApiError('stale lease', 409);
+      },
+      fail: async () => {
+        failCalled = true;
+        return runningJob;
+      }
+    };
+
+    await processExecutionJob({
+      client,
+      handler: async () => {},
+      executionJob: queuedJob,
+      lease: { leaseOwner: 'executor-test', leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 1_000,
+      maxExecutionMs: 60_000,
+      logger: testLogger
+    });
+
+    expect(failCalled).toBe(false);
+    expect(testLogger.events.at(-1)).toMatchObject({
+      event: 'execution_completion_rejected',
+      reason: 'lease_lost'
+    });
+  });
+
+  test('aborts and retries a handler that exceeds its execution limit', async () => {
+    const testLogger = logger();
+    let aborted = false;
+    let failureCode: string | undefined;
+    const client: ExecutorApiClient = {
+      claim: async () => null,
+      start: async () => runningJob,
+      renew: async () => runningJob,
+      complete: async () => completedJob,
+      fail: async (_id, input) => {
+        failureCode = input.error.code;
+        return {
+          ...runningJob,
+          status: 'queued',
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          availableAt: '2026-07-22T00:00:05.000Z',
+          error: input.error
+        };
+      }
+    };
+
+    await processExecutionJob({
+      client,
+      handler: async (_job, signal) => {
+        signal.addEventListener('abort', () => {
+          aborted = true;
+        });
+        await new Promise(() => {});
+      },
+      executionJob: queuedJob,
+      lease: { leaseOwner: 'executor-test', leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 1_000,
+      maxExecutionMs: 10,
+      logger: testLogger
+    });
+
+    expect(aborted).toBe(true);
+    expect(failureCode).toBe('execution_timeout');
+  });
+
+  test('backs off claim failures with safe diagnostics', async () => {
+    const controller = new AbortController();
+    const testLogger = logger();
+    let claimCount = 0;
+    const client: ExecutorApiClient = {
+      claim: async () => {
+        claimCount += 1;
+        if (claimCount === 1) {
+          const error = Object.assign(new Error('connect failed for secret host'), {
+            code: 'ECONNREFUSED'
+          });
+          error.name = 'Bearer raw-sensitive-error-type';
+          throw error;
+        }
+        controller.abort();
+        return null;
+      },
+      start: async () => runningJob,
+      renew: async () => runningJob,
+      complete: async () => completedJob,
+      fail: async () => runningJob
+    };
+
+    await runExecutor({
+      client,
+      handler: async () => {},
+      leaseOwner: 'executor-test',
+      leaseDurationMs: 1_000,
+      heartbeatIntervalMs: 10,
+      maxExecutionMs: 1_000,
+      pollIntervalMs: 1,
+      signal: controller.signal,
+      logger: testLogger,
+      random: () => 0
+    });
+
+    expect(claimCount).toBe(2);
+    expect(testLogger.events[0]).toMatchObject({
+      event: 'claim_failed',
+      retryInMs: 1,
+      systemCode: 'ECONNREFUSED'
+    });
+    expect(JSON.stringify(testLogger.events)).not.toContain('secret host');
+    expect(JSON.stringify(testLogger.events)).not.toContain('raw-sensitive-error-type');
   });
 });

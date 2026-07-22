@@ -15,3 +15,7 @@ bun run dev:executor
 
 Copy environment values from `apps/executor/.env.example`. The internal secret
 must match the API and scheduler value.
+
+`SELFHOST_EXECUTOR_MAX_EXECUTION_MS` defaults to 15 minutes. A timed-out
+handler receives an abort signal and the execution is retried according to its
+attempt policy.

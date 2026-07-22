@@ -33,8 +33,11 @@ describe('strict self-host configuration', () => {
     expect(
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET
-      }).SELFHOST_EXECUTOR_LEASE_DURATION_MS
-    ).toBe(60_000);
+      })
+    ).toMatchObject({
+      SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
+      SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000
+    });
     expect(() =>
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,

@@ -17,18 +17,35 @@ export const selfhostExecutorEnvSchema = z
     SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: z.preprocess(
       (value) => value ?? '20000',
       z.coerce.number().int().min(1_000).max(600_000)
+    ),
+    SELFHOST_EXECUTOR_MAX_EXECUTION_MS: z.preprocess(
+      (value) => value ?? '900000',
+      z.coerce.number().int().min(1_000).max(86_400_000)
     )
   })
   .superRefine((config, context) => {
-    const apiUrl = new URL(config.SELFHOST_EXECUTOR_API_BASE_URL);
+    let apiUrl: URL | null = null;
+
+    try {
+      apiUrl = new URL(config.SELFHOST_EXECUTOR_API_BASE_URL);
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        message: 'Executor API URL is invalid',
+        path: ['SELFHOST_EXECUTOR_API_BASE_URL']
+      });
+    }
 
     if (
-      !['http:', 'https:'].includes(apiUrl.protocol)
-      || apiUrl.username
-      || apiUrl.password
-      || apiUrl.pathname !== '/'
-      || apiUrl.search
-      || apiUrl.hash
+      apiUrl
+      && (
+        !['http:', 'https:'].includes(apiUrl.protocol)
+        || apiUrl.username
+        || apiUrl.password
+        || apiUrl.pathname !== '/'
+        || apiUrl.search
+        || apiUrl.hash
+      )
     ) {
       context.addIssue({
         code: 'custom',

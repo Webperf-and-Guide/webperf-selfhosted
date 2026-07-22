@@ -255,6 +255,40 @@ describe('api service monitoring expansion', () => {
       expect(completeExecutionResponse.status).toBe(200);
       expect((await completeExecutionResponse.json()).status).toBe('succeeded');
 
+      const invalidExecutionIdResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/%25invalid/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http' })
+        }
+      );
+      expect(invalidExecutionIdResponse.status).toBe(400);
+      expect(invalidExecutionIdResponse.headers.get('cache-control')).toBe('no-store');
+
+      const originalClaimExecutionJob = harness.repository.claimExecutionJob;
+      harness.repository.claimExecutionJob = () => {
+        throw new Error('raw-sensitive-repository-error');
+      };
+      let failedTransportResponse: Response;
+
+      try {
+        failedTransportResponse = await fetch(
+          `${harness.baseUrl}/internal/execution-jobs/claim`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+          }
+        );
+      } finally {
+        harness.repository.claimExecutionJob = originalClaimExecutionJob;
+      }
+
+      expect(failedTransportResponse.status).toBe(500);
+      expect(failedTransportResponse.headers.get('cache-control')).toBe('no-store');
+      expect(await failedTransportResponse.text()).not.toContain('raw-sensitive-repository-error');
+
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);
       const openApi = await openApiResponse.json();

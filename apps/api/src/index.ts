@@ -78,6 +78,7 @@ import {
   exportListResponseSchema,
   exportResourceSchema,
   executionJobFailRequestSchema,
+  executionJobIdSchema,
   executionJobLeaseRequestSchema,
   executionJobOwnerRequestSchema,
   jobListResponseSchema,
@@ -971,15 +972,24 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/internal/execution-jobs/claim' && request.method === 'POST') {
-      return handleClaimExecutionJob(request);
+      return withExecutionTransportErrors('claim', () => handleClaimExecutionJob(request));
     }
 
     const executionJobMatch = pathname.match(executionJobMutationPathPattern);
     if (executionJobMatch?.[1] && executionJobMatch[2] && request.method === 'POST') {
-      return handleExecutionJobMutation(
-        executionJobMatch[1],
-        executionJobMatch[2] as ExecutionJobMutationAction,
-        request
+      const executionJobId = executionJobIdSchema.safeParse(executionJobMatch[1]);
+
+      if (!executionJobId.success) {
+        return json(
+          { error: 'Invalid execution job ID' },
+          { status: 400, headers: { 'cache-control': 'no-store' } }
+        );
+      }
+
+      const action = executionJobMatch[2] as ExecutionJobMutationAction;
+      return withExecutionTransportErrors(
+        action,
+        () => handleExecutionJobMutation(executionJobId.data, action, request)
       );
     }
 
@@ -1424,22 +1434,17 @@ async function handleCreateJob(request: Request) {
 }
 
 async function handleClaimExecutionJob(request: Request) {
-  const body = await parseJsonBody<unknown>(request);
+  const body = await parseExecutionTransportBody(
+    request,
+    executionJobLeaseRequestSchema,
+    'Invalid execution lease request'
+  );
 
   if (!body.ok) {
     return body.response;
   }
 
-  const parsed = executionJobLeaseRequestSchema.safeParse(body.data);
-
-  if (!parsed.success) {
-    return json(
-      { error: 'Invalid execution lease request', issues: parsed.error.flatten() },
-      { status: 400, headers: { 'cache-control': 'no-store' } }
-    );
-  }
-
-  const executionJob = repository.claimExecutionJob(parsed.data);
+  const executionJob = repository.claimExecutionJob(body.data);
 
   if (!executionJob) {
     return new Response(null, {
@@ -1459,61 +1464,58 @@ async function handleExecutionJobMutation(
   action: ExecutionJobMutationAction,
   request: Request
 ) {
-  const body = await parseJsonBody<unknown>(request);
-
-  if (!body.ok) {
-    return body.response;
-  }
-
   if (action === 'start' || action === 'renew') {
-    const parsed = executionJobLeaseRequestSchema.safeParse(body.data);
+    const body = await parseExecutionTransportBody(
+      request,
+      executionJobLeaseRequestSchema,
+      'Invalid execution lease request'
+    );
 
-    if (!parsed.success) {
-      return json(
-        { error: 'Invalid execution lease request', issues: parsed.error.flatten() },
-        { status: 400, headers: { 'cache-control': 'no-store' } }
-      );
+    if (!body.ok) {
+      return body.response;
     }
 
     const executionJob = action === 'start'
-      ? repository.markExecutionJobRunning({ id: executionJobId, ...parsed.data })
-      : repository.renewExecutionJobLease({ id: executionJobId, ...parsed.data });
+      ? repository.markExecutionJobRunning({ id: executionJobId, ...body.data })
+      : repository.renewExecutionJobLease({ id: executionJobId, ...body.data });
     return executionJob
       ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
       : executionLeaseConflict();
   }
 
   if (action === 'complete') {
-    const parsed = executionJobOwnerRequestSchema.safeParse(body.data);
+    const body = await parseExecutionTransportBody(
+      request,
+      executionJobOwnerRequestSchema,
+      'Invalid execution owner request'
+    );
 
-    if (!parsed.success) {
-      return json(
-        { error: 'Invalid execution owner request', issues: parsed.error.flatten() },
-        { status: 400, headers: { 'cache-control': 'no-store' } }
-      );
+    if (!body.ok) {
+      return body.response;
     }
 
     const executionJob = repository.completeExecutionJob({
       id: executionJobId,
-      leaseOwner: parsed.data.leaseOwner
+      leaseOwner: body.data.leaseOwner
     });
     return executionJob
       ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
       : executionLeaseConflict();
   }
 
-  const parsed = executionJobFailRequestSchema.safeParse(body.data);
+  const body = await parseExecutionTransportBody(
+    request,
+    executionJobFailRequestSchema,
+    'Invalid execution failure request'
+  );
 
-  if (!parsed.success) {
-    return json(
-      { error: 'Invalid execution failure request', issues: parsed.error.flatten() },
-      { status: 400, headers: { 'cache-control': 'no-store' } }
-    );
+  if (!body.ok) {
+    return body.response;
   }
 
   const executionJob = repository.failExecutionJob({
     id: executionJobId,
-    ...parsed.data
+    ...body.data
   });
   return executionJob
     ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
@@ -1529,6 +1531,70 @@ const executionLeaseConflict = () =>
 const isExecutionTransportPath = (pathname: string) =>
   pathname === '/internal/execution-jobs/claim'
   || executionJobMutationPathPattern.test(pathname);
+
+async function parseExecutionTransportBody<T>(
+  request: Request,
+  schema: {
+    safeParse(value: unknown):
+      | { success: true; data: T }
+      | { success: false; error: { flatten(): unknown } };
+  },
+  errorLabel: string
+) {
+  const body = await parseJsonBody<unknown>(request);
+
+  if (!body.ok) {
+    return {
+      ok: false as const,
+      response: withNoStore(body.response)
+    };
+  }
+
+  const parsed = schema.safeParse(body.data);
+
+  if (!parsed.success) {
+    return {
+      ok: false as const,
+      response: json(
+        { error: errorLabel, issues: parsed.error.flatten() },
+        { status: 400, headers: { 'cache-control': 'no-store' } }
+      )
+    };
+  }
+
+  return { ok: true as const, data: parsed.data };
+}
+
+const withExecutionTransportErrors = async (
+  operation: 'claim' | ExecutionJobMutationAction,
+  execute: () => Promise<Response>
+) => {
+  try {
+    return await execute();
+  } catch {
+    console.error(
+      JSON.stringify({
+        service: 'webperf-api',
+        event: 'execution_transport_failed',
+        operation
+      })
+    );
+    return json(
+      { error: 'Execution transport failed' },
+      { status: 500, headers: { 'cache-control': 'no-store' } }
+    );
+  }
+};
+
+const withNoStore = (response: Response) => {
+  const headers = new Headers(response.headers);
+  headers.set('cache-control', 'no-store');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+};
 
 async function handleCreateProperty(request: Request) {
   return handleUpsertProperty(request);

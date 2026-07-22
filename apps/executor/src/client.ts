@@ -19,9 +19,10 @@ export class ExecutorApiError extends Error {
 
   constructor(
     message: string,
-    readonly status: number | null
+    readonly status: number | null,
+    options?: { cause?: unknown }
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -46,7 +47,13 @@ export const createExecutorApiClient = ({
     throw new Error('Executor API internal secret must contain at least 16 characters');
   }
 
-  const apiUrl = new URL(baseUrl);
+  let apiUrl: URL;
+
+  try {
+    apiUrl = new URL(baseUrl);
+  } catch (cause) {
+    throw new ExecutorApiError('Executor API base URL is invalid', null, { cause });
+  }
 
   if (
     !['http:', 'https:'].includes(apiUrl.protocol)
@@ -93,8 +100,12 @@ export const createExecutorApiClient = ({
 
       try {
         payload = await response.json();
-      } catch {
-        throw new ExecutorApiError('Executor API returned an invalid JSON response', response.status);
+      } catch (cause) {
+        throw new ExecutorApiError(
+          'Executor API returned an invalid JSON response',
+          response.status,
+          { cause }
+        );
       }
 
       const parsed = executionJobSchema.safeParse(payload);
@@ -113,7 +124,8 @@ export const createExecutorApiClient = ({
         controller.signal.aborted
           ? 'Executor API request timed out'
           : 'Executor API request failed',
-        null
+        null,
+        { cause: error }
       );
     } finally {
       clearTimeout(timeout);

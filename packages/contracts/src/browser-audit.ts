@@ -617,7 +617,7 @@ function normalizeLegacyBrowserAuditMetricSummary(
 
   // Historical rows are treated as untrusted input. Invalid individual fields
   // become null before the strict compatibility schema shapes the v1 output.
-  return browserAuditMetricSummarySchema.parse({
+  const parsed = browserAuditMetricSummarySchema.safeParse({
     finalUrl: normalizeLegacyUrl(summary.finalUrl),
     statusCode: normalizeLegacyStatusCode(summary.statusCode),
     performanceScore: normalizeLegacyScore(summary.performanceScore),
@@ -631,6 +631,8 @@ function normalizeLegacyBrowserAuditMetricSummary(
     tbtMs: normalizeLegacyNonnegativeNumber(summary.tbtMs),
     speedIndexMs: normalizeLegacyNonnegativeNumber(summary.speedIndexMs)
   });
+
+  return parsed.success ? parsed.data : null;
 }
 
 function normalizeLegacyUrl(value: unknown) {

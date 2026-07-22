@@ -91,6 +91,7 @@ if [[ "$profile" == "browser-audit" ]]; then
 
   audit_id="$(bun -e 'console.log(JSON.parse(process.argv[1]).id)' "$audit_response")"
   audit_detail="$audit_response"
+  audit_status="queued"
   for _ in {1..60}; do
     audit_detail="$(
       curl -fsS "http://127.0.0.1:8788/v1/browser-audits/${audit_id}" \
@@ -102,6 +103,11 @@ if [[ "$profile" == "browser-audit" ]]; then
     fi
     sleep 2
   done
+
+  if [[ "$audit_status" != "succeeded" && "$audit_status" != "failed" ]]; then
+    echo "Browser Audit ${audit_id} timed out while waiting for a terminal status" >&2
+    exit 1
+  fi
 
   bun -e '
     const payload = JSON.parse(process.argv[1]);

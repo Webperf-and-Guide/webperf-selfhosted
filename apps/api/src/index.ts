@@ -103,6 +103,7 @@ import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi'
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
 import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
+import { isDeepStrictEqual } from 'node:util';
 import {
   applyListQuery,
   buildRegionAvailabilityList,
@@ -1820,9 +1821,9 @@ const browserAuditInputsMatch = (
   existing.targetUrl === result.targetUrl
   && existing.region === result.region
   && existing.requestedAt === result.requestedAt
-  && JSON.stringify(existing.policy) === JSON.stringify(result.policy)
-  && JSON.stringify(existing.customHeaders) === JSON.stringify(result.customHeaders)
-  && JSON.stringify(existing.cookies) === JSON.stringify(result.cookies);
+  && isDeepStrictEqual(existing.policy, result.policy)
+  && isDeepStrictEqual(existing.customHeaders, result.customHeaders)
+  && isDeepStrictEqual(existing.cookies, result.cookies);
 
 const executionLeaseConflict = () =>
   json(

@@ -717,14 +717,23 @@ export const createSqliteJobRepository = ({
     }
 
     const cancelled = executionJob.status === 'cancelled';
-    persistBrowserAudit({
-      ...audit,
-      status: cancelled ? 'cancelled' : 'failed',
-      startedAt: cancelled ? audit.startedAt : audit.startedAt ?? nowIso,
-      completedAt: nowIso,
-      result: null,
-      error: cancelled ? null : 'Browser Audit execution stopped before producing a result'
-    });
+    try {
+      persistBrowserAudit({
+        ...audit,
+        status: cancelled ? 'cancelled' : 'failed',
+        startedAt: cancelled ? audit.startedAt : audit.startedAt ?? nowIso,
+        completedAt: nowIso,
+        result: null,
+        error: cancelled ? null : 'Browser Audit execution stopped before producing a result'
+      });
+    } catch {
+      console.warn(JSON.stringify({
+        service: 'webperf-api',
+        warning: 'browser_audit_terminal_sync_failed',
+        executionJobId: executionJob.id,
+        resourceId: executionJob.resourceId
+      }));
+    }
   };
 
   const enqueueExecution = (input: EnqueueExecutionJob, now: Date) => {

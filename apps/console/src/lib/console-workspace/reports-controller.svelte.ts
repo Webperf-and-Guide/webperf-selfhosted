@@ -140,11 +140,16 @@ export class ReportsController {
 
       try {
         const completed = await this.waitForBrowserAudit(payload.id);
-        this.state.browserAuditStatusMessage = completed
-          ? completed.status === 'succeeded'
-            ? 'Browser Audit completed and was saved to recent history.'
-            : `Browser Audit finished with status ${completed.status}; inspect the saved details.`
-          : 'Browser Audit is still queued or running and will continue in the background.';
+        if (!completed) {
+          this.state.browserAuditStatusMessage =
+            'Browser Audit is still queued or running and will continue in the background.';
+        } else if (completed.status === 'succeeded') {
+          this.state.browserAuditStatusMessage =
+            'Browser Audit completed and was saved to recent history.';
+        } else {
+          this.state.browserAuditStatusMessage =
+            `Browser Audit finished with status ${completed.status}; inspect the saved details.`;
+        }
       } catch {
         this.state.browserAuditStatusMessage =
           'Browser Audit was queued; refresh Reports to follow its latest status.';

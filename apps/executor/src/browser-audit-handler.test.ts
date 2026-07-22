@@ -189,6 +189,29 @@ describe('Browser Audit execution handler', () => {
     expect(failed.error).not.toContain('secret-cookie-value');
   });
 
+  test('fails explicitly when the runner responds for a different execution', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const handler = createBrowserAuditExecutionHandler({
+      client: createClient(savedResults),
+      leaseOwner: 'executor-browser',
+      browserAuditSharedSecret: 'browser-handler-shared-secret',
+      browserAuditBaseUrl: 'https://runner.example.com',
+      fetchImpl: (async () => Response.json({
+        executionId: 'audit_different',
+        status: 'succeeded',
+        result: successfulResult,
+        error: null
+      })) as unknown as typeof fetch
+    });
+
+    await handler(executionJob, new AbortController().signal);
+
+    expect(savedAudit(savedResults, -1)).toMatchObject({
+      status: 'failed',
+      error: 'Browser Audit runner returned a response for a different execution'
+    });
+  });
+
   test('requires HTTPS for non-loopback runners unless explicitly trusted', () => {
     expect(resolveBrowserAuditEndpoint('https://runner.example.com').href).toBe(
       'https://runner.example.com/audit'

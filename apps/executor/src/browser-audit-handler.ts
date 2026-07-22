@@ -60,6 +60,10 @@ export const createBrowserAuditExecutionHandler = ({
         result: { kind: 'browser_audit', audit }
       });
     };
+    const persistAudit = async (nextAudit: BrowserAuditResource) => {
+      audit = nextAudit;
+      await persist();
+    };
 
     if (['succeeded', 'failed', 'cancelled'].includes(audit.status)) {
       return;
@@ -114,10 +118,7 @@ export const createBrowserAuditExecutionHandler = ({
       await retryOrFail({
         executionJob,
         audit,
-        persist: async (nextAudit) => {
-          audit = nextAudit;
-          await persist();
-        },
+        persist: persistAudit,
         code: 'browser_audit_runner_unavailable',
         failureMessage: 'Browser Audit runner is unavailable'
       });
@@ -134,9 +135,17 @@ export const createBrowserAuditExecutionHandler = ({
 
     const parsedResponse = browserAuditWorkerResponseSchema.safeParse(payload);
 
+    if (parsedResponse.success && parsedResponse.data.executionId !== audit.id) {
+      audit = failAudit(
+        audit,
+        'Browser Audit runner returned a response for a different execution'
+      );
+      await persist();
+      return;
+    }
+
     if (
       parsedResponse.success
-      && parsedResponse.data.executionId === audit.id
       && parsedResponse.data.status === 'failed'
     ) {
       audit = failAudit(
@@ -150,7 +159,6 @@ export const createBrowserAuditExecutionHandler = ({
     if (
       response.ok
       && parsedResponse.success
-      && parsedResponse.data.executionId === audit.id
       && isSuccessfulWorkerResponse(parsedResponse.data)
     ) {
       audit = browserAuditResourceSchema.parse({
@@ -169,10 +177,7 @@ export const createBrowserAuditExecutionHandler = ({
       await retryOrFail({
         executionJob,
         audit,
-        persist: async (nextAudit) => {
-          audit = nextAudit;
-          await persist();
-        },
+        persist: persistAudit,
         code: 'browser_audit_runner_unavailable',
         failureMessage: 'Browser Audit runner is temporarily unavailable'
       });

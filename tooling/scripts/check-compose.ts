@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 type ComposePort = {
@@ -19,6 +20,7 @@ type ComposeService = {
   ports?: ComposePort[];
   profiles?: string[];
   cap_add?: string[];
+  security_opt?: string[];
   tmpfs?: string[];
   shm_size?: string | number;
   environment?: Record<string, string>;
@@ -33,6 +35,7 @@ const repositoryRoot = resolve(import.meta.dir, '../..');
 const envFile = resolve(repositoryRoot, 'infra/docker-compose/.env.example');
 const productionFile = resolve(repositoryRoot, 'infra/docker-compose/compose.yml');
 const developmentFile = resolve(repositoryRoot, 'infra/docker-compose/compose.dev.yml');
+const browserSeccompFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json');
 const defaultServiceNames = ['api', 'console', 'executor', 'probe', 'scheduler'];
 const expectedImages: Record<string, string> = {
   api: 'webperf-api',
@@ -112,6 +115,13 @@ assertStringArrayEqual(browser.profiles?.sort(), ['browser-audit', 'debug'], 'Br
 assert((browser.ports?.length ?? 0) === 0, 'Browser Audit runner must not publish a host port');
 assert(!browser.cap_add?.includes('SYS_ADMIN'), 'Browser Audit runner must not add SYS_ADMIN');
 assert(
+  browser.security_opt?.some(
+    (entry) => entry.startsWith('seccomp=') && entry.endsWith('browser-audit-seccomp.json')
+  ),
+  'Browser Audit runner must use the checked-in Chromium seccomp profile'
+);
+assertBrowserSeccompProfile();
+assert(
   parseSizeToBytes(browser.shm_size) >= 1024 ** 3,
   'Browser Audit runner must have at least 1 GiB of shared memory'
 );
@@ -189,6 +199,20 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
 function assertLoopbackPort(service: ComposeService | undefined, target: number, label: string) {
   const port = service?.ports?.find((candidate) => candidate.target === target);
   assert(port?.host_ip === '127.0.0.1', `${label} must bind ${target} on 127.0.0.1`);
+}
+
+function assertBrowserSeccompProfile() {
+  const profile = JSON.parse(readFileSync(browserSeccompFile, 'utf8')) as {
+    defaultAction?: string;
+    syscalls?: Array<{ names?: string[]; action?: string }>;
+  };
+  assert(profile.defaultAction === 'SCMP_ACT_ERRNO', 'Browser seccomp must default-deny syscalls');
+  const namespaceRule = profile.syscalls?.find(
+    (rule) =>
+      rule.action === 'SCMP_ACT_ALLOW'
+      && JSON.stringify(rule.names) === JSON.stringify(['clone', 'setns', 'unshare'])
+  );
+  assert(namespaceRule, 'Browser seccomp must allow only the required namespace syscalls explicitly');
 }
 
 function parseSizeToBytes(value: string | number | undefined) {

@@ -59,7 +59,12 @@ docker compose \
 
 The Lighthouse reference runner stays off the host network, runs one audit at
 a time, uses a 1 GiB shared-memory allocation, and keeps the Chrome sandbox
-enabled without adding `SYS_ADMIN`.
+enabled without adding `SYS_ADMIN`. Compose applies the checked-in
+`browser-audit-seccomp.json`, which is based on Moby's `seccomp/v0.2.1`
+default profile and adds only the `clone`, `setns`, and `unshare` permissions
+recommended for a non-root Chromium user-namespace sandbox. The vendored
+Apache-2.0 source is Moby `default.json` blob
+`ea5a494afb8d64898fa0f4f47ae0c4f5ba9cbbc9`.
 
 ## Loopback Debug Profile
 

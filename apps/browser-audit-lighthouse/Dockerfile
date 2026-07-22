@@ -54,12 +54,19 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
   else \
     resolved_chrome_version="${CHROME_VERSION:-$(bun -e 'import { PUPPETEER_REVISIONS } from "puppeteer-core"; process.stdout.write(PUPPETEER_REVISIONS.chrome)')}" \
     && test -n "$resolved_chrome_version" \
-    && bun x @puppeteer/browsers install "chrome@${resolved_chrome_version}" --path /opt/chrome; \
+    && bun x @puppeteer/browsers install "chrome@${resolved_chrome_version}" --path /opt/chrome \
+    && chrome_executable="$(find /opt/chrome -type f -name chrome -perm /111 -print -quit)" \
+    && test -n "$chrome_executable" \
+    && mkdir -p /opt/google/chrome \
+    && cp -a "$(dirname "$chrome_executable")/." /opt/google/chrome/ \
+    && rm -rf /opt/chrome; \
   fi
 RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox \) -print -quit 2>/dev/null)" \
   && test -n "$sandbox_path" \
   && chown root:root "$sandbox_path" \
   && chmod 4755 "$sandbox_path" \
+  && if [ -x /opt/google/chrome/chrome ]; then cp -p "$sandbox_path" /opt/google/chrome/chrome-sandbox; fi \
+  && if [ -f /opt/google/chrome/chrome-sandbox ]; then chown root:root /opt/google/chrome/chrome-sandbox && chmod 4755 /opt/google/chrome/chrome-sandbox; fi \
   && cp -p "$sandbox_path" /usr/local/sbin/chrome-devel-sandbox \
   && chown root:root /usr/local/sbin/chrome-devel-sandbox \
   && chmod 4755 /usr/local/sbin/chrome-devel-sandbox \
@@ -72,7 +79,7 @@ USER bun
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
-ENV CHROME_INSTALL_DIR=/opt/chrome
+ENV CHROME_INSTALL_DIR=/opt/google/chrome
 ENV CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
 
 EXPOSE 8080

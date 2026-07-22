@@ -14,9 +14,10 @@ self-hosted product:
 
 A `v0.x.y` tag on a commit in `main` starts the
 [release workflow](../../.github/workflows/release.yml). The workflow first
-runs the same required CI used by pull requests. It then publishes all six
-images with the version and source-SHA tags, generates SPDX SBOMs and
-provenance attestations, and creates a GitHub Release.
+runs the same required CI used by pull requests and waits for the protected
+`release` GitHub Environment. Once approved, it publishes all six images with
+the version and source-SHA tags, generates SPDX SBOMs and provenance
+attestations, and creates a GitHub Release.
 
 The downloadable release bundle contains a `compose.yml` in which every image
 is pinned by OCI digest. It also contains:

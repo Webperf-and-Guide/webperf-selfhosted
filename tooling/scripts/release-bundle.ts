@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
-  statSync,
   writeFileSync
 } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
@@ -177,9 +177,7 @@ export function renderReleaseBundle({
     }
     compose = compose.replace(dynamicReference, entry.reference);
   }
-  if (compose.includes('${WEBPERF_VERSION') || /ghcr\.io\/[^\s"']+:(?:main|latest)\b/.test(compose)) {
-    throw new Error('Release Compose contains a mutable image reference');
-  }
+  validateReleaseComposeImages(compose);
   writeFileSync(join(outputDirectory, 'compose.yml'), compose);
 
   const envExample = readFileSync(
@@ -286,6 +284,28 @@ function validateSpdxDocument(path: string, imageName: string) {
   }
 }
 
+export function validateReleaseComposeImages(compose: string) {
+  if (compose.includes('${WEBPERF_VERSION')) {
+    throw new Error('Release Compose contains an unresolved image version');
+  }
+  const imageLines = compose.split('\n').filter((line) => /^\s*image:/.test(line));
+  const references = [...compose.matchAll(
+    /^\s*image:\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))(?:\s+#.*)?\s*$/gm
+  )].map((match) => match[1] ?? match[2] ?? match[3]);
+  if (references.length === 0 || references.length !== imageLines.length) {
+    throw new Error('Release Compose contains an unreadable image reference');
+  }
+  for (const reference of references) {
+    const valid = releaseImages.some(
+      ({ image }) => new RegExp(`^${escapeRegExp(image)}@sha256:[a-f0-9]{64}$`).test(reference)
+    );
+    if (!valid) {
+      throw new Error(`Release Compose image is not an approved digest reference: ${reference}`);
+    }
+  }
+  return references;
+}
+
 type ParsedReleaseVersion = {
   raw: string;
   major: number;
@@ -316,18 +336,26 @@ function compareReleaseVersions(left: ParsedReleaseVersion, right: ParsedRelease
     }
   }
   if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-    return left.prerelease.length === right.prerelease.length
-      ? 0
-      : left.prerelease.length === 0
-        ? 1
-        : -1;
+    if (left.prerelease.length === right.prerelease.length) {
+      return 0;
+    }
+    if (left.prerelease.length === 0) {
+      return 1;
+    }
+    return -1;
   }
   const length = Math.max(left.prerelease.length, right.prerelease.length);
   for (let index = 0; index < length; index += 1) {
     const leftIdentifier = left.prerelease[index];
     const rightIdentifier = right.prerelease[index];
     if (leftIdentifier === undefined || rightIdentifier === undefined) {
-      return leftIdentifier === rightIdentifier ? 0 : leftIdentifier === undefined ? -1 : 1;
+      if (leftIdentifier === rightIdentifier) {
+        return 0;
+      }
+      if (leftIdentifier === undefined) {
+        return -1;
+      }
+      return 1;
     }
     if (leftIdentifier === rightIdentifier) {
       continue;
@@ -359,7 +387,11 @@ function writeChecksums(outputDirectory: string) {
 function walkFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {
     const path = join(directory, entry);
-    return statSync(path).isDirectory() ? walkFiles(path) : [path];
+    const stats = lstatSync(path);
+    if (stats.isSymbolicLink()) {
+      throw new Error(`Release bundle cannot contain symbolic links: ${path}`);
+    }
+    return stats.isDirectory() ? walkFiles(path) : [path];
   });
 }
 

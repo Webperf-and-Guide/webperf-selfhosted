@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   releaseImages,
   renderReleaseBundle,
+  validateReleaseComposeImages,
   validateReleaseVersion,
   writeReleaseImageMetadata
 } from './release-bundle';
@@ -57,7 +58,7 @@ describe('release bundle generation', () => {
     expect(result.imageCount).toBe(6);
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
-    expect(compose).not.toMatch(/:(?:main|latest)\b/);
+    expect(validateReleaseComposeImages(compose)).toHaveLength(8);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);
     }
@@ -86,6 +87,23 @@ describe('release bundle generation', () => {
         outputDirectory: makeTemporaryDirectory()
       })
     ).toThrow();
+  });
+
+  test('rejects every tagged or unapproved release Compose image', () => {
+    const digest = `sha256:${'a'.repeat(64)}`;
+    expect(
+      validateReleaseComposeImages(`services:\n  api:\n    image: "${releaseImages[1].image}@${digest}"`)
+    ).toEqual([`${releaseImages[1].image}@${digest}`]);
+    for (const reference of [
+      `${releaseImages[1].image}:main`,
+      `${releaseImages[1].image}:beta`,
+      `${releaseImages[1].image}:0.2.0`,
+      `docker.io/example/api@${digest}`
+    ]) {
+      expect(() =>
+        validateReleaseComposeImages(`services:\n  api:\n    image: "${reference}"`)
+      ).toThrow();
+    }
   });
 });
 

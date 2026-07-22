@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
+import { retiredReleasePaths } from './retired-release-paths';
 
 const root = process.cwd();
 const ignoredDirectories = new Set([
@@ -33,7 +34,8 @@ const ignoredFiles = new Set([
   'bun.lock',
   'tooling/scripts/check-boundaries.ts',
   'tooling/scripts/check-release.ts',
-  'tooling/scripts/check-retired-paths.ts'
+  'tooling/scripts/check-retired-paths.ts',
+  'tooling/scripts/retired-release-paths.ts'
 ]);
 
 const banned = [
@@ -54,26 +56,7 @@ const banned = [
     pattern: 'apps/browser-audit-worker',
     message: 'use apps/browser-audit-lighthouse for the reference runner'
   },
-  {
-    pattern: '.github/workflows/publish-probe-image.yml',
-    message: 'use the gated ci.yml development publisher and release.yml instead'
-  },
-  {
-    pattern: '.github/workflows/publish-browser-audit-image.yml',
-    message: 'use the gated ci.yml development publisher and release.yml instead'
-  },
-  {
-    pattern: 'infra/docker/metadata/probe.json',
-    message: 'consume digest-bearing GitHub Release runtime metadata instead'
-  },
-  {
-    pattern: 'infra/docker/metadata/browser-audit-lighthouse.json',
-    message: 'consume digest-bearing GitHub Release runtime metadata instead'
-  },
-  {
-    pattern: 'tooling/scripts/bump-image-tag.ts',
-    message: 'release image identity is generated from immutable digests now'
-  }
+  ...retiredReleasePaths.map(({ path, message }) => ({ pattern: path, message }))
 ];
 
 const targets = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'package.json', '.github', 'apps', 'packages', 'docs', 'infra', 'tooling'];

@@ -47,9 +47,20 @@ jobs:
       contents: read
     uses: ./.github/workflows/ci.yml
 
+  authorize:
+    name: Authorize protected release
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Confirm protected environment approval
+        run: test "$GITHUB_REF_TYPE" = "tag"
+
   images:
     name: Publish release image ${{ matrix.name }}
-    needs: [prepare, ci]
+    needs: [prepare, ci, authorize]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:

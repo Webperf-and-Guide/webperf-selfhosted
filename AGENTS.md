@@ -150,7 +150,7 @@ Current repo state as of 2026-07-22:
 - the optional Lighthouse container now prepares Chrome's setuid sandbox, stays host-port free with 1 GiB shared memory and one in-flight audit, and no longer receives default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
 - one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 96 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
 - all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links
-- public-beta tags are accepted only from `main` after Sampo changesets are applied and the tag matches the highest public package version; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
+- public-beta tags are accepted only from `main` after Sampo changesets are applied, the tag matches the highest public package version, and the protected `release` environment approves publication; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
 
 Current local dev entrypoints:
 - `bun run dev`

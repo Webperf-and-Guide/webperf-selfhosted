@@ -1,14 +1,32 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { releaseImages } from './release-bundle';
+import { retiredReleasePaths } from './retired-release-paths';
 
 const root = process.cwd();
 const workflowsDirectory = join(root, '.github/workflows');
-const releaseWorkflow = readFileSync(join(workflowsDirectory, 'release.yml'), 'utf8');
-const ciWorkflow = readFileSync(join(workflowsDirectory, 'ci.yml'), 'utf8');
 const violations: string[] = [];
 
-for (const file of readdirSync(workflowsDirectory).filter((entry) => /\.ya?ml$/.test(entry))) {
+function readWorkflow(file: string) {
+  try {
+    return readFileSync(join(workflowsDirectory, file), 'utf8');
+  } catch {
+    violations.push(`${file}: required workflow file is missing or unreadable`);
+    return '';
+  }
+}
+
+const releaseWorkflow = readWorkflow('release.yml');
+const ciWorkflow = readWorkflow('ci.yml');
+
+let workflowFiles: string[] = [];
+try {
+  workflowFiles = readdirSync(workflowsDirectory).filter((entry) => /\.ya?ml$/.test(entry));
+} catch {
+  violations.push('.github/workflows: workflow directory is missing or unreadable');
+}
+
+for (const file of workflowFiles) {
   const content = readFileSync(join(workflowsDirectory, file), 'utf8');
   for (const match of content.matchAll(/^\s*uses:\s+([^\s#]+)(?:\s+#.*)?$/gm)) {
     const action = match[1];
@@ -25,11 +43,15 @@ for (const file of readdirSync(workflowsDirectory).filter((entry) => /\.ya?ml$/.
 
 for (const definition of releaseImages) {
   const image = definition.image.split('/').at(-1);
-  if (!releaseWorkflow.includes(`- name: ${definition.name}`) || !releaseWorkflow.includes(`image: ${image}`)) {
-    violations.push(`release.yml: missing image matrix mapping for ${definition.name}`);
+  const mapping = new RegExp(
+    `^\\s*- name: ${escapeRegExp(definition.name)}\\s*\\n\\s+image: ${escapeRegExp(image ?? '')}\\s*$`,
+    'm'
+  );
+  if (!mapping.test(releaseWorkflow)) {
+    violations.push(`release.yml: missing or incorrect image matrix mapping for ${definition.name}`);
   }
-  if (!ciWorkflow.includes(`- name: ${definition.name}`) || !ciWorkflow.includes(`image: ${image}`)) {
-    violations.push(`ci.yml: missing main-channel image mapping for ${definition.name}`);
+  if (!mapping.test(ciWorkflow)) {
+    violations.push(`ci.yml: missing or incorrect main-channel image mapping for ${definition.name}`);
   }
 }
 
@@ -38,6 +60,7 @@ for (const requiredFragment of [
   'sbom: true',
   'provenance: mode=max',
   'actions/attest@',
+  'environment: release',
   'runtime-metadata.json',
   'SHA256SUMS'
 ]) {
@@ -56,27 +79,29 @@ if (ciWorkflow.includes(':latest')) {
   violations.push('ci.yml: the mutable latest tag is not part of the development channel');
 }
 
-for (const retiredPath of [
-  '.github/workflows/publish-probe-image.yml',
-  '.github/workflows/publish-browser-audit-image.yml',
-  'infra/docker/metadata/probe.json',
-  'infra/docker/metadata/browser-audit-lighthouse.json',
-  'tooling/scripts/bump-image-tag.ts'
-]) {
+for (const { path: retiredPath } of retiredReleasePaths) {
   if (existsSync(join(root, retiredPath))) {
     violations.push(`${retiredPath}: retired mutable image metadata path still exists`);
   }
 }
 
-const schema = JSON.parse(
-  readFileSync(join(root, 'infra/release/runtime-metadata.schema.json'), 'utf8')
-) as {
+let schema: {
   properties?: { images?: { items?: { properties?: { name?: { enum?: unknown } } } } };
-};
+} = {};
+try {
+  schema = JSON.parse(
+    readFileSync(join(root, 'infra/release/runtime-metadata.schema.json'), 'utf8')
+  );
+} catch {
+  violations.push('runtime metadata schema is missing, unreadable, or invalid JSON');
+}
 const schemaNames = schema.properties?.images?.items?.properties?.name?.enum;
+const expectedNames = new Set<string>(releaseImages.map(({ name }) => name));
 if (
   !Array.isArray(schemaNames)
-  || schemaNames.join('\n') !== releaseImages.map(({ name }) => name).join('\n')
+  || schemaNames.length !== expectedNames.size
+  || schemaNames.some((name) => typeof name !== 'string' || !expectedNames.has(name))
+  || new Set(schemaNames).size !== schemaNames.length
 ) {
   violations.push('runtime metadata schema image names do not match the release image registry');
 }
@@ -90,3 +115,7 @@ if (violations.length > 0) {
 }
 
 console.log('Release policy check passed.');
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

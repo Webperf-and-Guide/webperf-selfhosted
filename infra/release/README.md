@@ -1,7 +1,8 @@
 # Release assets
 
-Tagged `vX.Y.Z` releases are created only by `.github/workflows/release.yml`
-after the reusable CI workflow succeeds.
+Tagged `v0.x.y` releases are created only by `.github/workflows/release.yml`
+after the reusable CI workflow succeeds and the protected `release` GitHub
+Environment authorizes publication.
 
 Each release contains:
 
@@ -19,3 +20,7 @@ specific GitHub Release. It must not infer runtime identity from `main`,
 Before creating a release tag, apply and commit all pending Sampo changesets.
 The workflow rejects tags outside `main` history and repositories with pending
 changeset Markdown files.
+
+Repository administrators must configure the `release` Environment with a
+required reviewer and tag-only deployment rules. The workflow places this
+single approval before any versioned image is pushed.

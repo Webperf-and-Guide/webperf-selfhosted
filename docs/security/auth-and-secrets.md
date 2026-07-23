@@ -47,7 +47,9 @@ accepted. New writes use the current internal secret; reads accept the current
 and optional next secret so operators can rotate without taking the service
 offline. API, RPC, SSE, export, and Browser Audit artifact text paths mask
 sensitive headers, cookie values, webhook secrets, upload tokens, and URL query
-values.
+values. Browser Audit artifact redaction handles adjacent or malformed URLs and
+uses context-aware masking for values shorter than eight characters so numeric
+metrics are not corrupted by blanket single-character replacement.
 
 Sensitive header matching includes `authorization`, `cookie`, `set-cookie`,
 `proxy-authorization`, `x-api-key`, `api-key`, and custom names containing a

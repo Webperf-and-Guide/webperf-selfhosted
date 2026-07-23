@@ -49,4 +49,61 @@ describe('browser audit redaction', () => {
     expect(text).not.toContain('private-fragment');
     expect(text).not.toContain('Bearer private-token');
   });
+
+  test('redacts adjacent and malformed URLs without losing comma-path query coverage', () => {
+    const input = {
+      customHeaders: [],
+      cookies: [],
+      artifactUpload: null
+    } as unknown as BrowserAuditWorkerRequest;
+    const redacted = redactBrowserAuditText(
+      [
+        'https://first:user@a.example/?token=one,https://second:user@b.example/?token=two)',
+        'https://example.com/a,b?token=three',
+        'https://broken:user@exa[mple.test/?token=four'
+      ].join(' '),
+      input
+    );
+
+    for (const secret of ['first:user', 'second:user', 'token=one', 'token=two', 'token=three', 'broken:user', 'token=four']) {
+      expect(redacted).not.toContain(secret);
+    }
+
+    const bytes = new TextEncoder().encode(
+      'https://first:user@a.example/?token=one,https://second:user@b.example/?token=two'
+    );
+    const redactedBytes = new TextDecoder().decode(
+      redactBrowserAuditBytesInPlace(bytes, input)
+    );
+    expect(redactedBytes).not.toContain('first:user');
+    expect(redactedBytes).not.toContain('second:user');
+    expect(redactedBytes).not.toContain('token=one');
+    expect(redactedBytes).not.toContain('token=two');
+  });
+
+  test('redacts short values only in string and named credential contexts', () => {
+    const input = {
+      customHeaders: [{ name: 'Authorization', value: '1' }],
+      cookies: [{ name: 'session', value: 'ok' }],
+      artifactUpload: null
+    } as BrowserAuditWorkerRequest;
+    const source = '{"score":1,"header":"1","cookie":"ok","word":"101"}\nAuthorization:\t1 session =  ok';
+    const redacted = redactBrowserAuditText(source, input);
+
+    expect(redacted).toContain('"score":1');
+    expect(redacted).toContain('"word":"101"');
+    expect(redacted).not.toContain('"header":"1"');
+    expect(redacted).not.toContain('"cookie":"ok"');
+    expect(redacted).not.toContain('Authorization:\t1');
+    expect(redacted).not.toContain('session =  ok');
+
+    const bytes = new TextEncoder().encode(source);
+    const byteText = new TextDecoder().decode(redactBrowserAuditBytesInPlace(bytes, input));
+    expect(byteText).toContain('"score":1');
+    expect(byteText).toContain('"word":"101"');
+    expect(byteText).toContain('"header":"*"');
+    expect(byteText).toContain('"cookie":"**"');
+    expect(byteText).not.toContain('Authorization:\t1');
+    expect(byteText).not.toContain('session =  ok');
+  });
 });

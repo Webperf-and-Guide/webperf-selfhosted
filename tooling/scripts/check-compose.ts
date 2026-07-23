@@ -97,6 +97,28 @@ for (const name of ['api', 'console', 'executor', 'scheduler', 'api-debug', 'bro
   );
 }
 
+for (const [name, heartbeatPath] of Object.entries({
+  scheduler: '/tmp/webperf-scheduler-heartbeat',
+  executor: '/tmp/webperf-executor-heartbeat'
+})) {
+  const service = productionWithProfiles.services[name];
+  const healthCommand = service?.healthcheck?.test?.join(' ') ?? '';
+  assert(
+    service?.environment?.WEBPERF_PROCESS_HEARTBEAT_PATH === heartbeatPath,
+    `${name} must publish its process heartbeat path to the healthcheck`
+  );
+  assert(
+    healthCommand.includes("node:fs/promises")
+      && healthCommand.includes(heartbeatPath)
+      && healthCommand.includes('mtimeMs'),
+    `${name} healthcheck must validate its own process heartbeat freshness`
+  );
+  assert(
+    !healthCommand.includes('SELFHOST_') && !healthCommand.includes('/health'),
+    `${name} healthcheck must not proxy the API health endpoint`
+  );
+}
+
 assertStringArrayEqual(
   Object.entries(production.services)
     .filter(([, service]) => (service.ports?.length ?? 0) > 0)

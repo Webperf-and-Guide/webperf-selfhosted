@@ -1,5 +1,6 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { parseSelfhostExecutorVars } from '@webperf/config/selfhost-executor';
 import { createBrowserAuditExecutionHandler } from './browser-audit-handler';
 import { createExecutorApiClient } from './client';
@@ -8,6 +9,9 @@ import { createDefaultLeaseOwner } from './identity';
 import { createNetworkExecutionHandler, parseProbeBaseUrls } from './network-handler';
 import { ExecutionFailure, runExecutor } from './runner';
 import { createWebhookExecutionHandler } from './webhook-handler';
+
+const defaultProcessHeartbeatPath = '/tmp/webperf-executor-heartbeat';
+const processHeartbeatIntervalMs = 10_000;
 
 const main = async () => {
   const runtime = parseSelfhostExecutorVars({
@@ -100,6 +104,10 @@ const main = async () => {
     }));
   }
 
+  const stopProcessHeartbeat = startProcessHeartbeat(
+    process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath
+  );
+
   try {
     await runExecutor({
       client,
@@ -133,6 +141,7 @@ const main = async () => {
       signal: shutdownController.signal
     });
   } finally {
+    stopProcessHeartbeat();
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       process.off(signal, requestShutdown);
     }
@@ -154,4 +163,19 @@ try {
     })
   );
   process.exitCode = 1;
+}
+
+function startProcessHeartbeat(heartbeatPath: string) {
+  const writeHeartbeat = () => {
+    writeFileSync(heartbeatPath, `${Date.now()}\n`, {
+      encoding: 'utf8',
+      mode: 0o600
+    });
+  };
+
+  writeHeartbeat();
+  const interval = setInterval(writeHeartbeat, processHeartbeatIntervalMs);
+  interval.unref();
+
+  return () => clearInterval(interval);
 }

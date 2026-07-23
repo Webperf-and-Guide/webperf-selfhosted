@@ -111,12 +111,13 @@ services:
       SELFHOST_SCHEDULER_API_BASE_URL: "${SELFHOST_SCHEDULER_API_BASE_URL:-http://api:8788}"
       SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
       SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET in infra/docker-compose/.env}"
+      WEBPERF_PROCESS_HEARTBEAT_PATH: "/tmp/webperf-scheduler-heartbeat"
     healthcheck:
       test:
         - CMD
         - bun
         - -e
-        - "const response = await fetch((process.env.SELFHOST_SCHEDULER_API_BASE_URL ?? 'http://api:8788') + '/health'); if (!response.ok) process.exit(1);"
+        - "const { mtimeMs } = await (await import('node:fs/promises')).stat(process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || '/tmp/webperf-scheduler-heartbeat'); if (!Number.isFinite(mtimeMs) || Date.now() - mtimeMs > 45000) process.exit(1);"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -151,12 +152,13 @@ services:
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: "${SELFHOST_EXECUTOR_LEASE_DURATION_MS:-60000}"
       SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: "${SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS:-20000}"
       SELFHOST_EXECUTOR_MAX_EXECUTION_MS: "${SELFHOST_EXECUTOR_MAX_EXECUTION_MS:-900000}"
+      WEBPERF_PROCESS_HEARTBEAT_PATH: "/tmp/webperf-executor-heartbeat"
     healthcheck:
       test:
         - CMD
         - bun
         - -e
-        - "const response = await fetch((process.env.SELFHOST_EXECUTOR_API_BASE_URL ?? 'http://api:8788') + '/health'); if (!response.ok) process.exit(1);"
+        - "const { mtimeMs } = await (await import('node:fs/promises')).stat(process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || '/tmp/webperf-executor-heartbeat'); if (!Number.isFinite(mtimeMs) || Date.now() - mtimeMs > 45000) process.exit(1);"
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { parseSelfhostSchedulerVars } from '@webperf/config/selfhost-scheduler';
 import {
   describeSchedulerError,
@@ -6,6 +7,9 @@ import {
   runScheduler,
   type SchedulerLogger
 } from './scheduler';
+
+const defaultProcessHeartbeatPath = '/tmp/webperf-scheduler-heartbeat';
+const processHeartbeatIntervalMs = 10_000;
 
 const main = async () => {
   const runtime = parseSelfhostSchedulerVars({
@@ -48,6 +52,9 @@ const main = async () => {
     apiBaseUrl: runtime.SELFHOST_SCHEDULER_API_BASE_URL,
     pollIntervalSeconds: runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   });
+  const stopProcessHeartbeat = startProcessHeartbeat(
+    process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath
+  );
 
   try {
     await runScheduler({
@@ -61,6 +68,7 @@ const main = async () => {
       logger
     });
   } finally {
+    stopProcessHeartbeat();
     process.off('SIGINT', onSigint);
     process.off('SIGTERM', onSigterm);
   }
@@ -78,4 +86,19 @@ try {
     ...describeSchedulerError(error)
   }));
   process.exitCode = 1;
+}
+
+function startProcessHeartbeat(heartbeatPath: string) {
+  const writeHeartbeat = () => {
+    writeFileSync(heartbeatPath, `${Date.now()}\n`, {
+      encoding: 'utf8',
+      mode: 0o600
+    });
+  };
+
+  writeHeartbeat();
+  const interval = setInterval(writeHeartbeat, processHeartbeatIntervalMs);
+  interval.unref();
+
+  return () => clearInterval(interval);
 }

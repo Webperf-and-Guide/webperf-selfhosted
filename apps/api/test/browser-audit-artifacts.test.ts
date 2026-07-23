@@ -66,8 +66,12 @@ describe('Browser Audit upload tokens', () => {
       attemptCount: 2,
       maxArtifactBytes: 25_000_000
     });
+    const [encodedClaims, signature] = token.split('.') as [string, string];
+    const tamperedSignature = `${signature.startsWith('A') ? 'B' : 'A'}${signature.slice(1)}`;
     expect(verifyBrowserAuditUploadToken({
-      token: `${token.slice(0, -1)}x`,
+      // Change a full six-bit Base64 unit; mutating the final character can
+      // alter only ignored padding bits and decode to the original signature.
+      token: `${encodedClaims}.${tamperedSignature}`,
       secrets: ['current-internal-secret'],
       now
     })).toBeNull();

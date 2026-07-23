@@ -2008,6 +2008,9 @@ const isExecutionTransportPath = (pathname: string) =>
   || executionJobMutationPathPattern.test(pathname)
   || executionJobResourcePathPattern.test(pathname);
 
+// Follow-up transport can carry 20 bounded payloads plus identifiers and JSON framing.
+const executionTransportBodyMaxBytes = executionPayloadMaxBytes * 20 + 64 * 1_024;
+
 async function parseExecutionTransportBody<T>(
   request: Request,
   schema: {
@@ -2019,7 +2022,7 @@ async function parseExecutionTransportBody<T>(
 ) {
   const body = await parseJsonBody<unknown>(
     request,
-    executionPayloadMaxBytes * 20 + 64 * 1_024
+    executionTransportBodyMaxBytes
   );
 
   if (!body.ok) {

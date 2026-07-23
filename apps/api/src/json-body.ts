@@ -23,14 +23,12 @@ export const readBoundedJson = async (
   }
 
   const contentLengthValue = request.headers.get('content-length');
-  let declaredContentLength: number | null = null;
   if (contentLengthValue && /^\d+$/.test(contentLengthValue)) {
     const contentLength = Number(contentLengthValue);
     if (!Number.isSafeInteger(contentLength) || contentLength > maxBytes) {
       await cancelBody(request.body);
       throw new JsonBodyTooLargeError(maxBytes);
     }
-    declaredContentLength = contentLength;
   }
 
   if (!request.body) {
@@ -38,9 +36,7 @@ export const readBoundedJson = async (
   }
 
   const reader = request.body.getReader();
-  let bytes = new Uint8Array(
-    declaredContentLength ?? Math.min(maxBytes, 8 * 1_024)
-  );
+  let bytes = new Uint8Array(Math.min(maxBytes, 8 * 1_024));
   let byteSize = 0;
 
   try {

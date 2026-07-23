@@ -5,6 +5,7 @@ export const browserAuditDslVersion = 'v1' as const;
 export const browserAuditProtocolVersion = 'v1' as const;
 export const browserAuditArtifactRegistryVersion = 'v1' as const;
 export const browserAuditArtifactLimit = 50;
+export const browserAuditScoreKeyLimit = 50;
 export const defaultBrowserAuditArtifactContentTypes = [
   'application/gzip',
   'application/json',
@@ -87,7 +88,7 @@ export type BrowserAuditArtifactKind = z.infer<typeof browserAuditArtifactKindSc
  */
 export const browserAuditArtifactContentTypesForKind = (
   kind: BrowserAuditArtifactKind
-): readonly string[] => kind in standardBrowserAuditArtifactContentTypes
+): readonly string[] => Object.hasOwn(standardBrowserAuditArtifactContentTypes, kind)
   ? standardBrowserAuditArtifactContentTypes[
       kind as BrowserAuditStandardArtifactKind
     ]
@@ -346,10 +347,10 @@ export const browserAuditScoresSchema = z
   .superRefine((scores, context) => {
     const scoreKeys = Object.keys(scores);
 
-    if (scoreKeys.length > 50) {
+    if (scoreKeys.length > browserAuditScoreKeyLimit) {
       context.addIssue({
         code: 'custom',
-        message: 'Browser Audit scores must not exceed 50 keys'
+        message: `Browser Audit scores must not exceed ${browserAuditScoreKeyLimit} keys`
       });
     }
 

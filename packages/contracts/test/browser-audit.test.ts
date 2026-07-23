@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   browserAuditArtifactKindSchema,
   browserAuditArtifactContentTypesForKind,
+  browserAuditScoreKeyLimit,
   browserAuditPolicySchema,
   browserAuditResultSchema,
   browserAuditScoresSchema,
@@ -56,6 +57,9 @@ describe('engine-neutral Browser Audit Protocol', () => {
     expect(browserAuditArtifactContentTypesForKind('sitespeed-summary')).toContain(
       'text/html'
     );
+    expect(browserAuditArtifactContentTypesForKind('constructor')).toContain(
+      'application/json'
+    );
     expect(() => browserAuditArtifactKindSchema.parse('../report')).toThrow();
     expect(() => browserAuditScoresSchema.parse({ 'not-valid': 0.5 })).toThrow(
       'lowercase-start'
@@ -64,7 +68,7 @@ describe('engine-neutral Browser Audit Protocol', () => {
       '120 characters'
     );
     expect(() => browserAuditScoresSchema.parse(Object.fromEntries(
-      Array.from({ length: 51 }, (_, index) => [`score${index}`, 0.5])
+      Array.from({ length: browserAuditScoreKeyLimit + 1 }, (_, index) => [`score${index}`, 0.5])
     ))).toThrow('50 keys');
   });
 

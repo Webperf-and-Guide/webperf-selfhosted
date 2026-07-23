@@ -26,6 +26,7 @@ import { ExecutorApiError, type ExecutorApiClient } from './client';
 import { describeSafeError } from './diagnostics';
 import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
 import {
+  normalizeOutboundHostname,
   OutboundHttpPolicyError,
   requestPinnedHttp,
   type OutboundAddressPolicy,
@@ -500,10 +501,7 @@ const probeAddressPolicy = (
   }
 
   if (allowInsecureHttp) {
-    const hostname = url.hostname
-      .toLowerCase()
-      .replace(/^\[|\]$/g, '')
-      .replace(/\.$/, '');
+    const hostname = normalizeOutboundHostname(url.hostname);
     if (
       isIP(hostname) > 0
       || !hostname.includes('.')

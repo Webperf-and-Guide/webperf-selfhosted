@@ -146,7 +146,7 @@ export const resolveOutboundHttpTarget = async (
     throw new OutboundHttpPolicyError('invalid_target', 'Outbound HTTP target is invalid');
   }
 
-  const hostname = normalizeHostname(url.hostname);
+  const hostname = normalizeOutboundHostname(url.hostname);
   const literalFamily = isIP(hostname);
 
   if (literalFamily === 4 || literalFamily === 6) {
@@ -190,7 +190,7 @@ export const resolveOutboundHttpTarget = async (
   }
 
   const normalizedAddresses = addresses.map(({ address }) => {
-    const normalizedAddress = normalizeHostname(address);
+    const normalizedAddress = normalizeOutboundHostname(address);
     const family = isIP(normalizedAddress);
     if (family !== 4 && family !== 6) {
       throw new OutboundHttpPolicyError(
@@ -253,7 +253,7 @@ const issuePinnedRequest = (
   maximumResponseBytes: number,
   requestTimeoutMs: number
 ) => new Promise<Response>((resolve, reject) => {
-  const originalHostname = normalizeHostname(target.url.hostname);
+  const originalHostname = normalizeOutboundHostname(target.url.hostname);
   const headers = Object.fromEntries(new Headers(init.headers).entries());
   headers.host = target.url.host;
   const options: RequestOptions = {
@@ -454,7 +454,7 @@ const responseHeaders = (source: IncomingHttpHeaders) => {
   return headers;
 };
 
-const normalizeHostname = (hostname: string) =>
+export const normalizeOutboundHostname = (hostname: string) =>
   hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
 
 const normalizeMappedIpv4 = (address: string) => {
@@ -473,7 +473,7 @@ const normalizeMappedIpv4 = (address: string) => {
 };
 
 const parseIpv6Words = (value: string): number[] | null => {
-  let normalized = normalizeHostname(value);
+  let normalized = normalizeOutboundHostname(value);
   const dottedTail = normalized.match(/(?:^|:)(\d+\.\d+\.\d+\.\d+)$/)?.[1];
 
   if (dottedTail) {

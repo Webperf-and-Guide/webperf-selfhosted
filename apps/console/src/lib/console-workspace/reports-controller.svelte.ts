@@ -12,6 +12,7 @@ const browserAuditInitialPollingIntervalMs = 1_000;
 const browserAuditMaximumPollingIntervalMs = 5_000;
 const browserAuditPollingBackoffMultiplier = 1.5;
 const browserAuditMaximumNotFoundResponses = 5;
+const browserAuditMaximumServerErrorResponses = 5;
 const maximumBrowserAuditApiErrorLength = 500;
 
 const createAbortError = () => {
@@ -62,6 +63,16 @@ export const readBrowserAuditApiError = (value: unknown, fallback: string) => {
 
 export const isRetryableBrowserAuditStatus = (status: number) =>
   status >= 500 && status <= 599;
+
+export const recordBrowserAuditServerError = (consecutiveErrors: number) => {
+  const nextConsecutiveErrors = consecutiveErrors + 1;
+  if (nextConsecutiveErrors >= browserAuditMaximumServerErrorResponses) {
+    throw new BrowserAuditPollingError(
+      'Browser Audit status checks repeatedly failed due to server errors.'
+    );
+  }
+  return nextConsecutiveErrors;
+};
 
 export const isBrowserAuditTargetUrl = (value: string) => {
   try {
@@ -266,7 +277,16 @@ export class ReportsController {
 
       this.state.selectedBrowserAuditId = payload.id;
       this.state.browserAuditStatusMessage = 'Browser Audit queued. Waiting for the executor result.';
-      await this.accessors.refreshControlData();
+      try {
+        await this.accessors.refreshControlData();
+      } catch (error) {
+        if (isAbortError(error) || submissionController.signal.aborted) {
+          return;
+        }
+        this.state.browserAuditStatusMessage =
+          'Browser Audit was queued; refresh Reports to follow its latest status.';
+        return;
+      }
       if (submissionController.signal.aborted) {
         return;
       }
@@ -323,6 +343,7 @@ export class ReportsController {
   ): Promise<BrowserAuditResource | null> => {
     const deadline = Date.now() + timeoutMs;
     let consecutiveNotFound = 0;
+    let consecutiveServerErrors = 0;
     let pollingIntervalMs = browserAuditInitialPollingIntervalMs;
     let previousStatus: BrowserAuditExecutionStatus | null = null;
 
@@ -339,6 +360,7 @@ export class ReportsController {
       if (response.status === 404) {
         await discardResponseBody(response);
         consecutiveNotFound += 1;
+        consecutiveServerErrors = 0;
         previousStatus = null;
         if (consecutiveNotFound >= browserAuditMaximumNotFoundResponses) {
           throw new BrowserAuditPollingError(
@@ -351,9 +373,13 @@ export class ReportsController {
       consecutiveNotFound = 0;
       if (isRetryableBrowserAuditStatus(response.status)) {
         await discardResponseBody(response);
+        consecutiveServerErrors = recordBrowserAuditServerError(
+          consecutiveServerErrors
+        );
         pollingIntervalMs = nextPollingInterval(pollingIntervalMs);
         continue;
       }
+      consecutiveServerErrors = 0;
       if (!response.ok) {
         await discardResponseBody(response);
         throw createBrowserAuditPollingHttpError(response.status);

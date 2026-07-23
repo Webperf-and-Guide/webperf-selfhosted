@@ -243,6 +243,13 @@ function validateReferenceDefinition(
   validateLocalLinkTarget(target, sourcePath, sourceAbsolutePath);
 }
 
+/**
+ * Replaces fenced, indented, and inline CommonMark code with spaces instead
+ * of removing it. Keeping the original code-unit length preserves match
+ * indices for the shortcut-reference context checks that follow. Four-space
+ * and tab-indented lines are masked conservatively to avoid treating code as
+ * documentation links without implementing a complete Markdown parser.
+ */
 function maskMarkdownCode(source: string) {
   const masked = source.split('');
   let fence: { marker: '`' | '~'; length: number } | null = null;
@@ -270,6 +277,8 @@ function maskMarkdownCode(source: string) {
         fence = { marker, length: fenceMatch[1].length };
         maskRange(masked, lineStart, lineEnd);
       }
+    } else if (/^(?: {4}|\t)/.test(line)) {
+      maskRange(masked, lineStart, lineEnd);
     }
 
     lineStart = newline < 0 ? source.length : newline + 1;
@@ -297,8 +306,8 @@ function maskMarkdownCode(source: string) {
 
       const exactRun = source[candidate - 1] !== '`'
         && source[candidate + delimiterLength] !== '`';
-      const outsideFence = masked[candidate] === '`';
-      if (exactRun && outsideFence) {
+      const candidateUnmasked = masked[candidate] === '`';
+      if (exactRun && candidateUnmasked) {
         closingIndex = candidate;
         break;
       }

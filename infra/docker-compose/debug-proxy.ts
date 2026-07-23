@@ -34,7 +34,8 @@ Bun.serve({
         method: request.method,
         headers,
         body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
-        redirect: 'manual'
+        redirect: 'manual',
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)])
       });
     } catch (error) {
       console.error(
@@ -42,6 +43,8 @@ Bun.serve({
           service: 'webperf-debug-proxy',
           event: 'upstream_request_failed',
           target: target.origin,
+          method: request.method,
+          path: requestUrl.pathname,
           errorType: error instanceof Error ? error.name : 'UnknownError',
           errorCode: readErrorCode(error)
         })

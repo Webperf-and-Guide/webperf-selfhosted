@@ -40,7 +40,7 @@ export type BrowserAuditExecutorApiClient = ExecutorApiClient & {
 type ResponseSchema<T> = {
   safeParse(value: unknown):
     | { success: true; data: T }
-    | { success: false };
+    | { success: false; error: unknown };
 };
 
 export class ExecutorApiError extends Error {
@@ -120,6 +120,7 @@ export const createExecutorApiClient = ({
       }
 
       if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
         throw new ExecutorApiError(
           `Executor API rejected the request with status ${response.status}`,
           response.status
@@ -145,7 +146,11 @@ export const createExecutorApiClient = ({
       const parsed = schema.safeParse(payload);
 
       if (!parsed.success) {
-        throw new ExecutorApiError('Executor API returned an invalid response payload', response.status);
+        throw new ExecutorApiError(
+          'Executor API returned an invalid response payload',
+          response.status,
+          { cause: parsed.error }
+        );
       }
 
       return parsed.data;

@@ -222,6 +222,7 @@ const processNetworkJob = async ({
       );
 
       if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
         if (isRetryableHttpStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
           markTargetRetryable(target, `probe_http_${response.status}`);
           recomputeJob(job);

@@ -90,7 +90,8 @@ export const runExecutor = async ({
       lease,
       heartbeatIntervalMs,
       maxExecutionMs,
-      logger
+      logger,
+      shutdownSignal: signal
     });
   }
 };
@@ -102,7 +103,8 @@ export const processExecutionJob = async ({
   lease,
   heartbeatIntervalMs,
   maxExecutionMs,
-  logger
+  logger,
+  shutdownSignal
 }: {
   client: ExecutorLeaseClient;
   handler: ExecutionHandler;
@@ -111,6 +113,7 @@ export const processExecutionJob = async ({
   heartbeatIntervalMs: number;
   maxExecutionMs: number;
   logger: ExecutorLogger;
+  shutdownSignal?: AbortSignal;
 }) => {
   let running: ExecutionJob;
 
@@ -128,6 +131,15 @@ export const processExecutionJob = async ({
 
   const heartbeatController = new AbortController();
   const workController = new AbortController();
+  const onShutdown = () => {
+    workController.abort(createShutdownFailure());
+  };
+
+  if (shutdownSignal?.aborted) {
+    onShutdown();
+  } else {
+    shutdownSignal?.addEventListener('abort', onShutdown, { once: true });
+  }
   const heartbeat = renewLeaseUntilStopped({
     client,
     executionJob: running,
@@ -208,6 +220,7 @@ export const processExecutionJob = async ({
       });
     }
   } finally {
+    shutdownSignal?.removeEventListener('abort', onShutdown);
     heartbeatController.abort();
     await heartbeat;
   }
@@ -348,6 +361,13 @@ const runHandlerWithTimeout = async ({
 const createLeaseLostFailure = () => new ExecutionFailure(
   'lease_lost',
   'Execution lease was lost before completion',
+  true,
+  1_000
+);
+
+const createShutdownFailure = () => new ExecutionFailure(
+  'executor_shutdown',
+  'Executor shutdown interrupted active work',
   true,
   1_000
 );

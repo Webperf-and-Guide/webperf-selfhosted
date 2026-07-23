@@ -62,8 +62,10 @@ export const createWebhookExecutionHandler = ({
           : {})
       },
       body: serializedBody,
-      signal
+      signal,
+      redirect: 'manual'
     });
+    await response.body?.cancel().catch(() => {});
 
     if (response.ok) {
       delivery = buildDelivery(target, 'sent', response.status, null);

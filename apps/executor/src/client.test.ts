@@ -83,6 +83,29 @@ describe('executor API client', () => {
     expect((error as Error).message).not.toContain('raw-sensitive-api-error');
   });
 
+  test('retains response schema diagnostics as a non-reflected cause', async () => {
+    const client = createExecutorApiClient({
+      baseUrl: 'http://api.test:8788',
+      internalSecret: 'executor-client-internal-secret',
+      fetchImpl: (async () => Response.json({
+        ...leasedJob,
+        status: 'not-a-real-status',
+        secret: 'raw-sensitive-schema-value'
+      })) as unknown as typeof fetch
+    });
+
+    let error: unknown;
+    try {
+      await client.claim({ leaseOwner: 'executor-client', leaseDurationMs: 60_000 });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ExecutorApiError);
+    expect((error as ExecutorApiError).cause).toBeDefined();
+    expect((error as Error).message).not.toContain('raw-sensitive-schema-value');
+  });
+
   test('preserves a network failure as an internal cause', async () => {
     const networkError = Object.assign(new Error('connect ECONNREFUSED'), {
       code: 'ECONNREFUSED'

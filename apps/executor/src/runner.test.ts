@@ -46,7 +46,7 @@ const logger = (): ExecutorLogger & { events: Array<Record<string, unknown>> } =
 };
 
 describe('executor runner', () => {
-  test('renews a lease, finishes active work, and stops claiming after shutdown', async () => {
+  test('renews a lease, completes work, and stops claiming after shutdown', async () => {
     const calls: string[] = [];
     const controller = new AbortController();
     const testLogger = logger();
@@ -73,6 +73,7 @@ describe('executor runner', () => {
       },
       complete: async () => {
         calls.push('complete');
+        controller.abort();
         return completedJob;
       },
       fail: async () => {
@@ -84,7 +85,6 @@ describe('executor runner', () => {
       client,
       handler: async () => {
         calls.push('handle');
-        controller.abort();
         await renewed;
       },
       leaseOwner: 'executor-test',
@@ -101,6 +101,56 @@ describe('executor runner', () => {
     expect(calls.filter((call) => call === 'renew').length).toBeGreaterThan(0);
     expect(calls.at(-1)).toBe('complete');
     expect(testLogger.events.at(-1)?.event).toBe('execution_completed');
+  });
+
+  test('aborts active work and requeues it when shutdown is requested', async () => {
+    const controller = new AbortController();
+    const testLogger = logger();
+    let handlerAborted = false;
+    let failureCode: string | undefined;
+    const client: ExecutorLeaseClient = {
+      claim: async () => queuedJob,
+      start: async () => runningJob,
+      renew: async () => runningJob,
+      complete: async () => {
+        throw new Error('complete should not be called');
+      },
+      fail: async (_id, input) => {
+        failureCode = input.error.code;
+        return {
+          ...runningJob,
+          status: 'queued',
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          availableAt: '2026-07-22T00:00:05.000Z',
+          error: input.error
+        };
+      }
+    };
+
+    await runExecutor({
+      client,
+      handler: async (_job, signal) => {
+        controller.abort();
+        handlerAborted = signal.aborted;
+        throw signal.reason;
+      },
+      leaseOwner: 'executor-test',
+      leaseDurationMs: 60_000,
+      heartbeatIntervalMs: 1_000,
+      maxExecutionMs: 60_000,
+      pollIntervalMs: 5,
+      signal: controller.signal,
+      logger: testLogger
+    });
+
+    expect(handlerAborted).toBe(true);
+    expect(failureCode).toBe('executor_shutdown');
+    expect(testLogger.events).toContainEqual(expect.objectContaining({
+      event: 'execution_failed',
+      code: 'executor_shutdown',
+      retryable: true
+    }));
   });
 
   test('never persists or logs an unknown handler error message', async () => {

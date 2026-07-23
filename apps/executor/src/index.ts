@@ -122,8 +122,7 @@ const main = async () => {
         throw new ExecutionFailure(
           'handler_unavailable',
           `No executor handler is registered for ${executionJob.kind}`,
-          true,
-          5_000
+          false
         );
       },
       leaseOwner,

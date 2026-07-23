@@ -101,6 +101,7 @@ describe('webhook execution handler', () => {
     await handler(executionJob, new AbortController().signal);
 
     expect(deliveredRequest!.headers.get('idempotency-key')).toBe(executionJob.id);
+    expect(deliveredRequest!.redirect).toBe('manual');
     const body = await deliveredRequest!.text();
     const expectedSignature = `sha256=${createHmac('sha256', 'webhook-signing-secret')
       .update(body, 'utf8')
@@ -118,6 +119,47 @@ describe('webhook execution handler', () => {
       targetId: 'target_webhook',
       status: 'sent',
       responseStatus: 204
+    });
+  });
+
+  test('records redirects without following an unvalidated destination', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    let requestCount = 0;
+    const client: ExecutorApiClient = {
+      claim: async () => null,
+      start: async () => executionJob,
+      renew: async () => executionJob,
+      complete: async () => executionJob,
+      fail: async () => executionJob,
+      context: async () => context(),
+      saveResult: async (_id, result) => {
+        savedResults.push(result);
+      },
+      enqueueFollowups: async () => ({ jobs: [] })
+    };
+    const handler = createWebhookExecutionHandler({
+      client,
+      leaseOwner: 'executor-webhook',
+      validateUrl: () => {},
+      fetchImpl: (async (_input, init) => {
+        requestCount += 1;
+        expect(init?.redirect).toBe('manual');
+        return new Response('redirect', {
+          status: 302,
+          headers: { location: 'http://169.254.169.254/latest/meta-data' }
+        });
+      }) as typeof fetch
+    });
+
+    await handler(executionJob, new AbortController().signal);
+
+    expect(requestCount).toBe(1);
+    expect(savedResults[0]?.result).toMatchObject({
+      kind: 'webhook_delivery',
+      delivery: {
+        status: 'failed',
+        responseStatus: 302
+      }
     });
   });
 

@@ -42,6 +42,10 @@ export const selfhostExecutorEnvSchema = z
       (value) => value ?? 'false',
       z.enum(['true', 'false']).transform((value) => value === 'true')
     ),
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP: z.preprocess(
+      (value) => value ?? 'false',
+      z.enum(['true', 'false']).transform((value) => value === 'true')
+    ),
     SELFHOST_EXECUTOR_ID: emptyStringToUndefined(z.string().trim().min(1).max(120)),
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: z.preprocess(
       // This controls idle claim cadence only. Active lease renewal is governed

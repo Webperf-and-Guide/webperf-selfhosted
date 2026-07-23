@@ -31,6 +31,11 @@ requires the separate
 `SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP=true` trusted-network
 opt-in.
 
+Webhook targets require HTTPS by default because alert bodies and optional
+signatures otherwise cross the network in cleartext. Legacy public HTTP
+targets require `SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP=true`; this
+opt-in does not relax public-address DNS pinning or the no-redirect policy.
+
 `SELFHOST_EXECUTOR_MAX_EXECUTION_MS` defaults to 15 minutes. A timed-out
 handler receives an abort signal and the execution is retried according to its
 attempt policy.

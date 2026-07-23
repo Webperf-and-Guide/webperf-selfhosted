@@ -29,6 +29,8 @@ const main = async () => {
       process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP,
     SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP:
       process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP,
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP:
+      process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP,
     SELFHOST_EXECUTOR_ID: process.env.SELFHOST_EXECUTOR_ID,
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: process.env.SELFHOST_EXECUTOR_POLL_INTERVAL_MS,
     SELFHOST_EXECUTOR_LEASE_DURATION_MS: process.env.SELFHOST_EXECUTOR_LEASE_DURATION_MS,
@@ -105,7 +107,11 @@ const main = async () => {
     }),
     allowInsecureProbeHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP
   });
-  const webhookHandler = createWebhookExecutionHandler({ client, leaseOwner });
+  const webhookHandler = createWebhookExecutionHandler({
+    client,
+    leaseOwner,
+    allowInsecureHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP
+  });
   const browserAuditHandler = createBrowserAuditExecutionHandler({
     client,
     leaseOwner,
@@ -139,6 +145,13 @@ const main = async () => {
     console.warn(JSON.stringify({
       service: 'webperf-executor',
       warning: 'insecure_browser_audit_http_enabled'
+    }));
+  }
+
+  if (runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP) {
+    console.warn(JSON.stringify({
+      service: 'webperf-executor',
+      warning: 'insecure_webhook_http_enabled'
     }));
   }
 

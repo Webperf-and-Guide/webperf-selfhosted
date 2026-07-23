@@ -8,7 +8,10 @@ import type {
 import { UrlValidationError } from '@webperf/domain-core';
 import type { ExecutorApiClient } from './client';
 import { OutboundHttpPolicyError } from './outbound-http';
-import { createWebhookExecutionHandler } from './webhook-handler';
+import {
+  createWebhookExecutionHandler,
+  validateWebhookTargetUrl
+} from './webhook-handler';
 import { ExecutionFailure } from './runner';
 
 const executionJob: ExecutionJob = {
@@ -39,7 +42,7 @@ const executionJob: ExecutionJob = {
   completedAt: null
 };
 
-const context = (): ExecutionResourceContext => ({
+const context = (url = 'https://hooks.example.com/webperf'): ExecutionResourceContext => ({
   kind: 'webhook_delivery',
   executionJob,
   payload: {
@@ -48,7 +51,7 @@ const context = (): ExecutionResourceContext => ({
     target: {
       id: 'target_webhook',
       name: 'Release hook',
-      url: 'https://hooks.example.com/webperf',
+      url,
       enabled: true,
       secret: 'webhook-signing-secret'
     },
@@ -74,6 +77,71 @@ const context = (): ExecutionResourceContext => ({
 });
 
 describe('webhook execution handler', () => {
+  test('requires HTTPS unless plain HTTP is explicitly enabled', () => {
+    expect(() => validateWebhookTargetUrl('http://hooks.example.com/webperf'))
+      .toThrow('require HTTPS');
+    expect(validateWebhookTargetUrl('http://hooks.example.com/webperf', {
+      allowInsecureHttp: true
+    }).protocol).toBe('http:');
+    expect(validateWebhookTargetUrl('https://hooks.example.com/webperf').protocol)
+      .toBe('https:');
+  });
+
+  test('rejects plain HTTP before issuing a request by default', async () => {
+    let requestCalled = false;
+    const client: ExecutorApiClient = {
+      claim: async () => null,
+      start: async () => executionJob,
+      renew: async () => executionJob,
+      complete: async () => executionJob,
+      fail: async () => executionJob,
+      context: async () => context('http://hooks.example.com/webperf'),
+      saveResult: async () => {},
+      enqueueFollowups: async () => ({ jobs: [] })
+    };
+    const handler = createWebhookExecutionHandler({
+      client,
+      leaseOwner: 'executor-webhook',
+      requestImpl: async () => {
+        requestCalled = true;
+        return new Response(null, { status: 204 });
+      }
+    });
+
+    await expect(handler(executionJob, new AbortController().signal)).rejects.toMatchObject({
+      code: 'webhook_target_invalid_scheme',
+      retryable: false
+    });
+    expect(requestCalled).toBe(false);
+  });
+
+  test('applies the explicit HTTP opt-in without weakening the public address policy', async () => {
+    const requestedProtocols: string[] = [];
+    const client: ExecutorApiClient = {
+      claim: async () => null,
+      start: async () => executionJob,
+      renew: async () => executionJob,
+      complete: async () => executionJob,
+      fail: async () => executionJob,
+      context: async () => context('http://hooks.example.com/webperf'),
+      saveResult: async () => {},
+      enqueueFollowups: async () => ({ jobs: [] })
+    };
+    const handler = createWebhookExecutionHandler({
+      client,
+      leaseOwner: 'executor-webhook',
+      allowInsecureHttp: true,
+      requestImpl: async (url, init) => {
+        requestedProtocols.push(url.protocol);
+        expect(init.addressPolicy).toBe('public');
+        return new Response(null, { status: 204 });
+      }
+    });
+
+    await handler(executionJob, new AbortController().signal);
+    expect(requestedProtocols).toEqual(['http:']);
+  });
+
   test('uses an idempotency key and HMAC without transmitting the secret', async () => {
     const savedResults: ExecutionResourceResultRequest[] = [];
     let deliveredRequest: Request | null = null;

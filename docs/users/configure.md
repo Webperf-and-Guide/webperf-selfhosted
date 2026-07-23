@@ -39,6 +39,9 @@ key early can make existing rows unreadable.
   HTTPS for remote API origins.
 - `SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://api:8788` is the credential-free
   origin the optional runner uses for scoped artifact uploads.
+- Webhook targets require HTTPS. Set
+  `SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP=true` only for a legacy public
+  HTTP endpoint; public-address pinning and redirect blocking remain enabled.
 
 These base URLs must be HTTP(S) origins without embedded credentials, paths,
 queries, or fragments.

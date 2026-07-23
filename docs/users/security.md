@@ -54,7 +54,8 @@ targets, navigations, redirects, and subresources, then routes Chrome through a
 loopback proxy that connects to the validated IP instead of re-resolving the
 hostname. It also blocks downloads and new windows. Webhook targets use the
 same public URL policy and connect to a single validated, pinned DNS answer so
-DNS rebinding cannot redirect a delivery into a private network. Redirects are
+DNS rebinding cannot redirect a delivery into a private network. HTTPS is
+required unless the executor's explicit legacy HTTP opt-in is enabled. Redirects are
 reported as failures instead of being followed.
 
 Private-host allowlists and insecure HTTP runtime toggles are explicit trust

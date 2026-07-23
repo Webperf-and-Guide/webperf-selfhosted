@@ -15,6 +15,7 @@ import { ExecutionFailure } from './runner';
 export type WebhookHandlerOptions = {
   client: ExecutorApiClient;
   leaseOwner: string;
+  allowInsecureHttp?: boolean;
   requestImpl?: PinnedHttpRequest;
   validateUrl?: (url: string) => URL | void;
   now?: () => Date;
@@ -24,8 +25,9 @@ export type WebhookHandlerOptions = {
 export const createWebhookExecutionHandler = ({
   client,
   leaseOwner,
+  allowInsecureHttp = false,
   requestImpl = requestPinnedHttp,
-  validateUrl = validateMeasurementUrl,
+  validateUrl = (url) => validateWebhookTargetUrl(url, { allowInsecureHttp }),
   now = () => new Date(),
   logger = defaultWebhookLogger
 }: WebhookHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
@@ -162,6 +164,17 @@ export const createWebhookExecutionHandler = ({
       delivery
     }
   });
+};
+
+export const validateWebhookTargetUrl = (
+  value: string,
+  { allowInsecureHttp = false }: { allowInsecureHttp?: boolean } = {}
+) => {
+  const url = validateMeasurementUrl(value);
+  if (url.protocol !== 'https:' && !allowInsecureHttp) {
+    throw new UrlValidationError('Webhook targets require HTTPS', 'invalid_scheme');
+  }
+  return url;
 };
 
 const createWebhookSignature = (

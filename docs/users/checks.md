@@ -48,8 +48,10 @@ reports.
 ## Alerts
 
 A Check can send up to five generic webhook targets on failure, latency
-threshold breach, or regression. Targets must pass the same public-network
-URL policy as measurements. Each delivery includes an `Idempotency-Key`; when
+threshold breach, or regression. Targets must use HTTPS and pass the same
+public-network URL policy as measurements. A legacy public HTTP target requires
+the executor's explicit `SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP=true`
+opt-in, which does not permit private addresses. Each delivery includes an `Idempotency-Key`; when
 a target secret is configured, `X-WebPerf-Signature` contains
 `t=<unix-seconds>,v1=<HMAC-SHA256>` over `<unix-seconds>.<exact JSON body>`.
 The same timestamp is sent as `X-WebPerf-Timestamp`; receivers should require a

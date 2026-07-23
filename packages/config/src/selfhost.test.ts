@@ -71,6 +71,7 @@ describe('strict self-host configuration', () => {
       SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: false,
       SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: false,
       SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: false,
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP: false,
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
       SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000
     });
@@ -119,5 +120,12 @@ describe('strict self-host configuration', () => {
         SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: 'true'
       }).SELFHOST_BROWSER_AUDIT_BASE_URL
     ).toBe('http://browser-audit:8080');
+    expect(
+      parseSelfhostExecutorVars({
+        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        ...executionSecrets,
+        SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP: 'true'
+      }).SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP
+    ).toBe(true);
   });
 });

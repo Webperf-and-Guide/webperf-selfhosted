@@ -273,6 +273,7 @@ export class ReportsController {
       );
       if (response.status === 404) {
         consecutiveNotFound += 1;
+        previousStatus = null;
         if (consecutiveNotFound >= browserAuditMaximumNotFoundResponses) {
           throw new BrowserAuditPollingError(
             'Browser Audit could not be found after repeated status checks.'

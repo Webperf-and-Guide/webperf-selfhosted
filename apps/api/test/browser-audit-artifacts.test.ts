@@ -153,6 +153,10 @@ describe('local Browser Audit artifact storage', () => {
   test('rejects traversal, symlinks, declared-size mismatches, and byte-limit overflow', async () => {
     expect(() => normalizeArtifactFilename('../report.html'))
       .toThrow(ArtifactStoreValidationError);
+    expect(() => normalizeArtifactFilename('....'))
+      .toThrow(ArtifactStoreValidationError);
+    expect(() => normalizeArtifactFilename('．．．'))
+      .toThrow(ArtifactStoreValidationError);
     expect(normalizeArtifactFilename('  Résumé report.html  ')).toBe('R_sum_-report.html');
 
     const directory = createTempDirectory();
@@ -207,6 +211,58 @@ describe('local Browser Audit artifact storage', () => {
     expect(readFileSync(artifactPath, 'utf8')).toBe('must not be served');
     await expect(store.openDownload(stored.storageKey, body.byteLength))
       .rejects.toThrow('missing or inconsistent');
+  });
+
+  test('rejects an intermediate audit-directory symlink during download and delete', async () => {
+    const directory = createTempDirectory();
+    const root = join(directory, 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const body = new TextEncoder().encode('indexed artifact');
+    const stored = await store.write({
+      auditId: 'audit_intermediate',
+      artifactId: 'artifact_intermediate',
+      body: new Response(body).body,
+      expectedBytes: body.byteLength,
+      maxBytes: 1_024
+    });
+    const auditPath = join(root, 'audit_intermediate');
+    const outsidePath = join(directory, 'outside');
+    mkdirSync(outsidePath);
+    writeFileSync(join(outsidePath, 'artifact_intermediate'), 'outside secret');
+    rmSync(auditPath, { recursive: true });
+    symlinkSync(outsidePath, auditPath);
+
+    await expect(store.openDownload(stored.storageKey, body.byteLength))
+      .rejects.toThrow('unsafe');
+    await expect(store.delete(stored.storageKey)).rejects.toThrow('unsafe');
+    expect(readFileSync(join(outsidePath, 'artifact_intermediate'), 'utf8'))
+      .toBe('outside secret');
+  });
+
+  test('normalizes a missing audit directory as an unavailable artifact', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+
+    await expect(store.openDownload('audit_missing/artifact_missing', 1))
+      .rejects.toThrow('Browser Audit artifact file is missing or inconsistent');
+  });
+
+  test('preserves root entries outside the managed artifact-ID namespace', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    mkdirSync(join(root, 'lost+found'), { recursive: true });
+    writeFileSync(join(root, 'lost+found', 'filesystem-marker'), 'preserve');
+    writeFileSync(join(root, '.gitkeep'), 'preserve');
+    writeFileSync(join(root, 'managed_conflict'), 'remove');
+    const store = new LocalBrowserAuditArtifactStore(root);
+
+    expect(await store.reconcile(new Set(), { minimumOrphanAgeMs: 0 })).toEqual({
+      removedFiles: 1,
+      removedDirectories: 0
+    });
+    expect(readFileSync(join(root, 'lost+found', 'filesystem-marker'), 'utf8'))
+      .toBe('preserve');
+    expect(readFileSync(join(root, '.gitkeep'), 'utf8')).toBe('preserve');
+    expect(await Bun.file(join(root, 'managed_conflict')).exists()).toBe(false);
   });
 });
 

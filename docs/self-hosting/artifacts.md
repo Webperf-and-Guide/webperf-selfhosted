@@ -41,16 +41,18 @@ index. `bun run selfhost:maintenance` performs the same reconciliation; use
 `--artifacts <path>` when it differs from `SELFHOST_ARTIFACTS_PATH`.
 
 The reconciliation root may not be a filesystem root. It does not follow
-symlinks and only removes unindexed entries below the configured artifact
-directory.
+symlinks. At the root it owns only names that match the generated artifact-ID
+namespace, so filesystem or deployment entries such as `lost+found` and
+`.gitkeep` are preserved. It removes unindexed entries inside managed audit
+directories after the reconciliation grace period.
 
 ## Backup boundary
 
 `selfhost:backup` backs up SQLite metadata, not artifact bytes. For a complete
 recovery point, stop API/executor writers and back up both the SQLite snapshot
 and `SELFHOST_ARTIFACTS_PATH`. Restore the matching pair before startup; missing
-indexed files are reported as unavailable, while unindexed files are removed by
-reconciliation.
+indexed files are reported as unavailable, while unindexed files inside managed
+audit directories are removed by reconciliation.
 
 The storage boundary is an explicit adapter interface. Local filesystem is the
 only shipped backend in the public beta; an S3-compatible implementation can be

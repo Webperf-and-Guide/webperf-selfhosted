@@ -79,7 +79,7 @@ export const normalizeArtifactFilename = (value: string) => {
     .replace(/[^A-Za-z0-9._-]/g, '_')
     .replace(/_+/g, '_');
 
-  if (!safe || safe === '.' || safe === '..') {
+  if (!safe || /^\.+$/.test(safe)) {
     throw new ArtifactStoreValidationError('Artifact filename is invalid');
   }
 
@@ -206,11 +206,19 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
   }
 
   async openDownload(storageKey: string, expectedBytes: number) {
+    if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0) {
+      throw new ArtifactStoreValidationError('Artifact size is invalid');
+    }
     await this.ensureRoot();
     const path = this.pathForStorageKey(storageKey);
+    const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
 
     try {
+      await enforcePrivateDirectory(
+        auditPath,
+        'Browser Audit artifact directory is unsafe'
+      );
       handle = await open(
         path,
         constants.O_RDONLY | constants.O_NOFOLLOW
@@ -239,7 +247,20 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
   }
 
   async delete(storageKey: string) {
+    await this.ensureRoot();
     const path = this.pathForStorageKey(storageKey);
+    const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
+    try {
+      await enforcePrivateDirectory(
+        auditPath,
+        'Browser Audit artifact directory is unsafe'
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
     await rm(path, { force: true });
   }
 
@@ -268,7 +289,13 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     for (const auditEntry of await readdir(this.rootPath, { withFileTypes: true })) {
       const auditPath = resolve(this.rootPath, auditEntry.name);
 
-      if (!auditEntry.isDirectory() || auditEntry.isSymbolicLink() || !safeStorageSegment.test(auditEntry.name)) {
+      // The store owns only ID-shaped root names. Preserve filesystem and
+      // deployment entries such as lost+found or .gitkeep.
+      if (!safeStorageSegment.test(auditEntry.name)) {
+        continue;
+      }
+
+      if (!auditEntry.isDirectory() || auditEntry.isSymbolicLink()) {
         await rm(auditPath, { recursive: true, force: true });
         if (auditEntry.isDirectory()) {
           removedDirectories += 1;

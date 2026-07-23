@@ -94,6 +94,8 @@ export const startProcessHeartbeat = async ({
     try {
       await writeHeartbeatFile();
     } catch {
+      // The callback is deliberately signal-only: raw filesystem errors can
+      // contain deployment paths or other operator-controlled sensitive text.
       reportWriteFailure();
     } finally {
       scheduleNextWrite();
@@ -177,6 +179,9 @@ const writePrivateHeartbeatFile: ProcessHeartbeatWriter = async (
     await handle.sync();
     await handle.close();
     closed = true;
+    // The durable temporary file is disposable. Once the deadline has won,
+    // publishing its fresh mtime would incorrectly make a stalled worker look
+    // healthy, so retain this abort boundary immediately before atomic rename.
     signal.throwIfAborted();
     await rename(temporaryPath, heartbeatPath);
     published = true;

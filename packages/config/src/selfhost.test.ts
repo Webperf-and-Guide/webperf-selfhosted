@@ -27,6 +27,10 @@ describe('strict self-host configuration', () => {
       ...requiredApiSecrets,
       SELFHOST_MIGRATION_BACKUP: 'true'
     }).SELFHOST_MIGRATION_BACKUP).toBe(true);
+    expect(parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_MIGRATION_BACKUP: ' TRUE '
+    }).SELFHOST_MIGRATION_BACKUP).toBe(true);
     expect(() => parseSelfhostApiVars({
       ...requiredApiSecrets,
       SELFHOST_ARTIFACT_UPLOAD_BASE_URL: 'https://operator:secret@api.example.test/path'

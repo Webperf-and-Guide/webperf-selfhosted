@@ -6,6 +6,16 @@ import {
   emptyStringToUndefined
 } from './shared';
 
+export const defaultSelfhostMaxArtifactBytes = 25_000_000;
+export const maximumSelfhostMaxArtifactBytes = 250_000_000;
+
+const normalizedBoolean = (defaultValue: 'true' | 'false') => z.preprocess(
+  (value) => typeof value === 'string'
+    ? value.trim().toLowerCase()
+    : value ?? defaultValue,
+  z.enum(['true', 'false']).transform((value) => value === 'true')
+);
+
 export const selfhostApiEnvSchema = z.object({
   SELFHOST_API_HOST: z.string().min(1).default('0.0.0.0'),
   SELFHOST_API_PORT: z.preprocess(
@@ -16,8 +26,8 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_ARTIFACTS_PATH: z.string().trim().min(1).default('./data/artifacts'),
   SELFHOST_ARTIFACT_UPLOAD_BASE_URL: emptyStringToUndefined(z.string().url()),
   SELFHOST_MAX_ARTIFACT_BYTES: z.preprocess(
-    (value) => value ?? '25000000',
-    z.coerce.number().int().positive().max(250_000_000)
+    (value) => value ?? String(defaultSelfhostMaxArtifactBytes),
+    z.coerce.number().int().positive().max(maximumSelfhostMaxArtifactBytes)
   ),
   SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS: z.preprocess(
     (value) => value ?? '900',
@@ -27,10 +37,7 @@ export const selfhostApiEnvSchema = z.object({
     (value) => value ?? '30',
     z.coerce.number().int().positive()
   ),
-  SELFHOST_MIGRATION_BACKUP: z.preprocess(
-    (value) => value ?? 'false',
-    z.enum(['true', 'false']).transform((value) => value === 'true')
-  ),
+  SELFHOST_MIGRATION_BACKUP: normalizedBoolean('false'),
   SELFHOST_ADMIN_TOKEN: z.string().trim().min(16),
   SELFHOST_ADMIN_TOKEN_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
   SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),

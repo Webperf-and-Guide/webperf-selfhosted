@@ -1,7 +1,15 @@
-import { writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 
 export const defaultProcessHeartbeatIntervalMs = 10_000;
 export const defaultProcessHeartbeatFailureReportIntervalMs = 5 * 60_000;
+export const defaultProcessHeartbeatWriteTimeoutMs = 5_000;
+
+export type ProcessHeartbeatWriter = (
+  heartbeatPath: string,
+  contents: string,
+  signal: AbortSignal
+) => Promise<void>;
 
 /**
  * Starts a self-host worker heartbeat containing a Unix timestamp and newline.
@@ -13,11 +21,15 @@ export const startProcessHeartbeat = async ({
   heartbeatPath,
   intervalMs = defaultProcessHeartbeatIntervalMs,
   failureReportIntervalMs = defaultProcessHeartbeatFailureReportIntervalMs,
+  writeTimeoutMs = defaultProcessHeartbeatWriteTimeoutMs,
+  writeHeartbeat = writePrivateHeartbeatFile,
   onWriteFailure = () => {}
 }: {
   heartbeatPath: string;
   intervalMs?: number;
   failureReportIntervalMs?: number;
+  writeTimeoutMs?: number;
+  writeHeartbeat?: ProcessHeartbeatWriter;
   onWriteFailure?: () => void;
 }) => {
   const normalizedPath = heartbeatPath.trim();
@@ -33,13 +45,18 @@ export const startProcessHeartbeat = async ({
   ) {
     throw new Error('Process heartbeat failure report interval must be a positive integer');
   }
+  if (!Number.isSafeInteger(writeTimeoutMs) || writeTimeoutMs < 1) {
+    throw new Error('Process heartbeat write timeout must be a positive integer');
+  }
 
   let stopped = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let lastFailureReportedAt: number | null = null;
-  const writeHeartbeatFile = () => writeFile(normalizedPath, `${Date.now()}\n`, {
-    encoding: 'utf8',
-    mode: 0o600
+  const writeHeartbeatFile = () => writeHeartbeatWithinDeadline({
+    heartbeatPath: normalizedPath,
+    contents: `${Date.now()}\n`,
+    timeoutMs: writeTimeoutMs,
+    writeHeartbeat
   });
 
   const reportWriteFailure = () => {
@@ -86,4 +103,66 @@ export const startProcessHeartbeat = async ({
       clearTimeout(timeout);
     }
   };
+};
+
+const writeHeartbeatWithinDeadline = async ({
+  heartbeatPath,
+  contents,
+  timeoutMs,
+  writeHeartbeat
+}: {
+  heartbeatPath: string;
+  contents: string;
+  timeoutMs: number;
+  writeHeartbeat: ProcessHeartbeatWriter;
+}) => {
+  const controller = new AbortController();
+  const operation = writeHeartbeat(heartbeatPath, contents, controller.signal);
+  // A filesystem operation may finish after the deadline; always retain a
+  // rejection observer even when the timeout branch wins.
+  void operation.catch(() => undefined);
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          const error = Object.assign(new Error('Process heartbeat write timed out'), {
+            name: 'TimeoutError',
+            code: 'ETIMEDOUT'
+          });
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
+        timeout.unref?.();
+      })
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
+const writePrivateHeartbeatFile: ProcessHeartbeatWriter = async (
+  heartbeatPath,
+  contents,
+  signal
+) => {
+  const handle = await open(
+    heartbeatPath,
+    constants.O_WRONLY
+      | constants.O_CREAT
+      | constants.O_TRUNC
+      | constants.O_NOFOLLOW,
+    0o600
+  );
+
+  try {
+    await handle.chmod(0o600);
+    await handle.writeFile(contents, { encoding: 'utf8', signal });
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 };

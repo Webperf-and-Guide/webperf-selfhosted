@@ -44,6 +44,8 @@ export const selfhostExecutorEnvSchema = z
     ),
     SELFHOST_EXECUTOR_ID: emptyStringToUndefined(z.string().trim().min(1).max(120)),
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: z.preprocess(
+      // This controls idle claim cadence only. Active lease renewal is governed
+      // independently by SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS below.
       (value) => value ?? '1000',
       z.coerce.number().int().min(100).max(60_000)
     ),

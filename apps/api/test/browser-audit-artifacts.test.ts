@@ -144,16 +144,9 @@ describe('local Browser Audit artifact storage', () => {
       now: new Date(startedAt.getTime() + 60 * 60 * 1_000 + 1)
     })).toEqual({
       removedFiles: 2,
-      removedDirectories: 0
-    });
-    expect(await Bun.file(join(auditPath, 'artifact_fresh')).exists()).toBe(false);
-
-    expect(await store.reconcile(new Set(), {
-      now: new Date(startedAt.getTime() + 2 * 60 * 60 * 1_000 + 2)
-    })).toEqual({
-      removedFiles: 0,
       removedDirectories: 1
     });
+    expect(await Bun.file(join(auditPath, 'artifact_fresh')).exists()).toBe(false);
   });
 
   test('rejects traversal, symlinks, declared-size mismatches, and byte-limit overflow', async () => {

@@ -265,6 +265,22 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         continue;
       }
 
+      let directoryMtimeMs: number;
+      try {
+        const directory = await lstat(auditPath);
+        if (!directory.isDirectory() || directory.isSymbolicLink()) {
+          await rm(auditPath, { recursive: true, force: true });
+          removedDirectories += 1;
+          continue;
+        }
+        directoryMtimeMs = directory.mtimeMs;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          continue;
+        }
+        throw error;
+      }
+
       for (const artifactEntry of await readdir(auditPath, { withFileTypes: true })) {
         const artifactPath = resolve(auditPath, artifactEntry.name);
         const storageKey = `${auditEntry.name}/${artifactEntry.name}`;
@@ -308,16 +324,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
       }
 
       if (remainingEntries.length === 0) {
-        let directory;
-        try {
-          directory = await lstat(auditPath);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            continue;
-          }
-          throw error;
-        }
-        if (minimumOrphanAgeMs === 0 || directory.mtimeMs <= orphanCutoffMs) {
+        if (minimumOrphanAgeMs === 0 || directoryMtimeMs <= orphanCutoffMs) {
           try {
             await rmdir(auditPath);
             removedDirectories += 1;

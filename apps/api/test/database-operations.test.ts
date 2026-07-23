@@ -139,6 +139,7 @@ describe('SQLite operations', () => {
       now: new Date('2026-07-22T12:00:00.000Z')
     });
     expect(restored.currentBackupPath).not.toBeNull();
+    expect(restored.verifiedEncryptedPayloads).toBe(1);
 
     const current = new Database(databasePath, { readonly: true });
     expect(current.query<{ status: string }, []>('SELECT status FROM jobs').get()?.status)

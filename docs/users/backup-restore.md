@@ -79,7 +79,8 @@ SQLite sidecars. It rejects a snapshot with pending migrations unless
 `--allow-pending-migrations` is explicitly supplied. For an encrypted schema it
 also decrypts every persisted payload with the configured current/next internal
 secret before changing the live database, so a mismatched recovery key fails
-before replacement.
+before replacement. The JSON result reports `verifiedEncryptedPayloads` so the
+operator can confirm how many encrypted rows were checked.
 
 ## Restore artifacts
 

@@ -11,6 +11,7 @@ import {
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getSqliteMigrationState, openSqliteDatabase } from './sqlite';
+import { encryptedPayloadMigration } from './migrations/20260722_001_encrypted_payloads_v2';
 import type { StorageCrypto } from '../storage-crypto';
 
 export type SqliteIntegrityReport = {
@@ -58,7 +59,6 @@ const tableExists = (database: Database, table: string) => Boolean(
     )
     .get(table)
 );
-const encryptedPayloadMigrationId = '20260722_001_encrypted_payloads_v2';
 const persistedPayloadColumns = [
   { table: 'jobs', column: 'payload_json' },
   { table: 'saved_entities', column: 'payload_json' },
@@ -374,9 +374,11 @@ export const restoreSqliteDatabase = ({
       );
     }
 
-    if (sourceMigrations.applied.some((migration) => migration.id === encryptedPayloadMigrationId)) {
-      verifySqliteStorageCrypto(source, storageCrypto);
-    }
+    const verifiedEncryptedPayloads = sourceMigrations.applied.some(
+      (migration) => migration.id === encryptedPayloadMigration.id
+    )
+      ? verifySqliteStorageCrypto(source, storageCrypto)
+      : 0;
 
     const currentBackupPath = backupCurrent && existsSync(databasePath)
       ? backupSqliteDatabase({
@@ -414,6 +416,7 @@ export const restoreSqliteDatabase = ({
       databasePath,
       sourcePath,
       currentBackupPath,
+      verifiedEncryptedPayloads,
       pendingMigrationIds: sourceMigrations.pending
     };
   } catch (error) {
@@ -460,26 +463,31 @@ export const verifySqliteStorageCrypto = (
       LIMIT 100
     `);
 
-    while (true) {
-      const rows: Array<{ row_id: string; encrypted_value: string }> = lastRowId === null
-        ? readFirstBatch.all()
-        : readNextBatch.all(lastRowId);
-      if (rows.length === 0) {
-        break;
-      }
-
-      for (const row of rows) {
-        try {
-          storageCrypto.parse(row.encrypted_value);
-        } catch (cause) {
-          throw new Error(
-            `SQLite restore source contains a payload incompatible with the configured internal secret (${table}.${column}, rowid ${row.row_id})`,
-            { cause }
-          );
+    try {
+      while (true) {
+        const rows: Array<{ row_id: string; encrypted_value: string }> = lastRowId === null
+          ? readFirstBatch.all()
+          : readNextBatch.all(lastRowId);
+        if (rows.length === 0) {
+          break;
         }
-        checkedPayloads += 1;
-        lastRowId = row.row_id;
+
+        for (const row of rows) {
+          try {
+            storageCrypto.parse(row.encrypted_value);
+          } catch (cause) {
+            throw new Error(
+              `SQLite restore source contains a payload incompatible with the configured internal secret (${table}.${column}, rowid ${row.row_id})`,
+              { cause }
+            );
+          }
+          checkedPayloads += 1;
+          lastRowId = row.row_id;
+        }
       }
+    } finally {
+      readFirstBatch.finalize();
+      readNextBatch.finalize();
     }
   }
 

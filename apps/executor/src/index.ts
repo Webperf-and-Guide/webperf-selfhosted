@@ -11,10 +11,13 @@ import { ExecutionFailure, runExecutor } from './runner';
 import { createWebhookExecutionHandler } from './webhook-handler';
 
 const defaultProcessHeartbeatPath = '/tmp/webperf-executor-heartbeat';
+const forcedShutdownTimeoutMs = 10_000;
 
 const main = async () => {
   const runtime = parseSelfhostExecutorVars({
     SELFHOST_EXECUTOR_API_BASE_URL: process.env.SELFHOST_EXECUTOR_API_BASE_URL,
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP:
+      process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP,
     SELFHOST_INTERNAL_SECRET: process.env.SELFHOST_INTERNAL_SECRET,
     PROBE_SHARED_SECRET: process.env.PROBE_SHARED_SECRET,
     BROWSER_AUDIT_SHARED_SECRET: process.env.BROWSER_AUDIT_SHARED_SECRET,
@@ -37,6 +40,7 @@ const main = async () => {
       nonce: randomUUID()
     });
   const shutdownController = new AbortController();
+  let forcedShutdownTimer: ReturnType<typeof setTimeout> | null = null;
   const requestShutdown = (signal: NodeJS.Signals) => {
     if (!shutdownController.signal.aborted) {
       console.log(
@@ -47,6 +51,15 @@ const main = async () => {
         })
       );
       shutdownController.abort();
+      forcedShutdownTimer = setTimeout(() => {
+        console.error(JSON.stringify({
+          service: 'webperf-executor',
+          event: 'forced_shutdown',
+          timeoutMs: forcedShutdownTimeoutMs
+        }));
+        process.exit(1);
+      }, forcedShutdownTimeoutMs);
+      forcedShutdownTimer.unref?.();
     }
   };
 
@@ -65,7 +78,8 @@ const main = async () => {
 
   const client = createExecutorApiClient({
     baseUrl: runtime.SELFHOST_EXECUTOR_API_BASE_URL,
-    internalSecret: runtime.SELFHOST_INTERNAL_SECRET
+    internalSecret: runtime.SELFHOST_INTERNAL_SECRET,
+    allowInsecureHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP
   });
   const networkHandler = createNetworkExecutionHandler({
     client,
@@ -90,6 +104,16 @@ const main = async () => {
     console.warn(JSON.stringify({
       service: 'webperf-executor',
       warning: 'insecure_probe_http_enabled'
+    }));
+  }
+
+  if (
+    runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP
+    && new URL(runtime.SELFHOST_EXECUTOR_API_BASE_URL).protocol === 'http:'
+  ) {
+    console.warn(JSON.stringify({
+      service: 'webperf-executor',
+      warning: 'insecure_executor_api_http_enabled'
     }));
   }
 
@@ -146,6 +170,10 @@ const main = async () => {
     });
   } finally {
     stopProcessHeartbeat();
+    if (forcedShutdownTimer) {
+      clearTimeout(forcedShutdownTimer);
+      forcedShutdownTimer = null;
+    }
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       process.off(signal, requestShutdown);
     }

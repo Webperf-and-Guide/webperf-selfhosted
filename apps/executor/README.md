@@ -20,6 +20,11 @@ probe service origins. Non-loopback probe origins require HTTPS unless
 `SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP=true` explicitly marks an isolated,
 trusted service network such as the default Compose bridge.
 
+`SELFHOST_EXECUTOR_API_BASE_URL` also requires HTTPS outside loopback because
+every request carries the internal Bearer secret. The default Compose bridge
+sets `SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP=true` explicitly for its isolated
+service network; leave that opt-in disabled for remote API origins.
+
 `BROWSER_AUDIT_SHARED_SECRET` signs requests to the optional runner.
 `SELFHOST_BROWSER_AUDIT_BASE_URL` enables that handler, and non-loopback HTTP
 requires the separate

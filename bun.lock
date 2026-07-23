@@ -84,6 +84,7 @@
       "dependencies": {
         "@webperf/config": "workspace:*",
         "@webperf/contracts": "workspace:*",
+        "@webperf/domain-core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.11",
@@ -94,6 +95,7 @@
       "name": "webperf-scheduler",
       "dependencies": {
         "@webperf/config": "workspace:*",
+        "@webperf/contracts": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.11",

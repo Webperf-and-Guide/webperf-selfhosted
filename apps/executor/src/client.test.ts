@@ -30,6 +30,11 @@ describe('executor API client', () => {
     expect(createWithBaseUrl('ftp://api.test')).toThrow(
       'Executor API base URL must be a credential-free HTTP(S) origin'
     );
+    expect(createWithBaseUrl('http://api.test:8788')).toThrow('explicit insecure opt-in');
+    expect(() => createExecutorApiClient({
+      baseUrl: 'http://127.0.0.2:8788',
+      internalSecret: 'executor-client-internal-secret'
+    })).not.toThrow();
 
     try {
       createWithBaseUrl('not-a-url')();
@@ -41,7 +46,7 @@ describe('executor API client', () => {
   test('sends the internal bearer credential and validates claim responses', async () => {
     let request: Request | undefined;
     const client = createExecutorApiClient({
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       internalSecret: 'executor-client-internal-secret',
       fetchImpl: (async (
         input: Parameters<typeof fetch>[0],
@@ -65,7 +70,7 @@ describe('executor API client', () => {
 
   test('does not reflect an API error body into the thrown error', async () => {
     const client = createExecutorApiClient({
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       internalSecret: 'executor-client-internal-secret',
       fetchImpl: (async () =>
         new Response('Bearer raw-sensitive-api-error', { status: 500 })) as unknown as typeof fetch
@@ -83,9 +88,38 @@ describe('executor API client', () => {
     expect((error as Error).message).not.toContain('raw-sensitive-api-error');
   });
 
+  test('retains bounded server correlation fields without reflecting raw errors', async () => {
+    const incidentId = '123e4567-e89b-42d3-a456-426614174000';
+    const client = createExecutorApiClient({
+      baseUrl: 'https://api.test:8788',
+      internalSecret: 'executor-client-internal-secret',
+      fetchImpl: (async () => Response.json({
+        error: 'Bearer raw-sensitive-api-error',
+        incidentId,
+        code: 'LEASE_CONFLICT'
+      }, { status: 409 })) as unknown as typeof fetch
+    });
+
+    let error: unknown;
+    try {
+      await client.claim({ leaseOwner: 'executor-client', leaseDurationMs: 60_000 });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ExecutorApiError);
+    expect(error).toMatchObject({
+      status: 409,
+      incidentId,
+      serverCode: 'LEASE_CONFLICT'
+    });
+    expect((error as Error).message).toContain(`incident ${incidentId}`);
+    expect((error as Error).message).not.toContain('raw-sensitive-api-error');
+  });
+
   test('retains response schema diagnostics as a non-reflected cause', async () => {
     const client = createExecutorApiClient({
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       internalSecret: 'executor-client-internal-secret',
       fetchImpl: (async () => Response.json({
         ...leasedJob,
@@ -111,7 +145,7 @@ describe('executor API client', () => {
       code: 'ECONNREFUSED'
     });
     const client = createExecutorApiClient({
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       internalSecret: 'executor-client-internal-secret',
       fetchImpl: (async () => {
         throw networkError;
@@ -133,14 +167,14 @@ describe('executor API client', () => {
   test('retrieves a transient artifact grant through its dedicated lease-bound route', async () => {
     let request: Request | undefined;
     const grant = {
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       bearerToken: 'scoped-artifact-upload-token',
       expiresAt: '2099-07-22T00:15:00.000Z',
       maxArtifactBytes: 25_000_000,
       allowedContentTypes: ['application/json', 'text/html']
     };
     const client = createExecutorApiClient({
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       internalSecret: 'executor-client-internal-secret',
       fetchImpl: (async (
         input: Parameters<typeof fetch>[0],
@@ -163,7 +197,7 @@ describe('executor API client', () => {
   test('persists results and enqueues follow-ups through lease-bound routes', async () => {
     const requests: Request[] = [];
     const client = createExecutorApiClient({
-      baseUrl: 'http://api.test:8788',
+      baseUrl: 'https://api.test:8788',
       internalSecret: 'executor-client-internal-secret',
       fetchImpl: (async (
         input: Parameters<typeof fetch>[0],

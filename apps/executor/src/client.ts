@@ -15,6 +15,11 @@ import {
   executionJobSchema,
   executionResourceContextSchema
 } from '@webperf/contracts';
+import { isLoopbackHostname } from '@webperf/config/selfhost-executor';
+
+const maximumExecutorApiErrorBytes = 16 * 1_024;
+const incidentIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const serverCodePattern = /^[A-Z][A-Z0-9_]{0,79}$/;
 
 export type ExecutorLeaseClient = {
   claim(input: ExecutionJobLeaseRequest): Promise<ExecutionJob | null>;
@@ -49,21 +54,32 @@ export class ExecutorApiError extends Error {
   constructor(
     message: string,
     readonly status: number | null,
-    options?: { cause?: unknown }
+    options?: {
+      cause?: unknown;
+      incidentId?: string;
+      serverCode?: string;
+    }
   ) {
-    super(message, options);
+    super(message, { cause: options?.cause });
+    this.incidentId = options?.incidentId ?? null;
+    this.serverCode = options?.serverCode ?? null;
   }
+
+  readonly incidentId: string | null;
+  readonly serverCode: string | null;
 }
 
 export const createExecutorApiClient = ({
   baseUrl,
   internalSecret,
   requestTimeoutMs = 30_000,
+  allowInsecureHttp = false,
   fetchImpl = globalThis.fetch
 }: {
   baseUrl: string;
   internalSecret: string;
   requestTimeoutMs?: number;
+  allowInsecureHttp?: boolean;
   fetchImpl?: typeof globalThis.fetch;
 }): BrowserAuditExecutorApiClient => {
   if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 100 || requestTimeoutMs > 300_000) {
@@ -95,6 +111,14 @@ export const createExecutorApiClient = ({
     throw new Error('Executor API base URL must be a credential-free HTTP(S) origin');
   }
 
+  if (
+    apiUrl.protocol === 'http:'
+    && !isLoopbackHostname(apiUrl.hostname)
+    && !allowInsecureHttp
+  ) {
+    throw new Error('Executor API HTTP requires a loopback origin or explicit insecure opt-in');
+  }
+
   const request = async <T>(
     path: string,
     body: unknown,
@@ -120,10 +144,15 @@ export const createExecutorApiClient = ({
       }
 
       if (!response.ok) {
-        await response.body?.cancel().catch(() => {});
+        const details = await readExecutorApiErrorDetails(response);
+        const correlation = [
+          details.incidentId ? `incident ${details.incidentId}` : null,
+          details.serverCode ? `code ${details.serverCode}` : null
+        ].filter(Boolean).join(', ');
         throw new ExecutorApiError(
-          `Executor API rejected the request with status ${response.status}`,
-          response.status
+          `Executor API rejected the request with status ${response.status}${correlation ? ` (${correlation})` : ''}`,
+          response.status,
+          details
         );
       }
 
@@ -247,4 +276,80 @@ export const createExecutorApiClient = ({
       return followups;
     }
   };
+};
+
+const readExecutorApiErrorDetails = async (response: Response) => {
+  let text: string | null;
+  try {
+    text = await readBoundedResponseText(response, maximumExecutorApiErrorBytes);
+  } catch {
+    return {};
+  }
+  if (!text) {
+    return {};
+  }
+
+  try {
+    const payload = JSON.parse(text) as unknown;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return {};
+    }
+    const candidate = payload as Record<string, unknown>;
+    return {
+      ...(typeof candidate.incidentId === 'string'
+        && incidentIdPattern.test(candidate.incidentId)
+        ? { incidentId: candidate.incidentId }
+        : {}),
+      ...(typeof candidate.code === 'string' && serverCodePattern.test(candidate.code)
+        ? { serverCode: candidate.code }
+        : {})
+    };
+  } catch {
+    return {};
+  }
+};
+
+const readBoundedResponseText = async (response: Response, maximumBytes: number) => {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.body) {
+    return '';
+  }
+
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    return null;
+  }
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      byteLength += value.byteLength;
+      if (byteLength > maximumBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 };

@@ -3,6 +3,8 @@ import { ExecutorApiError } from './client';
 export type SafeErrorDiagnostic = {
   errorType: string;
   status?: number;
+  incidentId?: string;
+  serverCode?: string;
   causeType?: string;
   systemCode?: string;
 };
@@ -18,6 +20,8 @@ export const describeSafeError = (error: unknown): SafeErrorDiagnostic => {
     return {
       errorType: normalizeErrorName(error.name),
       ...(error.status === null ? {} : { status: error.status }),
+      ...(error.incidentId ? { incidentId: error.incidentId } : {}),
+      ...(error.serverCode ? { serverCode: error.serverCode } : {}),
       ...(diagnosticSource instanceof Error
         ? { causeType: normalizeErrorName(diagnosticSource.name) }
         : {}),

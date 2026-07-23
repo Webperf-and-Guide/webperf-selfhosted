@@ -1,5 +1,26 @@
 import { z } from 'zod';
+import { isIP } from 'node:net';
 import { defaultSelfhostProbeBaseUrlsJson, emptyStringToUndefined } from './shared';
+
+export const isLoopbackHostname = (hostname: string) => {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (normalized === 'localhost') {
+    return true;
+  }
+
+  const family = isIP(normalized);
+  if (family === 4) {
+    return normalized.split('.')[0] === '127';
+  }
+  if (family === 6) {
+    try {
+      return new URL(`http://[${normalized}]/`).hostname === '[::1]';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
 
 export const selfhostExecutorEnvSchema = z
   .object({
@@ -9,6 +30,10 @@ export const selfhostExecutorEnvSchema = z
     BROWSER_AUDIT_SHARED_SECRET: z.string().trim().min(16),
     SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
     SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
+    SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: z.preprocess(
+      (value) => value ?? 'false',
+      z.enum(['true', 'false']).transform((value) => value === 'true')
+    ),
     SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: z.preprocess(
       (value) => value ?? 'false',
       z.enum(['true', 'false']).transform((value) => value === 'true')
@@ -66,30 +91,54 @@ export const selfhostExecutorEnvSchema = z
       });
     }
 
-    if (config.SELFHOST_BROWSER_AUDIT_BASE_URL) {
-      const browserAuditUrl = new URL(config.SELFHOST_BROWSER_AUDIT_BASE_URL);
-      const loopbackHostname = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(
-        browserAuditUrl.hostname.toLowerCase()
-      );
-      const protocolAllowed = browserAuditUrl.protocol === 'https:'
-        || (
-          browserAuditUrl.protocol === 'http:'
-          && (loopbackHostname || config.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP)
-        );
+    if (
+      apiUrl
+      && apiUrl.protocol === 'http:'
+      && !isLoopbackHostname(apiUrl.hostname)
+      && !config.SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Executor API HTTP requires a loopback origin or explicit insecure opt-in',
+        path: ['SELFHOST_EXECUTOR_API_BASE_URL']
+      });
+    }
 
-      if (
-        !protocolAllowed
-        || browserAuditUrl.username
-        || browserAuditUrl.password
-        || browserAuditUrl.pathname !== '/'
-        || browserAuditUrl.search
-        || browserAuditUrl.hash
-      ) {
+    if (config.SELFHOST_BROWSER_AUDIT_BASE_URL) {
+      let browserAuditUrl: URL | null = null;
+
+      try {
+        browserAuditUrl = new URL(config.SELFHOST_BROWSER_AUDIT_BASE_URL);
+      } catch {
         context.addIssue({
           code: 'custom',
-          message: 'Browser Audit URL must be an allowed credential-free origin',
+          message: 'Browser Audit URL is invalid',
           path: ['SELFHOST_BROWSER_AUDIT_BASE_URL']
         });
+      }
+
+      if (browserAuditUrl) {
+        const loopbackHostname = isLoopbackHostname(browserAuditUrl.hostname);
+        const protocolAllowed = browserAuditUrl.protocol === 'https:'
+          || (
+            browserAuditUrl.protocol === 'http:'
+            && (loopbackHostname || config.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP)
+          );
+
+        if (
+          !protocolAllowed
+          || browserAuditUrl.username
+          || browserAuditUrl.password
+          || browserAuditUrl.pathname !== '/'
+          || browserAuditUrl.search
+          || browserAuditUrl.hash
+        ) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Browser Audit URL must be an allowed credential-free origin',
+            path: ['SELFHOST_BROWSER_AUDIT_BASE_URL']
+          });
+        }
       }
     }
 

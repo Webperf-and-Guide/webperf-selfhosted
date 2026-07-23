@@ -34,6 +34,9 @@ key early can make existing rows unreadable.
 - `CONTROL_BASE_URL=http://api:8788` is the internal console-to-API origin.
 - `SELFHOST_SCHEDULER_API_BASE_URL` and
   `SELFHOST_EXECUTOR_API_BASE_URL` should remain the internal API origin.
+- Non-loopback plain HTTP for the executor API requires the explicit
+  `SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP=true` trusted-network opt-in; use
+  HTTPS for remote API origins.
 - `SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://api:8788` is the credential-free
   origin the optional runner uses for scoped artifact uploads.
 

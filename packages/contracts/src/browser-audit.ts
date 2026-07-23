@@ -110,6 +110,17 @@ export const browserAuditExecutionStatusSchema = z.enum([
   'cancelled'
 ]);
 export type BrowserAuditExecutionStatus = z.infer<typeof browserAuditExecutionStatusSchema>;
+export const browserAuditTerminalExecutionStatusValues = [
+  'succeeded',
+  'failed',
+  'cancelled'
+] as const satisfies readonly BrowserAuditExecutionStatus[];
+const browserAuditTerminalExecutionStatuses = new Set<BrowserAuditExecutionStatus>(
+  browserAuditTerminalExecutionStatusValues
+);
+export const isBrowserAuditTerminalExecutionStatus = (
+  status: BrowserAuditExecutionStatus
+) => browserAuditTerminalExecutionStatuses.has(status);
 
 export const browserAuditHeaderSchema = z.object({
   name: z.string().min(1).max(120),

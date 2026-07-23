@@ -6,6 +6,8 @@ import {
   browserAuditPolicySchema,
   browserAuditResultSchema,
   browserAuditScoresSchema,
+  browserAuditTerminalExecutionStatusValues,
+  isBrowserAuditTerminalExecutionStatus,
   standardBrowserAuditArtifactKinds
 } from '../src/browser-audit';
 
@@ -13,6 +15,16 @@ const readFixture = async (name: string) =>
   await Bun.file(new URL(`./fixtures/browser-audit/${name}`, import.meta.url)).json();
 
 describe('engine-neutral Browser Audit Protocol', () => {
+  test('publishes terminal execution status semantics', () => {
+    expect(browserAuditTerminalExecutionStatusValues).toEqual([
+      'succeeded',
+      'failed',
+      'cancelled'
+    ]);
+    expect(isBrowserAuditTerminalExecutionStatus('succeeded')).toBe(true);
+    expect(isBrowserAuditTerminalExecutionStatus('uploading')).toBe(false);
+  });
+
   test('accepts Lighthouse and sitespeed.io normalized result fixtures', async () => {
     const lighthouse = browserAuditResultSchema.parse(
       await readFixture('lighthouse-result.json')

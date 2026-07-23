@@ -1,5 +1,60 @@
-import type { BrowserAuditResource, RegionAvailability } from '@webperf/contracts';
+import {
+  browserAuditResourceSchema,
+  isBrowserAuditTerminalExecutionStatus,
+  type BrowserAuditExecutionStatus,
+  type BrowserAuditResource,
+  type RegionAvailability
+} from '@webperf/contracts';
 import type { MetricGridItem } from '@webperf/ui/components/operator/types';
+
+const browserAuditPollingTimeoutMs = 180_000;
+const browserAuditInitialPollingIntervalMs = 1_000;
+const browserAuditMaximumPollingIntervalMs = 5_000;
+const browserAuditPollingBackoffMultiplier = 1.5;
+const browserAuditMaximumNotFoundResponses = 5;
+
+const createAbortError = () => {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('Browser Audit polling was cancelled', 'AbortError');
+  }
+
+  return Object.assign(new Error('Browser Audit polling was cancelled'), {
+    name: 'AbortError'
+  });
+};
+
+const isAbortError = (error: unknown) =>
+  typeof error === 'object'
+  && error !== null
+  && 'name' in error
+  && error.name === 'AbortError';
+
+class BrowserAuditPollingError extends Error {
+  override name = 'BrowserAuditPollingError';
+}
+
+const waitForPollingInterval = (signal: AbortSignal, timeoutMs: number) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(isAbortError(signal.reason) ? signal.reason : createAbortError());
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, timeoutMs);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(isAbortError(signal.reason) ? signal.reason : createAbortError());
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });
+
+const nextPollingInterval = (current: number) => Math.min(
+  browserAuditMaximumPollingIntervalMs,
+  Math.ceil(current * browserAuditPollingBackoffMultiplier)
+);
 
 type ReportsAccessors = {
   getSavedChecksEnabled: () => boolean;
@@ -199,13 +254,15 @@ export class ReportsController {
   private waitForBrowserAudit = async (
     auditId: string,
     signal: AbortSignal,
-    timeoutMs = 180_000
+    timeoutMs = browserAuditPollingTimeoutMs
   ): Promise<BrowserAuditResource | null> => {
     const deadline = Date.now() + timeoutMs;
     let consecutiveNotFound = 0;
+    let pollingIntervalMs = browserAuditInitialPollingIntervalMs;
+    let previousStatus: BrowserAuditExecutionStatus | null = null;
 
     while (Date.now() < deadline) {
-      await waitForPollingInterval(signal, 1_000);
+      await waitForPollingInterval(signal, pollingIntervalMs);
       const response = await fetch(
         `/api/control/browser-audits/${encodeURIComponent(auditId)}`,
         {
@@ -216,22 +273,27 @@ export class ReportsController {
       );
       if (response.status === 404) {
         consecutiveNotFound += 1;
-        if (consecutiveNotFound >= 5) {
+        if (consecutiveNotFound >= browserAuditMaximumNotFoundResponses) {
           throw new BrowserAuditPollingError(
             'Browser Audit could not be found after repeated status checks.'
           );
         }
+        pollingIntervalMs = nextPollingInterval(pollingIntervalMs);
         continue;
       }
       consecutiveNotFound = 0;
       if (!response.ok) {
         throw new Error(`Browser Audit status request failed with HTTP ${response.status}`);
       }
-      const audit = (await response.json()) as BrowserAuditResource;
+      const audit = browserAuditResourceSchema.parse(await response.json());
 
-      if (audit && ['succeeded', 'failed', 'cancelled'].includes(audit.status)) {
+      if (audit && isBrowserAuditTerminalExecutionStatus(audit.status)) {
         return audit;
       }
+      pollingIntervalMs = audit.status === previousStatus
+        ? nextPollingInterval(pollingIntervalMs)
+        : browserAuditInitialPollingIntervalMs;
+      previousStatus = audit.status;
     }
 
     return null;
@@ -246,41 +308,3 @@ export class ReportsController {
 
 export const createReportsController = (accessors: ReportsAccessors) =>
   new ReportsController(accessors);
-
-const createAbortError = () => {
-  if (typeof DOMException !== 'undefined') {
-    return new DOMException('Browser Audit polling was cancelled', 'AbortError');
-  }
-
-  return Object.assign(new Error('Browser Audit polling was cancelled'), {
-    name: 'AbortError'
-  });
-};
-
-const isAbortError = (error: unknown) =>
-  typeof error === 'object'
-  && error !== null
-  && 'name' in error
-  && error.name === 'AbortError';
-
-class BrowserAuditPollingError extends Error {
-  override name = 'BrowserAuditPollingError';
-}
-
-const waitForPollingInterval = (signal: AbortSignal, timeoutMs: number) =>
-  new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(isAbortError(signal.reason) ? signal.reason : createAbortError());
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      signal.removeEventListener('abort', abort);
-      resolve();
-    }, timeoutMs);
-    const abort = () => {
-      clearTimeout(timeout);
-      reject(isAbortError(signal.reason) ? signal.reason : createAbortError());
-    };
-    signal.addEventListener('abort', abort, { once: true });
-  });

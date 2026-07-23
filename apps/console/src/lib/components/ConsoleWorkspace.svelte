@@ -594,7 +594,7 @@
                     type="submit"
                     variant="secondary"
                   >
-                    {#if reportsState.browserAuditSubmitting}Following audit...{:else}Queue browser audit{/if}
+                    {#if reportsState.browserAuditSubmitting}Waiting for result...{:else}Queue browser audit{/if}
                   </Button>
                 </FieldSetFooter>
               </FieldSet>

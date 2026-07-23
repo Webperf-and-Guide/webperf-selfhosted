@@ -52,8 +52,9 @@ timespan start/end.
 
 The Lighthouse runner currently limits a flow to 20 steps, three checkpoints,
 one page, one browser context, a default 120-second total timeout, and a
-default 10-second step timeout. The total deadline includes report and artifact
-finalization. Key-press values are engine-specific; the Lighthouse runner
+default 10-second step timeout. The total deadline includes every interactive
+step plus report and artifact finalization, and an explicit wait may not exceed
+the per-step timeout. Key-press values are engine-specific; the Lighthouse runner
 rejects values outside its pinned Puppeteer keyboard layout. The contract
 normalizes core metrics, scores,
 extended metrics, checkpoints, issues, artifacts, timestamps, and

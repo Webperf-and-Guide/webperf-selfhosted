@@ -158,7 +158,9 @@ Current limits:
 - default per-step timeout `10000ms`
 
 The total timeout also bounds screenshot/trace finalization, Lighthouse flow
-result creation, report generation, and artifact upload. A `press` step remains
+result creation, report generation, artifact upload, and every interactive
+step. A `waitForTimeout` value may not exceed the configured per-step timeout.
+A `press` step remains
 engine-neutral in the public contract; this runner accepts only keys present in
 the exact pinned Puppeteer keyboard layout and rejects unsupported values before
 sending input to Chrome.

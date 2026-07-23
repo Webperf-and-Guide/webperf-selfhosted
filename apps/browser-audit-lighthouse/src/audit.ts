@@ -216,7 +216,17 @@ export const runBrowserAudit = async ({
         throw new Error('Flow must navigate before interactive steps');
       }
 
-      await runStep(page, flow, step, input.policy.timeouts.stepTimeoutMs, input);
+      await runWithinAuditDeadline(
+        () => runStep(
+          page,
+          flow,
+          step,
+          input.policy.timeouts.stepTimeoutMs,
+          input
+        ),
+        deadline,
+        input.policy.timeouts.totalTimeoutMs
+      );
       networkGuard.throwIfBlocked();
     }
 
@@ -388,10 +398,7 @@ const runStep = async (
     case 'type':
       await waitForInteractiveSelector(page, step.selector, stepTimeoutMs);
       if (step.clear) {
-        await page.click(step.selector, {
-          count: 3
-        });
-        await page.keyboard.press('Backspace');
+        await clearBrowserAuditField(page, step.selector);
       }
       await page.type(step.selector, step.text, {
         delay: defaultTypingDelayMs
@@ -408,6 +415,7 @@ const runStep = async (
       await page.select(step.selector, ...step.values);
       return;
     case 'waitForTimeout':
+      assertWaitForTimeoutWithinStepLimit(step.ms, stepTimeoutMs);
       await Bun.sleep(step.ms);
       return;
     case 'setViewport':
@@ -461,6 +469,32 @@ const waitForInteractiveSelector = async (
   timeout: number
 ) => {
   await page.waitForSelector(selector, { visible: true, timeout });
+};
+
+export const clearBrowserAuditField = async (
+  page: Pick<Page, 'click' | 'keyboard'>,
+  selector: string
+) => {
+  await page.click(selector);
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.down(modifier);
+  try {
+    await page.keyboard.press('a');
+  } finally {
+    await page.keyboard.up(modifier);
+  }
+  await page.keyboard.press('Backspace');
+};
+
+export const assertWaitForTimeoutWithinStepLimit = (
+  waitMs: number,
+  stepTimeoutMs: number
+) => {
+  if (waitMs > stepTimeoutMs) {
+    throw new Error(
+      `Wait step exceeds the per-step timeout of ${stepTimeoutMs}ms`
+    );
+  }
 };
 
 export const waitForDetachedSelector = async (

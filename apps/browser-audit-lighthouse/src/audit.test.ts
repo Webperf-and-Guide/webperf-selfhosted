@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto';
 import { _keyDefinitions } from 'puppeteer-core/internal/common/USKeyboardLayout.js';
 import type { BrowserAuditWorkerConfig } from './config';
 import {
+  assertWaitForTimeoutWithinStepLimit,
   buildChromeLaunchArgs,
+  clearBrowserAuditField,
   createWaitForUrlMatcher,
   lighthouseArtifactContentTypes,
   launchBrowser,
@@ -91,6 +93,36 @@ describe('Lighthouse Chrome launch policy', () => {
     expect(isPuppeteerKeyInput('Enter')).toBe(true);
     expect(isPuppeteerKeyInput('a')).toBe(true);
     expect(isPuppeteerKeyInput('not-a-puppeteer-key')).toBe(false);
+  });
+
+  test('clears the whole focused field and releases the select-all modifier', async () => {
+    const actions: string[] = [];
+    const page = {
+      click: async (selector: string) => { actions.push(`click:${selector}`); },
+      keyboard: {
+        down: async (key: string) => { actions.push(`down:${key}`); },
+        press: async (key: string) => { actions.push(`press:${key}`); },
+        up: async (key: string) => { actions.push(`up:${key}`); }
+      }
+    } as unknown as Parameters<typeof clearBrowserAuditField>[0];
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+
+    await clearBrowserAuditField(page, '#notes');
+
+    expect(actions).toEqual([
+      'click:#notes',
+      `down:${modifier}`,
+      'press:a',
+      `up:${modifier}`,
+      'press:Backspace'
+    ]);
+  });
+
+  test('rejects an explicit wait above the per-step timeout', () => {
+    expect(() => assertWaitForTimeoutWithinStepLimit(10_001, 10_000))
+      .toThrow('Wait step exceeds the per-step timeout of 10000ms');
+    expect(() => assertWaitForTimeoutWithinStepLimit(10_000, 10_000))
+      .not.toThrow();
   });
 
   test('bounds dependency work by the shared audit deadline', async () => {

@@ -335,7 +335,7 @@ const raceWithAbort = async <Result>(operation: Promise<Result>, signal: AbortSi
 const normalizeSchedulerAbortError = (
   signal: AbortSignal,
   fallback?: unknown
-) => {
+): Error => {
   if (signal.reason instanceof Error) {
     return signal.reason;
   }

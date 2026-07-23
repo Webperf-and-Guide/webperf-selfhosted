@@ -3,6 +3,7 @@ import {
   BrowserAuditPollingError,
   ReportsController,
   createBrowserAuditPollingHttpError,
+  fetchBrowserAuditStatus,
   isBrowserAuditTargetUrl,
   isRetryableBrowserAuditStatus,
   parseBrowserAuditResourcePayload,
@@ -55,6 +56,30 @@ describe('Reports Browser Audit response handling', () => {
     expect(consecutiveErrors).toBe(4);
     expect(() => recordBrowserAuditServerError(consecutiveErrors))
       .toThrow('repeatedly failed due to server errors');
+  });
+
+  test('bounds a stalled status request independently of the polling deadline', async () => {
+    const stalledFetch = Object.assign(
+      async (_input: string | URL | Request, init?: RequestInit) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true }
+          );
+        }),
+      { preconnect: () => undefined }
+    );
+
+    await expect(fetchBrowserAuditStatus({
+      auditId: 'audit_stalled',
+      signal: new AbortController().signal,
+      timeoutMs: 5,
+      fetchImpl: stalledFetch
+    })).rejects.toMatchObject({
+      name: 'BrowserAuditPollingError',
+      message: 'Browser Audit status request timed out.'
+    });
   });
 
   test('keeps queue success distinct when the initial refresh fails', async () => {

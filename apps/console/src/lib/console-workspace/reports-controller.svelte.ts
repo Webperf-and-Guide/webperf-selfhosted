@@ -8,6 +8,7 @@ import {
 import type { MetricGridItem } from '@webperf/ui/components/operator/types';
 
 const browserAuditPollingTimeoutMs = 180_000;
+const browserAuditStatusRequestTimeoutMs = 15_000;
 const browserAuditInitialPollingIntervalMs = 1_000;
 const browserAuditMaximumPollingIntervalMs = 5_000;
 const browserAuditPollingBackoffMultiplier = 1.5;
@@ -30,6 +31,12 @@ const isAbortError = (error: unknown) =>
   && error !== null
   && 'name' in error
   && error.name === 'AbortError';
+
+const isTimeoutError = (error: unknown) =>
+  typeof error === 'object'
+  && error !== null
+  && 'name' in error
+  && error.name === 'TimeoutError';
 
 export class BrowserAuditPollingError extends Error {
   override name = 'BrowserAuditPollingError';
@@ -93,6 +100,37 @@ export const readBrowserAuditResponsePayload = async (response: Response): Promi
     return await response.json();
   } catch {
     return null;
+  }
+};
+
+export const fetchBrowserAuditStatus = async ({
+  auditId,
+  signal,
+  timeoutMs,
+  fetchImpl = fetch
+}: {
+  auditId: string;
+  signal: AbortSignal;
+  timeoutMs: number;
+  fetchImpl?: typeof fetch;
+}) => {
+  try {
+    return await fetchImpl(
+      `/api/control/browser-audits/${encodeURIComponent(auditId)}`,
+      {
+        cache: 'no-store',
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+      }
+    );
+  } catch (error) {
+    if (signal.aborted) {
+      throw isAbortError(signal.reason) ? signal.reason : createAbortError();
+    }
+    if (isTimeoutError(error)) {
+      throw new BrowserAuditPollingError('Browser Audit status request timed out.');
+    }
+    throw error;
   }
 };
 
@@ -304,7 +342,7 @@ export class ReportsController {
         }
         if (!completed) {
           this.state.browserAuditStatusMessage =
-            'Browser Audit is still queued or running and will continue in the background.';
+            'Browser Audit is still queued or running. Refresh Reports to see the latest status.';
         } else if (completed.status === 'succeeded') {
           this.state.browserAuditStatusMessage =
             'Browser Audit completed and was saved to recent history.';
@@ -348,15 +386,20 @@ export class ReportsController {
     let previousStatus: BrowserAuditExecutionStatus | null = null;
 
     while (Date.now() < deadline) {
-      await waitForPollingInterval(signal, pollingIntervalMs);
-      const response = await fetch(
-        `/api/control/browser-audits/${encodeURIComponent(auditId)}`,
-        {
-          cache: 'no-store',
-          headers: { accept: 'application/json' },
-          signal
-        }
+      const remainingBeforeWaitMs = deadline - Date.now();
+      await waitForPollingInterval(
+        signal,
+        Math.min(pollingIntervalMs, remainingBeforeWaitMs)
       );
+      const remainingRequestMs = deadline - Date.now();
+      if (remainingRequestMs <= 0) {
+        break;
+      }
+      const response = await fetchBrowserAuditStatus({
+        auditId,
+        signal,
+        timeoutMs: Math.min(browserAuditStatusRequestTimeoutMs, remainingRequestMs)
+      });
       if (response.status === 404) {
         await discardResponseBody(response);
         consecutiveNotFound += 1;

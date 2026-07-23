@@ -26,6 +26,8 @@ export type ExecutionJobStatus = z.infer<typeof executionJobStatusSchema>;
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export const executionPayloadMaxDepth = 32;
+export const executionPayloadMaxBytes = 256 * 1_024;
+const utf8Encoder = new TextEncoder();
 
 const jsonLiteralSchema = z.union([z.null(), z.boolean(), z.number(), z.string()]);
 
@@ -42,7 +44,19 @@ const createJsonValueSchema = (depth: number): z.ZodType<JsonValue> => {
   ]);
 };
 
-export const jsonValueSchema = createJsonValueSchema(0);
+const rawJsonValueSchema = createJsonValueSchema(0);
+
+export const jsonValueSchema = rawJsonValueSchema.superRefine((value, context) => {
+  const serialized = JSON.stringify(value);
+  const byteSize = utf8Encoder.encode(serialized).byteLength;
+
+  if (byteSize > executionPayloadMaxBytes) {
+    context.addIssue({
+      code: 'custom',
+      message: `JSON payload must not exceed ${executionPayloadMaxBytes} bytes`
+    });
+  }
+});
 
 export const executionJobErrorSchema = z.object({
   code: z.string().min(1).max(120),

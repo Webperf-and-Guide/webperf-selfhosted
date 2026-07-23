@@ -47,6 +47,13 @@ Authentication boundary:
 - `GET /v1/health`, artifact downloads, and every data or execution endpoint
   require the appropriate administrator or internal-service bearer token.
 
+Request boundary:
+
+- JSON request bodies on the resource-oriented `/v1` routes are limited to
+  1 MiB and return `413` before parsing when the declared or streamed body is larger.
+- Browser Audit binary uploads use their separately configured per-artifact
+  limit and do not pass through the JSON reader.
+
 ## Compatibility Aliases
 
 The older self-host aliases remain supported:

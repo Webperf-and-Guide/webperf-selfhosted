@@ -182,6 +182,13 @@ describe('api service monitoring expansion', () => {
       expect(publicHealth).toEqual({ service: 'webperf-api', ok: true });
       expect((await nativeFetch(`${harness.baseUrl}/openapi/public.json`)).status).toBe(200);
       expect((await nativeFetch(`${harness.baseUrl}/openapi/control.json`)).status).toBe(401);
+      const oversizedJsonResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify('x'.repeat(1_024 * 1_024))
+      });
+      expect(oversizedJsonResponse.status).toBe(413);
+      expect((await oversizedJsonResponse.json()).error).toContain('1048576 bytes');
       expect(
         (
           await nativeFetch(`${harness.baseUrl}/v1/scheduler/dispatch`, {

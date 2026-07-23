@@ -81,6 +81,18 @@ export const browserAuditArtifactKindSchema = z.preprocess(
 );
 export type BrowserAuditArtifactKind = z.infer<typeof browserAuditArtifactKindSchema>;
 
+/**
+ * Engine extensions remain portable by using the bounded public MIME registry;
+ * standard kinds additionally narrow that registry to their declared formats.
+ */
+export const browserAuditArtifactContentTypesForKind = (
+  kind: BrowserAuditArtifactKind
+): readonly string[] => kind in standardBrowserAuditArtifactContentTypes
+  ? standardBrowserAuditArtifactContentTypes[
+      kind as BrowserAuditStandardArtifactKind
+    ]
+  : defaultBrowserAuditArtifactContentTypes;
+
 export const browserAuditCheckpointModeSchema = z.enum(['navigation', 'snapshot', 'timespan']);
 export type BrowserAuditCheckpointMode = z.infer<typeof browserAuditCheckpointModeSchema>;
 
@@ -332,7 +344,16 @@ export const browserAuditScoresSchema = z
   })
   .catchall(browserAuditScoreValueSchema)
   .superRefine((scores, context) => {
-    for (const key of Object.keys(scores)) {
+    const scoreKeys = Object.keys(scores);
+
+    if (scoreKeys.length > 50) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Browser Audit scores must not exceed 50 keys'
+      });
+    }
+
+    for (const key of scoreKeys) {
       if (key.length > 120) {
         context.addIssue({
           code: 'custom',

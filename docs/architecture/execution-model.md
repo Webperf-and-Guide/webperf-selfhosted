@@ -32,6 +32,9 @@ Execution details should stay behind a small boundary:
 - the executor owns execution leases and calls probe runtimes
 - Browser Audit upload credentials use a dedicated lease-bound grant endpoint;
   they are not embedded in the general execution context or persisted queue payload
+- each durable execution JSON value is limited to 256 KiB, recursive values are
+  depth-bounded, and the internal HTTP transport applies a corresponding aggregate
+  request limit before JSON parsing
 - probe runtimes decide how to perform an individual measurement
 - optional runtimes can expose extra capabilities without forcing them into the default self-host stack
 

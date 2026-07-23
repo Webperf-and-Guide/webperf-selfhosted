@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   browserAuditArtifactKindSchema,
+  browserAuditArtifactContentTypesForKind,
   browserAuditPolicySchema,
   browserAuditResultSchema,
   browserAuditScoresSchema,
@@ -49,6 +50,12 @@ describe('engine-neutral Browser Audit Protocol', () => {
       'sitespeed-summary'
     );
     expect(browserAuditArtifactKindSchema.parse('json')).toBe('lighthouse-json');
+    expect(browserAuditArtifactContentTypesForKind('lighthouse-json')).toEqual([
+      'application/json'
+    ]);
+    expect(browserAuditArtifactContentTypesForKind('sitespeed-summary')).toContain(
+      'text/html'
+    );
     expect(() => browserAuditArtifactKindSchema.parse('../report')).toThrow();
     expect(() => browserAuditScoresSchema.parse({ 'not-valid': 0.5 })).toThrow(
       'lowercase-start'
@@ -56,6 +63,9 @@ describe('engine-neutral Browser Audit Protocol', () => {
     expect(() => browserAuditScoresSchema.parse({ [`a${'b'.repeat(120)}`]: 0.5 })).toThrow(
       '120 characters'
     );
+    expect(() => browserAuditScoresSchema.parse(Object.fromEntries(
+      Array.from({ length: 51 }, (_, index) => [`score${index}`, 0.5])
+    ))).toThrow('50 keys');
   });
 
   test('keeps portable navigation, snapshot, and timespan flows', () => {

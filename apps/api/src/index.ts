@@ -59,6 +59,7 @@ import {
   browserAuditArtifactUploadGrantRequestSchema,
   browserAuditArtifactUploadGrantSchema,
   browserAuditArtifactKindSchema,
+  browserAuditArtifactContentTypesForKind,
   browserAuditArtifactLimit,
   browserAuditArtifactRefSchema,
   browserAuditArtifactRegistryVersion,
@@ -83,13 +84,13 @@ import {
   executionJobIdSchema,
   executionJobLeaseRequestSchema,
   executionJobOwnerRequestSchema,
+  executionPayloadMaxBytes,
   executionFollowupsRequestSchema,
   executionFollowupsResponseSchema,
   executionResourceContextRequestSchema,
   executionResourceContextSchema,
   executionResourceResultRequestSchema,
   defaultBrowserAuditArtifactContentTypes,
-  standardBrowserAuditArtifactContentTypes,
   browserAuditExecutionPayloadSchema,
   networkProbeExecutionPayloadSchema,
   webhookDeliveryExecutionPayloadSchema,
@@ -110,6 +111,7 @@ import {
 } from '@webperf/contracts';
 import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi';
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
+import { JsonBodyTooLargeError, readBoundedJson } from './json-body';
 import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import { isDeepStrictEqual } from 'node:util';
@@ -2015,7 +2017,10 @@ async function parseExecutionTransportBody<T>(
   },
   errorLabel: string
 ) {
-  const body = await parseJsonBody<unknown>(request);
+  const body = await parseJsonBody<unknown>(
+    request,
+    executionPayloadMaxBytes * 20 + 64 * 1_024
+  );
 
   if (!body.ok) {
     return {
@@ -2963,18 +2968,9 @@ async function handleBrowserAuditArtifactUpload(
     ?.split(';', 1)[0]
     ?.trim()
     .toLowerCase();
-  if (!contentType || !defaultBrowserAuditArtifactContentTypes.includes(
-    contentType as (typeof defaultBrowserAuditArtifactContentTypes)[number]
-  )) {
-    return artifactUploadError('Artifact content type is not allowed', 415);
-  }
-  const standardContentTypes = kind.data in standardBrowserAuditArtifactContentTypes
-    ? standardBrowserAuditArtifactContentTypes[
-        kind.data as keyof typeof standardBrowserAuditArtifactContentTypes
-      ]
-    : null;
-  if (standardContentTypes && !standardContentTypes.includes(contentType)) {
-    return artifactUploadError('Artifact content type does not match its registered kind', 415);
+  const allowedContentTypes = browserAuditArtifactContentTypesForKind(kind.data);
+  if (!contentType || !allowedContentTypes.includes(contentType)) {
+    return artifactUploadError('Artifact content type is not allowed for its kind', 415);
   }
 
   const declaredSize = parseArtifactByteSize(request.headers.get('x-artifact-size'));
@@ -3819,20 +3815,22 @@ function parseRegionMap(jsonValue: string): Partial<Record<RegionCode, string>> 
   }
 }
 
-async function parseJsonBody<T>(request: Request) {
+async function parseJsonBody<T>(request: Request, maxBytes = 1_024 * 1_024) {
   try {
     return {
       ok: true as const,
-      data: (await request.json()) as T
+      data: (await readBoundedJson(request, maxBytes)) as T
     };
-  } catch {
+  } catch (error) {
     return {
       ok: false as const,
       response: json(
         {
-          error: 'Invalid JSON payload'
+          error: error instanceof JsonBodyTooLargeError
+            ? error.message
+            : 'Invalid JSON payload'
         },
-        { status: 400 }
+        { status: error instanceof JsonBodyTooLargeError ? 413 : 400 }
       )
     };
   }

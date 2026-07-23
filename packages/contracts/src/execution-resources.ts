@@ -50,17 +50,39 @@ export type WebhookDeliveryExecutionPayload = z.infer<typeof webhookDeliveryExec
 export const executionResourceContextRequestSchema = executionJobOwnerRequestSchema;
 export type ExecutionResourceContextRequest = z.infer<typeof executionResourceContextRequestSchema>;
 
-const networkProbeExecutionContextSchema = z.object({
-  kind: z.literal('network_probe'),
-  executionJob: executionJobSchema,
-  payload: networkProbeExecutionPayloadSchema,
-  jobs: z.array(latencyJobDetailSchema).min(1).max(20),
-  check: checkProfileSchema.nullable(),
-  run: checkProfileRunSchema.nullable(),
-  comparedRun: checkProfileRunSchema.nullable(),
-  comparedJobs: z.array(latencyJobDetailSchema).max(20),
-  comparisonMode: z.enum(['baseline', 'latest_previous']).nullable()
-});
+export const networkProbeExecutionContextSchema = z
+  .object({
+    kind: z.literal('network_probe'),
+    executionJob: executionJobSchema,
+    payload: networkProbeExecutionPayloadSchema,
+    jobs: z.array(latencyJobDetailSchema).min(1).max(20),
+    check: checkProfileSchema.nullable(),
+    run: checkProfileRunSchema.nullable(),
+    comparedRun: checkProfileRunSchema.nullable(),
+    comparedJobs: z.array(latencyJobDetailSchema).max(20),
+    comparisonMode: z.enum(['baseline', 'latest_previous']).nullable()
+  })
+  .superRefine((contextValue, issueContext) => {
+    const hasComparison = contextValue.comparisonMode !== null;
+
+    if (hasComparison !== (contextValue.comparedRun !== null)) {
+      issueContext.addIssue({
+        code: 'custom',
+        message: 'comparisonMode and comparedRun must either both be present or both be null',
+        path: ['comparedRun']
+      });
+    }
+
+    if (hasComparison === (contextValue.comparedJobs.length === 0)) {
+      issueContext.addIssue({
+        code: 'custom',
+        message: hasComparison
+          ? 'comparedJobs must contain at least one job when comparisonMode is set'
+          : 'comparedJobs must be empty when comparisonMode is null',
+        path: ['comparedJobs']
+      });
+    }
+  });
 
 const browserAuditExecutionContextSchema = z.object({
   kind: z.literal('browser_audit'),

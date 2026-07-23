@@ -34,6 +34,7 @@ describe('browser audit network policy', () => {
     await expect(validateBrowserRequestUrl('http://[::1]')).rejects.toThrow('private');
     await expect(validateBrowserRequestUrl('http://[::ffff:127.0.0.1]')).rejects.toThrow('private');
     await expect(validateBrowserRequestUrl('http://[::ffff:7f00:1]')).rejects.toThrow('private');
+    await expect(validateBrowserRequestUrl('http://[::ffff:a9fe:a9fe]')).rejects.toThrow('private');
     await expect(validateBrowserRequestUrl('http://[::192.168.1.1]')).rejects.toThrow('private');
     await expect(
       validateBrowserRequestUrl('https://example.com', {

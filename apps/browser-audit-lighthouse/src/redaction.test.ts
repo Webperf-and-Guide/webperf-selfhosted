@@ -150,4 +150,23 @@ describe('browser audit redaction', () => {
       expect(redacted).toContain('sid=okay');
     }
   });
+
+  test('continues redacting quoted short values after an unmatched quote', () => {
+    const input = {
+      customHeaders: [{ name: 'X-Code', value: 'abc' }],
+      cookies: [{ name: 'sid', value: 'ok' }],
+      artifactUpload: null
+    } as BrowserAuditWorkerRequest;
+    const source = 'stray " prefix then \'abc\' and \'ok\'';
+
+    const redactedText = redactBrowserAuditText(source, input);
+    const redactedBytes = new TextDecoder().decode(
+      redactBrowserAuditBytesInPlace(new TextEncoder().encode(source), input)
+    );
+
+    expect(redactedText).not.toContain("'abc'");
+    expect(redactedText).not.toContain("'ok'");
+    expect(redactedBytes).not.toContain("'abc'");
+    expect(redactedBytes).not.toContain("'ok'");
+  });
 });

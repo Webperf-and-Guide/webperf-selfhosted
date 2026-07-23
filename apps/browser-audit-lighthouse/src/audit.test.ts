@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
 import { createHash } from 'node:crypto';
+import type { BrowserAuditWorkerConfig } from './config';
 import {
   buildChromeLaunchArgs,
   createWaitForUrlMatcher,
   lighthouseArtifactContentTypes,
+  launchBrowser,
+  serializeFlowResult,
+  waitForDetachedSelector,
   uploadArtifact
 } from './audit';
 
@@ -25,6 +29,13 @@ describe('Lighthouse Chrome launch policy', () => {
   test('adds no-sandbox only for the explicit degraded mode', () => {
     expect(buildChromeLaunchArgs({ allowNoSandbox: true })).toContain('--no-sandbox');
     expect(buildChromeLaunchArgs({ allowNoSandbox: false })).not.toContain('--no-sandbox');
+  });
+
+  test('rejects a missing Chrome executable at the launch boundary', async () => {
+    await expect(launchBrowser({
+      chromeExecutablePath: null,
+      allowNoSandbox: false
+    } as BrowserAuditWorkerConfig)).rejects.toThrow('Chrome executable is not configured');
   });
 
   test('keeps Lighthouse MIME types aligned with the public registry', () => {
@@ -49,6 +60,38 @@ describe('Lighthouse Chrome launch policy', () => {
       .toThrow('invalid or unsupported');
     expect(() => createWaitForUrlMatcher('[', 'regex'))
       .toThrow('invalid or unsupported');
+  });
+
+  test('waits for actual selector detachment instead of hidden state', async () => {
+    let queryCount = 0;
+    let disposeCount = 0;
+    const page = {
+      $: async () => {
+        queryCount += 1;
+        return queryCount === 1
+          ? { dispose: async () => { disposeCount += 1; } }
+          : null;
+      }
+    } as unknown as Parameters<typeof waitForDetachedSelector>[0];
+
+    await waitForDetachedSelector(page, '#toast', 100);
+    expect(queryCount).toBe(2);
+    expect(disposeCount).toBe(1);
+  });
+
+  test('normalizes circular Lighthouse flow serialization failures', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    try {
+      serializeFlowResult(circular);
+      throw new Error('Expected circular serialization to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('Lighthouse flow result could not be serialized');
+      expect((error as Error).cause).toBeInstanceOf(TypeError);
+    }
+    expect(serializeFlowResult({ name: 'flow', steps: [] })).toContain('"steps": []');
   });
 
   test('verifies the uploaded artifact digest against the submitted bytes', async () => {
@@ -131,5 +174,48 @@ describe('Lighthouse Chrome launch policy', () => {
       }
     )).rejects.toThrow('Audit exceeded total timeout');
     expect(fetchCalls).toBe(0);
+  });
+
+  test('encodes upload path values and cancels rejected response bodies', async () => {
+    const input = {
+      executionId: 'audit/path?token=secret',
+      policy: {
+        timeouts: { totalTimeoutMs: 5_000 }
+      },
+      artifactUpload: {
+        baseUrl: 'https://api.example.test',
+        bearerToken: 'signed-upload-token',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        maxArtifactBytes: 1_024,
+        allowedContentTypes: ['application/json']
+      }
+    } as BrowserAuditWorkerRequest;
+    let requestedUrl = '';
+    let cancelled = false;
+
+    await expect(uploadArtifact(
+      input,
+      'custom/kind',
+      'report name.json',
+      'application/json',
+      new TextEncoder().encode('{}'),
+      {
+        fetchImpl: async (request) => {
+          requestedUrl = String(request);
+          return new Response(new ReadableStream({
+            cancel() {
+              cancelled = true;
+            }
+          }), { status: 503 });
+        }
+      }
+    )).rejects.toThrow('Artifact upload failed with 503');
+
+    expect(requestedUrl).toBe(
+      'https://api.example.test/internal/browser-audits/'
+      + 'audit%2Fpath%3Ftoken%3Dsecret/artifacts'
+      + '?kind=custom%2Fkind&filename=report%20name.json'
+    );
+    expect(cancelled).toBe(true);
   });
 });

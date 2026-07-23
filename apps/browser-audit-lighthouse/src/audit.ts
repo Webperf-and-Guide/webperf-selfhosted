@@ -12,7 +12,7 @@ import {
 } from '@webperf/contracts';
 import { createHash } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
-import type { Browser, Page } from 'puppeteer-core';
+import type { Browser, KeyInput, Page, WaitForSelectorOptions } from 'puppeteer-core';
 import { RE2JS } from 're2js';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
@@ -39,6 +39,21 @@ const presetViewport = {
     hasTouch: false
   }
 } as const;
+const defaultTypingDelayMs = 20;
+
+type LighthouseUserFlow = {
+  navigate(requestor: () => Promise<void>, options?: { name?: string }): Promise<void>;
+  snapshot(options?: { name?: string }): Promise<void>;
+  startTimespan(options?: { name?: string }): Promise<void>;
+  endTimespan(): Promise<void>;
+  createFlowResult(): Promise<unknown>;
+  generateReport?: () => Promise<string>;
+};
+
+type LighthouseUserFlowConstructor = new (
+  page: Page,
+  options?: { name?: string }
+) => LighthouseUserFlow;
 export const lighthouseArtifactContentTypes = {
   html: `${requireRegisteredArtifactContentType('lighthouse-html', 'text/html')}; charset=utf-8`,
   json: requireRegisteredArtifactContentType('lighthouse-json', 'application/json'),
@@ -145,8 +160,8 @@ export const runBrowserAudit = async ({
     }
 
     const importedFlow = (await import('lighthouse/core/user-flow.js')) as unknown as {
-      UserFlow?: new (page: Page, options?: Record<string, unknown>) => any;
-      default?: new (page: Page, options?: Record<string, unknown>) => any;
+      UserFlow?: LighthouseUserFlowConstructor;
+      default?: LighthouseUserFlowConstructor;
     };
     const UserFlow = importedFlow.UserFlow ?? importedFlow.default;
 
@@ -175,7 +190,7 @@ export const runBrowserAudit = async ({
               const response = await page.goto(url, {
                 waitUntil: 'networkidle0',
                 timeout: input.policy.timeouts.stepTimeoutMs
-              } as any);
+              });
               responseStatusCode = response?.status() ?? responseStatusCode;
             },
             {
@@ -235,18 +250,19 @@ export const runBrowserAudit = async ({
       }
     }
 
-    const rawFlowResult = (await flow.createFlowResult()) as any;
+    const rawFlowResult = await flow.createFlowResult();
     networkGuard.throwIfBlocked();
-    const reportHtml = typeof flow.generateReport === 'function' ? ((await flow.generateReport()) as string) : null;
+    const reportHtml = flow.generateReport ? await flow.generateReport() : null;
 
     if (input.policy.artifacts.json) {
+      const serializedFlowResult = serializeFlowResult(rawFlowResult);
       artifacts.push(
         ...(await uploadArtifact(
           input,
           'lighthouse-json',
           'flow-result.json',
           lighthouseArtifactContentTypes.json,
-          new TextEncoder().encode(redactBrowserAuditText(JSON.stringify(rawFlowResult, null, 2), input)),
+          new TextEncoder().encode(redactBrowserAuditText(serializedFlowResult, input)),
           { deadline }
         ))
       );
@@ -282,7 +298,12 @@ export const runBrowserAudit = async ({
     const checkpoints = extractCheckpointResults(rawFlowResult, responseStatusCode, finalUrl, input);
     const primaryCheckpoint =
       checkpoints[0]
-      ?? extractNormalizedMetrics(rawFlowResult?.steps?.[0], responseStatusCode, finalUrl, input);
+      ?? extractNormalizedMetrics(
+        getFlowSteps(rawFlowResult)[0],
+        responseStatusCode,
+        finalUrl,
+        input
+      );
     const result = browserAuditResultSchema.parse({
       coreMetrics: primaryCheckpoint.coreMetrics,
       scores: primaryCheckpoint.scores,
@@ -311,48 +332,52 @@ const applySetupState = async (page: Page, input: BrowserAuditWorkerRequest) => 
   }
 
   if (input.cookies.length > 0) {
-    await (page as any).setCookie(...input.cookies);
+    await page.setCookie(...input.cookies);
   }
 };
 
 const runStep = async (
   page: Page,
-  flow: any,
+  flow: LighthouseUserFlow,
   step: BrowserAuditFlowStep,
   stepTimeoutMs: number,
   input: BrowserAuditWorkerRequest
 ) => {
   switch (step.type) {
     case 'waitForSelector':
+      if (step.state === 'detached') {
+        await waitForDetachedSelector(page, step.selector, stepTimeoutMs);
+        return;
+      }
       await page.waitForSelector(step.selector, {
-        state: step.state,
+        ...selectorStateOptions(step.state),
         timeout: stepTimeoutMs
-      } as any);
+      });
       return;
     case 'waitForUrl':
       await waitForUrl(page, step.url, step.match, stepTimeoutMs, input);
       return;
     case 'click':
-      await page.click(step.selector, {
-        timeout: stepTimeoutMs
-      } as any);
+      await waitForInteractiveSelector(page, step.selector, stepTimeoutMs);
+      await page.click(step.selector);
       return;
     case 'type':
+      await waitForInteractiveSelector(page, step.selector, stepTimeoutMs);
       if (step.clear) {
         await page.click(step.selector, {
-          clickCount: 3,
-          timeout: stepTimeoutMs
-        } as any);
+          count: 3
+        });
         await page.keyboard.press('Backspace');
       }
       await page.type(step.selector, step.text, {
-        delay: 20
-      } as any);
+        delay: defaultTypingDelayMs
+      });
       return;
     case 'press':
-      await page.keyboard.press(step.key as any);
+      await page.keyboard.press(step.key as KeyInput);
       return;
     case 'select':
+      await page.waitForSelector(step.selector, { timeout: stepTimeoutMs });
       await page.select(step.selector, ...step.values);
       return;
     case 'waitForTimeout':
@@ -368,7 +393,7 @@ const runStep = async (
       });
       return;
     case 'setCookie':
-      await (page as any).setCookie(step.cookie);
+      await page.setCookie(step.cookie);
       return;
     case 'setExtraHeaders':
       await page.setExtraHTTPHeaders(Object.fromEntries(step.headers.map((header) => [header.name, header.value])));
@@ -388,6 +413,48 @@ const runStep = async (
       return;
     case 'navigate':
       throw new Error('Navigate step must be handled by the flow coordinator');
+  }
+};
+
+const selectorStateOptions = (
+  state: Extract<BrowserAuditFlowStep, { type: 'waitForSelector' }>['state']
+): WaitForSelectorOptions => {
+  if (state === 'visible') {
+    return { visible: true };
+  }
+  if (state === 'hidden') {
+    return { hidden: true };
+  }
+  return {};
+};
+
+const waitForInteractiveSelector = async (
+  page: Page,
+  selector: string,
+  timeout: number
+) => {
+  await page.waitForSelector(selector, { visible: true, timeout });
+};
+
+export const waitForDetachedSelector = async (
+  page: Pick<Page, '$'>,
+  selector: string,
+  timeout: number
+) => {
+  const deadline = Date.now() + timeout;
+
+  while (true) {
+    const handle = await page.$(selector);
+    if (!handle) {
+      return;
+    }
+    await handle.dispose();
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`Timed out waiting for selector ${selector} to detach`);
+    }
+    await Bun.sleep(Math.min(50, remainingMs));
   }
 };
 
@@ -472,11 +539,14 @@ export const launchBrowser = async (
   config: BrowserAuditWorkerConfig,
   networkProxyUrl?: string
 ): Promise<Browser> => {
+  if (!config.chromeExecutablePath) {
+    throw new Error('Chrome executable is not configured');
+  }
   const args = buildChromeLaunchArgs(config, networkProxyUrl);
 
   return puppeteer.launch({
     browser: 'chrome',
-    executablePath: config.chromeExecutablePath!,
+    executablePath: config.chromeExecutablePath,
     headless: true,
     args
   });
@@ -511,21 +581,33 @@ export const buildChromeLaunchArgs = (
 };
 
 const extractCheckpointResults = (
-  flowResult: any,
+  flowResult: unknown,
   statusCode: number | null,
   finalUrl: string | null,
   input: BrowserAuditWorkerRequest
 ) => {
-  const steps = Array.isArray(flowResult?.steps) ? flowResult.steps : [];
+  const steps = getFlowSteps(flowResult);
 
   return steps
-    .map((step: any, index: number) => ({
-      id: step?.name ?? `checkpoint-${index + 1}`,
-      mode: normalizeStepMode(step?.mode),
-      label: typeof step?.name === 'string' ? step.name : null,
-      ...extractNormalizedMetrics(step, statusCode, finalUrl, input)
-    }))
+    .map((step, index) => {
+      const stepRecord = asAuditRecord(step);
+      const lhr = asAuditRecord(stepRecord?.lhr);
+      const name = typeof stepRecord?.name === 'string'
+        ? stepRecord.name
+        : `checkpoint-${index + 1}`;
+      return {
+        id: name,
+        mode: normalizeStepMode(lhr?.gatherMode ?? stepRecord?.mode),
+        label: typeof stepRecord?.name === 'string' ? name : null,
+        ...extractNormalizedMetrics(step, statusCode, finalUrl, input)
+      };
+    })
     .slice(0, 3);
+};
+
+const getFlowSteps = (flowResult: unknown): unknown[] => {
+  const flowRecord = asAuditRecord(flowResult);
+  return Array.isArray(flowRecord?.steps) ? flowRecord.steps : [];
 };
 
 const normalizeStepMode = (value: unknown): 'navigation' | 'snapshot' | 'timespan' => {
@@ -537,14 +619,17 @@ const normalizeStepMode = (value: unknown): 'navigation' | 'snapshot' | 'timespa
 };
 
 const extractNormalizedMetrics = (
-  step: any,
+  step: unknown,
   statusCode: number | null,
   finalUrl: string | null,
   input: BrowserAuditWorkerRequest
 ) => {
-  const lhr = step?.lhr ?? step;
-  const audits = lhr?.audits ?? {};
-  const categories = lhr?.categories ?? {};
+  const stepRecord = asAuditRecord(step);
+  const lhr = asAuditRecord(stepRecord?.lhr) ?? stepRecord;
+  const audits: Record<string, unknown> = asAuditRecord(lhr?.audits) ?? {};
+  const categories: Record<string, unknown> = asAuditRecord(lhr?.categories) ?? {};
+  const categoryScore = (id: string) => asAuditRecord(categories[id])?.score;
+  const auditNumericValue = (id: string) => asAuditRecord(audits[id])?.numericValue;
 
   return {
     finalUrl:
@@ -553,18 +638,18 @@ const extractNormalizedMetrics = (
         : finalUrl,
     statusCode,
     scores: {
-      performance: toNullableScore(categories.performance?.score),
-      accessibility: toNullableScore(categories.accessibility?.score),
-      bestPractices: toNullableScore(categories['best-practices']?.score),
-      seo: toNullableScore(categories.seo?.score)
+      performance: toNullableScore(categoryScore('performance')),
+      accessibility: toNullableScore(categoryScore('accessibility')),
+      bestPractices: toNullableScore(categoryScore('best-practices')),
+      seo: toNullableScore(categoryScore('seo'))
     },
     coreMetrics: {
-      fcpMs: toNullableNumber(audits['first-contentful-paint']?.numericValue),
-      lcpMs: toNullableNumber(audits['largest-contentful-paint']?.numericValue),
-      cls: toNullableNumber(audits['cumulative-layout-shift']?.numericValue),
-      inpMs: toNullableNumber(audits['interaction-to-next-paint']?.numericValue),
-      tbtMs: toNullableNumber(audits['total-blocking-time']?.numericValue),
-      speedIndexMs: toNullableNumber(audits['speed-index']?.numericValue)
+      fcpMs: toNullableNumber(auditNumericValue('first-contentful-paint')),
+      lcpMs: toNullableNumber(auditNumericValue('largest-contentful-paint')),
+      cls: toNullableNumber(auditNumericValue('cumulative-layout-shift')),
+      inpMs: toNullableNumber(auditNumericValue('interaction-to-next-paint')),
+      tbtMs: toNullableNumber(auditNumericValue('total-blocking-time')),
+      speedIndexMs: toNullableNumber(auditNumericValue('speed-index'))
     },
     extendedMetrics: extractExtendedMetrics(audits)
   };
@@ -622,6 +707,19 @@ const asAuditRecord = (value: unknown): Record<string, unknown> | null =>
 const toNullableScore = (value: unknown) => (typeof value === 'number' ? value : null);
 const toNullableNumber = (value: unknown) => (typeof value === 'number' ? value : null);
 
+export const serializeFlowResult = (value: unknown): string => {
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    if (serialized !== undefined) {
+      return serialized;
+    }
+  } catch (error) {
+    // Normalize dependency payload failures without reflecting their contents.
+    throw new Error('Lighthouse flow result could not be serialized', { cause: error });
+  }
+  throw new Error('Lighthouse flow result could not be serialized');
+};
+
 type ArtifactFetch = (
   input: string | URL | Request,
   init?: RequestInit
@@ -673,7 +771,7 @@ export const uploadArtifact = async (
   }
 
   const response = await (options.fetchImpl ?? fetch)(
-    `${input.artifactUpload.baseUrl}/internal/browser-audits/${input.executionId}/artifacts?kind=${kind}&filename=${encodeURIComponent(filename)}`,
+    `${input.artifactUpload.baseUrl}/internal/browser-audits/${encodeURIComponent(input.executionId)}/artifacts?kind=${encodeURIComponent(kind)}&filename=${encodeURIComponent(filename)}`,
     {
       method: 'POST',
       headers: {
@@ -690,6 +788,7 @@ export const uploadArtifact = async (
   );
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
     throw new Error(`Artifact upload failed with ${response.status}`);
   }
 

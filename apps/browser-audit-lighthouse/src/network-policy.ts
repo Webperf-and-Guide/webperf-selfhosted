@@ -10,6 +10,7 @@ export class BrowserNetworkPolicyError extends Error {
 }
 
 const blockedAddresses = new BlockList();
+const blockedUnnormalizedMappedAddresses = new BlockList();
 const maxBlockedErrors = 8;
 const defaultDnsLookupTimeoutMs = 10_000;
 
@@ -45,6 +46,11 @@ for (const [network, prefix] of [
 ] as const) {
   blockedAddresses.addSubnet(network, prefix, 'ipv6');
 }
+
+// Node's BlockList treats an IPv6 mapped-address subnet as matching every
+// IPv4 input too. Keep this fallback isolated and consult it only when mapped
+// normalization unexpectedly leaves a value as IPv6.
+blockedUnnormalizedMappedAddresses.addSubnet('::ffff:0:0', 96, 'ipv6');
 
 export type ResolvedBrowserRequestTarget = {
   url: URL;
@@ -318,7 +324,7 @@ const matchesAllowlist = (hostname: string, allowlist: string[]) =>
     const normalized = normalizeHostname(entry.trim());
 
     if (normalized.startsWith('*.')) {
-      return hostname.endsWith(normalized.slice(1)) && hostname !== normalized.slice(2);
+      return hostname.endsWith(normalized.slice(1));
     }
 
     return hostname === normalized;
@@ -329,7 +335,14 @@ const assertPublicAddress = (rawAddress: string) => {
   const normalizedFamily = isIP(address);
   const type = normalizedFamily === 4 ? 'ipv4' : 'ipv6';
 
-  if ((normalizedFamily !== 4 && normalizedFamily !== 6) || blockedAddresses.check(address, type)) {
+  if (
+    (normalizedFamily !== 4 && normalizedFamily !== 6)
+    || blockedAddresses.check(address, type)
+    || (
+      normalizedFamily === 6
+      && blockedUnnormalizedMappedAddresses.check(address, 'ipv6')
+    )
+  ) {
     throw new BrowserNetworkPolicyError(
       'Browser request resolved to a private, local, metadata, or reserved address'
     );

@@ -168,7 +168,7 @@ const redactQuotedShortValues = (value: string, sensitiveValues: string[]) => {
 
     const closingQuote = findClosingQuote(value, index, quote);
     if (closingQuote < 0) {
-      break;
+      continue;
     }
     if (sensitive.has(value.slice(index + 1, closingQuote))) {
       redacted += `${value.slice(copyStart, index + 1)}${redactedValue}`;
@@ -240,7 +240,7 @@ const redactQuotedShortValuesInPlace = (
 
     const closingQuote = findClosingQuoteInBytes(bytes, index, quote);
     if (closingQuote < 0) {
-      break;
+      continue;
     }
     const valueLength = closingQuote - index - 1;
     const matches = sensitiveBuffers.some(
@@ -305,7 +305,10 @@ const redactShortContextsInPlace = (bytes: Buffer, pairs: SensitivePair[]) => {
       while (separator < bytes.length && isAsciiWhitespace(bytes[separator]!)) {
         separator += 1;
       }
-      if (bytes[separator] !== ascii.colon && bytes[separator] !== ascii.equals) {
+      if (
+        separator >= bytes.length
+        || (bytes[separator] !== ascii.colon && bytes[separator] !== ascii.equals)
+      ) {
         continue;
       }
       let valueStart = separator + 1;

@@ -3,6 +3,7 @@ import { createServer, connect, type Server, type Socket } from 'node:net';
 import {
   sanitizeProxyHeaders,
   startBrowserNetworkProxy,
+  validateConnectAuthority,
   type BrowserNetworkProxy,
   type BrowserNetworkProxyDiagnostic
 } from './network-proxy';
@@ -107,6 +108,74 @@ describe('browser audit pinned network proxy', () => {
       host: 'example.com',
       accept: 'text/html'
     });
+  });
+
+  test('removes content length when transfer decoding changes the body framing', () => {
+    expect(sanitizeProxyHeaders({
+      'transfer-encoding': 'chunked',
+      'content-length': '999',
+      'content-type': 'text/plain'
+    })).toEqual({
+      'content-type': 'text/plain'
+    });
+    expect(sanitizeProxyHeaders({
+      'content-length': '12',
+      'content-type': 'text/plain'
+    })).toEqual({
+      'content-length': '12',
+      'content-type': 'text/plain'
+    });
+  });
+
+  test('bounds and rejects ambiguous CONNECT authorities', () => {
+    expect(validateConnectAuthority('example.com:443')).toBe('example.com:443');
+    for (const authority of [
+      'example.com :443',
+      'example.com/other:443',
+      'example.com\\other:443',
+      `example.com\u0000:443`,
+      `${'a'.repeat(513)}:443`
+    ]) {
+      expect(() => validateConnectAuthority(authority)).toThrow('authority is invalid');
+    }
+  });
+
+  test('does not connect after the client closes during DNS resolution', async () => {
+    let releaseLookup!: (addresses: Array<{ address: string; family: number }>) => void;
+    let markLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      markLookupStarted = resolve;
+    });
+    const lookupResult = new Promise<Array<{ address: string; family: number }>>((resolve) => {
+      releaseLookup = resolve;
+    });
+    let connected = false;
+    const proxy = await startBrowserNetworkProxy({
+      lookupHost: async () => {
+        markLookupStarted();
+        return await lookupResult;
+      },
+      connectTarget: () => {
+        connected = true;
+        throw new Error('must not connect after the client closes');
+      }
+    });
+    proxies.push(proxy);
+
+    const socket = connect({ host: '127.0.0.1', port: proxy.port });
+    sockets.push(socket);
+    await new Promise<void>((resolve, reject) => {
+      socket.once('error', reject);
+      socket.once('connect', resolve);
+    });
+    socket.write('CONNECT delayed.example:443 HTTP/1.1\r\nHost: delayed.example:443\r\n\r\n');
+    await lookupStarted;
+    socket.end();
+    await Bun.sleep(20);
+    releaseLookup([{ address: '93.184.216.34', family: 4 }]);
+    await waitForSocketClose(socket);
+
+    expect(connected).toBe(false);
   });
 
   test('closes established CONNECT tunnels after the idle deadline', async () => {

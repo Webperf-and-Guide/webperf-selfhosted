@@ -17,6 +17,7 @@ const proxyHost = '127.0.0.1';
 const connectTimeoutMs = 10_000;
 const httpIdleTimeoutMs = 30_000;
 const defaultTunnelIdleTimeoutMs = 30_000;
+const maximumConnectAuthorityBytes = 512;
 const maximumDiagnostics = 20;
 const hopByHopHeaders = new Set([
   'connection',
@@ -255,15 +256,40 @@ const proxyConnectRequest = async (
 ) => {
   let established = false;
   let upstream: Socket | null = null;
-  clientSocket.once('error', () => upstream?.destroy());
-  clientSocket.once('close', () => upstream?.destroy());
+  let clientClosed = false;
+  let signalClientClosed!: () => void;
+  const clientClosedSignal = new Promise<void>((resolve) => {
+    signalClientClosed = resolve;
+  });
+  const markClientClosed = () => {
+    if (clientClosed) {
+      return;
+    }
+    clientClosed = true;
+    signalClientClosed();
+    upstream?.destroy();
+  };
+  request.once('aborted', markClientClosed);
+  clientSocket.once('error', markClientClosed);
+  clientSocket.once('end', markClientClosed);
+  clientSocket.once('close', markClientClosed);
 
   try {
-    const authority = request.url;
-    if (!authority || authority.includes('/') || authority.includes('\\')) {
-      throw new Error('Proxy CONNECT authority is invalid');
+    const authority = validateConnectAuthority(request.url);
+    const targetPromise = resolveTarget(`https://${authority}/`)
+      .then((target) => ({ target }));
+    // The client-close signal can win before DNS settles. Keep an explicit
+    // observer on the losing lookup so a later failure remains harmless.
+    void targetPromise.catch(() => undefined);
+    const resolved = await Promise.race([
+      targetPromise,
+      clientClosedSignal.then(() => null)
+    ]);
+    if (!resolved || clientClosed || clientSocket.destroyed || clientSocket.readableEnded) {
+      clientSocket.destroy();
+      return;
     }
-    const target = await resolveTarget(`https://${authority}/`);
+    const { target } = resolved;
     upstream = trackSocket(connectTarget({
       host: target.address,
       family: target.family,
@@ -301,13 +327,30 @@ const proxyConnectRequest = async (
   }
 };
 
-export const sanitizeProxyHeaders = (headers: IncomingHttpHeaders): IncomingHttpHeaders =>
-  Object.fromEntries(
+export const validateConnectAuthority = (authority: string | undefined): string => {
+  if (
+    !authority
+    || Buffer.byteLength(authority, 'utf8') > maximumConnectAuthorityBytes
+    || /[\u0000-\u0020\u007f/\\]/.test(authority)
+  ) {
+    throw new Error('Proxy CONNECT authority is invalid');
+  }
+  return authority;
+};
+
+export const sanitizeProxyHeaders = (headers: IncomingHttpHeaders): IncomingHttpHeaders => {
+  const hadTransferEncoding = Object.keys(headers).some(
+    (name) => name.toLowerCase() === 'transfer-encoding'
+  );
+  return Object.fromEntries(
     Object.entries(headers).filter(([name]) => {
       const normalized = name.toLowerCase();
-      return !hopByHopHeaders.has(normalized) && !proxySignalingHeaders.has(normalized);
+      return !hopByHopHeaders.has(normalized)
+        && !proxySignalingHeaders.has(normalized)
+        && !(hadTransferEncoding && normalized === 'content-length');
     })
   );
+};
 
 const sendProxyError = (response: ServerResponse) => {
   if (response.destroyed || response.headersSent) {

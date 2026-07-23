@@ -1,7 +1,7 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
 import { parseSelfhostExecutorVars } from '@webperf/config/selfhost-executor';
+import { startProcessHeartbeat } from '@webperf/config/selfhost-process-heartbeat';
 import { createBrowserAuditExecutionHandler } from './browser-audit-handler';
 import { createExecutorApiClient } from './client';
 import { describeSafeError } from './diagnostics';
@@ -11,7 +11,6 @@ import { ExecutionFailure, runExecutor } from './runner';
 import { createWebhookExecutionHandler } from './webhook-handler';
 
 const defaultProcessHeartbeatPath = '/tmp/webperf-executor-heartbeat';
-const processHeartbeatIntervalMs = 10_000;
 
 const main = async () => {
   const runtime = parseSelfhostExecutorVars({
@@ -104,9 +103,14 @@ const main = async () => {
     }));
   }
 
-  const stopProcessHeartbeat = startProcessHeartbeat(
-    process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath
-  );
+  const stopProcessHeartbeat = startProcessHeartbeat({
+    heartbeatPath:
+      process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath,
+    onWriteFailure: () => console.error(JSON.stringify({
+      service: 'webperf-executor',
+      event: 'process_heartbeat_write_failed'
+    }))
+  });
 
   try {
     await runExecutor({
@@ -163,19 +167,4 @@ try {
     })
   );
   process.exitCode = 1;
-}
-
-function startProcessHeartbeat(heartbeatPath: string) {
-  const writeHeartbeat = () => {
-    writeFileSync(heartbeatPath, `${Date.now()}\n`, {
-      encoding: 'utf8',
-      mode: 0o600
-    });
-  };
-
-  writeHeartbeat();
-  const interval = setInterval(writeHeartbeat, processHeartbeatIntervalMs);
-  interval.unref();
-
-  return () => clearInterval(interval);
 }

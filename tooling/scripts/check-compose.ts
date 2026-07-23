@@ -108,7 +108,7 @@ for (const [name, heartbeatPath] of Object.entries({
     `${name} must publish its process heartbeat path to the healthcheck`
   );
   assert(
-    healthCommand.includes("node:fs/promises")
+    healthCommand.includes('node:fs/promises')
       && healthCommand.includes(heartbeatPath)
       && healthCommand.includes('mtimeMs'),
     `${name} healthcheck must validate its own process heartbeat freshness`

@@ -30,6 +30,10 @@
     "./selfhost-executor": {
       "types": "./src/selfhost-executor.ts",
       "import": "./src/selfhost-executor.ts"
+    },
+    "./selfhost-process-heartbeat": {
+      "types": "./src/selfhost-process-heartbeat.ts",
+      "import": "./src/selfhost-process-heartbeat.ts"
     }
   },
   "peerDependencies": {

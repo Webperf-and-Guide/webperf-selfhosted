@@ -14,6 +14,7 @@ import {
   type BrowserAuditSignatureRequest
 } from '@webperf/domain-core';
 import type { BrowserAuditExecutorApiClient } from './client';
+import { describeSafeError } from './diagnostics';
 import {
   isRetryableHttpStatus,
   redactExecutionText,
@@ -22,6 +23,8 @@ import {
 } from './execution-utils';
 import { ExecutionFailure } from './runner';
 
+const maximumBrowserAuditResponseContentTypeLength = 160;
+
 export type BrowserAuditHandlerOptions = {
   client: BrowserAuditExecutorApiClient;
   leaseOwner: string;
@@ -29,6 +32,7 @@ export type BrowserAuditHandlerOptions = {
   browserAuditBaseUrl?: string;
   allowInsecureBrowserAuditHttp?: boolean;
   fetchImpl?: typeof globalThis.fetch;
+  logger?: { error(event: Record<string, unknown>): void };
 };
 
 export const createBrowserAuditExecutionHandler = ({
@@ -37,7 +41,8 @@ export const createBrowserAuditExecutionHandler = ({
   browserAuditSharedSecret,
   browserAuditBaseUrl,
   allowInsecureBrowserAuditHttp = false,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  logger = defaultBrowserAuditLogger
 }: BrowserAuditHandlerOptions) => {
   const endpoint = browserAuditBaseUrl
     ? resolveBrowserAuditEndpoint(browserAuditBaseUrl, allowInsecureBrowserAuditHttp)
@@ -134,7 +139,16 @@ export const createBrowserAuditExecutionHandler = ({
 
     try {
       payload = await response.json();
-    } catch {
+    } catch (error) {
+      logger.error({
+        event: 'browser_audit_response_json_invalid',
+        executionId: executionJob.id,
+        status: response.status,
+        contentType: normalizeBrowserAuditResponseContentType(
+          response.headers.get('content-type')
+        ),
+        ...describeSafeError(error)
+      });
       // The status code below determines whether an invalid body is retryable.
     }
 
@@ -296,3 +310,22 @@ const isSuccessfulWorkerResponse = (
   response: BrowserAuditWorkerResponse
 ): response is BrowserAuditWorkerResponse & { status: 'succeeded'; result: NonNullable<BrowserAuditWorkerResponse['result']> } =>
   response.status === 'succeeded' && response.result !== null;
+
+const normalizeBrowserAuditResponseContentType = (value: string | null) => {
+  if (value === null) {
+    return 'missing';
+  }
+  if (value.length > maximumBrowserAuditResponseContentTypeLength) {
+    return 'invalid';
+  }
+  const mediaType = value.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  return /^[a-z0-9][a-z0-9.+_-]{0,63}\/[a-z0-9][a-z0-9.+_-]{0,63}$/.test(mediaType)
+    ? mediaType
+    : 'invalid';
+};
+
+const defaultBrowserAuditLogger = {
+  error: (event: Record<string, unknown>) => {
+    console.error(JSON.stringify({ service: 'webperf-executor', level: 'error', ...event }));
+  }
+};

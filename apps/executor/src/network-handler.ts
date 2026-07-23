@@ -200,15 +200,13 @@ const processNetworkJob = async ({
     target.startedAt ??= now;
     target.finishedAt = null;
     target.updatedAt = now;
-    recomputeJob(job);
-    await persist();
+    await recomputeAndPersistJob(job, persist);
 
     const probeBaseUrl = probeBaseUrls[target.region];
 
     if (!probeBaseUrl) {
       markTargetFailed(target, 'missing_probe_region', 'No probe is configured for this region');
-      recomputeJob(job);
-      await persist();
+      await recomputeAndPersistJob(job, persist);
       continue;
     }
 
@@ -239,8 +237,7 @@ const processNetworkJob = async ({
         await response.body?.cancel().catch(() => {});
         if (isRetryableHttpStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
           markTargetRetryable(target, `probe_http_${response.status}`);
-          recomputeJob(job);
-          await persist();
+          await recomputeAndPersistJob(job, persist);
           throw new ExecutionFailure(
             'probe_temporarily_unavailable',
             'Network probe is temporarily unavailable',
@@ -250,8 +247,7 @@ const processNetworkJob = async ({
         }
 
         markTargetFailed(target, `probe_http_${response.status}`, 'Network probe rejected the request');
-        recomputeJob(job);
-        await persist();
+        await recomputeAndPersistJob(job, persist);
         continue;
       }
 
@@ -259,14 +255,12 @@ const processNetworkJob = async ({
 
       if (!parsed.success) {
         markTargetFailed(target, 'probe_invalid_payload', 'Network probe returned an invalid result');
-        recomputeJob(job);
-        await persist();
+        await recomputeAndPersistJob(job, persist);
         continue;
       }
 
       applyMeasurement(target, parsed.data);
-      recomputeJob(job);
-      await persist();
+      await recomputeAndPersistJob(job, persist);
     } catch (error) {
       throwIfAborted(signal);
 
@@ -283,8 +277,7 @@ const processNetworkJob = async ({
           'probe_origin_blocked',
           'Network probe origin resolved to a blocked address'
         );
-        recomputeJob(job);
-        await persist();
+        await recomputeAndPersistJob(job, persist);
         continue;
       }
 
@@ -297,8 +290,7 @@ const processNetworkJob = async ({
 
       if (executionJob.attemptCount < executionJob.maxAttempts) {
         markTargetRetryable(target, 'probe_transport_failed');
-        recomputeJob(job);
-        await persist();
+        await recomputeAndPersistJob(job, persist);
         throw new ExecutionFailure(
           'probe_temporarily_unavailable',
           'Network probe is temporarily unavailable',
@@ -308,8 +300,7 @@ const processNetworkJob = async ({
       }
 
       markTargetFailed(target, 'probe_transport_failed', 'Network probe request failed');
-      recomputeJob(job);
-      await persist();
+      await recomputeAndPersistJob(job, persist);
     }
   }
 
@@ -397,6 +388,14 @@ const recomputeJob = (job: LatencyJobDetail) => {
     monitorPolicy: job.monitorPolicy,
     targets: job.targets
   });
+};
+
+const recomputeAndPersistJob = async (
+  job: LatencyJobDetail,
+  persist: () => Promise<void>
+) => {
+  recomputeJob(job);
+  await persist();
 };
 
 const buildWebhookFollowups = ({

@@ -203,6 +203,7 @@ describe('Browser Audit execution handler', () => {
 
   test('retries an invalid successful runner response', async () => {
     const savedResults: ExecutionResourceResultRequest[] = [];
+    const diagnosticEvents: Array<Record<string, unknown>> = [];
     const handler = createBrowserAuditExecutionHandler({
       client: createClient(savedResults),
       leaseOwner: 'executor-browser',
@@ -210,8 +211,11 @@ describe('Browser Audit execution handler', () => {
       browserAuditBaseUrl: 'https://runner.example.com',
       fetchImpl: (async () => new Response('{"partial":', {
         status: 200,
-        headers: { 'content-type': 'application/json' }
-      })) as unknown as typeof fetch
+        headers: {
+          'content-type': 'application/json; private=must-not-appear'
+        }
+      })) as unknown as typeof fetch,
+      logger: { error: (event) => diagnosticEvents.push(event) }
     });
 
     await expect(handler(
@@ -225,6 +229,15 @@ describe('Browser Audit execution handler', () => {
       status: 'queued',
       error: 'Browser Audit execution will be retried'
     });
+    expect(diagnosticEvents).toEqual([{
+      event: 'browser_audit_response_json_invalid',
+      executionId: executionJob.id,
+      status: 200,
+      contentType: 'application/json',
+      errorType: 'SyntaxError'
+    }]);
+    expect(JSON.stringify(diagnosticEvents)).not.toContain('must-not-appear');
+    expect(JSON.stringify(diagnosticEvents)).not.toContain('partial');
   });
 
   test('fails explicitly when the runner responds for a different execution', async () => {

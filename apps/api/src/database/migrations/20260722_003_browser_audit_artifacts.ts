@@ -20,6 +20,8 @@ export const browserAuditArtifactsMigration: SqliteMigration = {
       CREATE INDEX IF NOT EXISTS browser_audit_artifacts_audit_idx
         ON browser_audit_artifacts (audit_id, created_at, id);
 
+      -- Keep this immutable threshold aligned with
+      -- maximumBrowserAuditArtifactsPerAudit in apps/api/src/repository.ts.
       CREATE TRIGGER IF NOT EXISTS browser_audit_artifacts_limit_before_insert
       BEFORE INSERT ON browser_audit_artifacts
       WHEN (

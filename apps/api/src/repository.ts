@@ -48,6 +48,8 @@ import {
 } from './database/operations';
 import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 
+// Must stay in sync with the immutable trigger threshold in migration
+// 20260722_003_browser_audit_artifacts.
 const maximumBrowserAuditArtifactsPerAudit = 50;
 
 type JobRow = {
@@ -999,7 +1001,14 @@ export const createSqliteJobRepository = ({
       } catch (error) {
         // The trigger remains a cross-process backstop if another API connection
         // wins the race after this transaction's explicit count check.
-        if ((error as { code?: unknown } | null)?.code === 'SQLITE_CONSTRAINT_TRIGGER') {
+        const errorMessage = (error as { message?: unknown } | null)?.message;
+        if (
+          (error as { code?: unknown } | null)?.code === 'SQLITE_CONSTRAINT_TRIGGER'
+          || (
+            typeof errorMessage === 'string'
+            && errorMessage.includes('browser_audit_artifact_limit')
+          )
+        ) {
           return false;
         }
 

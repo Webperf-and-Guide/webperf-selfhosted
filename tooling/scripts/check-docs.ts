@@ -92,13 +92,11 @@ for (const relativePath of (await files).sort()) {
   // A CommonMark shortcut reference is a link only when a matching definition
   // exists; otherwise it is ordinary bracketed text. Resolve the defined forms
   // here while leaving ordinary prose such as `[main]` untouched.
-  const sourceWithoutCode = source
-    .replace(/(`{3,}|~{3,})[\s\S]*?\1/g, '')
-    .replace(/(`+)[^`\n]*?\1/g, '');
+  const sourceWithoutCode = maskMarkdownCode(source);
   for (const match of sourceWithoutCode.matchAll(shortcutReferencePattern)) {
     const matchIndex = match.index ?? 0;
-    const previousCharacter = source[matchIndex - 1];
-    const nextCharacter = source[matchIndex + match[0].length];
+    const previousCharacter = sourceWithoutCode[matchIndex - 1];
+    const nextCharacter = sourceWithoutCode[matchIndex + match[0].length];
     if (previousCharacter === ']' || nextCharacter === ':') {
       continue;
     }
@@ -243,4 +241,87 @@ function validateReferenceDefinition(
 
   validatedLabels.add(label);
   validateLocalLinkTarget(target, sourcePath, sourceAbsolutePath);
+}
+
+function maskMarkdownCode(source: string) {
+  const masked = source.split('');
+  let fence: { marker: '`' | '~'; length: number } | null = null;
+  let lineStart = 0;
+
+  while (lineStart < source.length) {
+    const newline = source.indexOf('\n', lineStart);
+    const lineEnd = newline < 0 ? source.length : newline;
+    const line = source.slice(lineStart, lineEnd);
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+
+    if (fence) {
+      maskRange(masked, lineStart, lineEnd);
+      const closingRun = line.match(/^ {0,3}(`+|~+)[ \t]*\r?$/)?.[1];
+      if (
+        closingRun
+        && closingRun[0] === fence.marker
+        && closingRun.length >= fence.length
+      ) {
+        fence = null;
+      }
+    } else if (fenceMatch?.[1]) {
+      const marker = fenceMatch[1][0];
+      if (marker === '`' || marker === '~') {
+        fence = { marker, length: fenceMatch[1].length };
+        maskRange(masked, lineStart, lineEnd);
+      }
+    }
+
+    lineStart = newline < 0 ? source.length : newline + 1;
+  }
+
+  for (let index = 0; index < source.length;) {
+    if (source[index] !== '`' || masked[index] !== '`') {
+      index += 1;
+      continue;
+    }
+
+    let delimiterLength = 1;
+    while (source[index + delimiterLength] === '`') {
+      delimiterLength += 1;
+    }
+    const delimiter = '`'.repeat(delimiterLength);
+    let searchFrom = index + delimiterLength;
+    let closingIndex = -1;
+
+    while (searchFrom < source.length) {
+      const candidate = source.indexOf(delimiter, searchFrom);
+      if (candidate < 0) {
+        break;
+      }
+
+      const exactRun = source[candidate - 1] !== '`'
+        && source[candidate + delimiterLength] !== '`';
+      const outsideFence = masked[candidate] === '`';
+      if (exactRun && outsideFence) {
+        closingIndex = candidate;
+        break;
+      }
+      searchFrom = candidate + 1;
+    }
+
+    if (closingIndex < 0) {
+      index += delimiterLength;
+      continue;
+    }
+
+    const spanEnd = closingIndex + delimiterLength;
+    maskRange(masked, index, spanEnd);
+    index = spanEnd;
+  }
+
+  return masked.join('');
+}
+
+function maskRange(value: string[], start: number, end: number) {
+  for (let index = start; index < end; index += 1) {
+    if (value[index] !== '\n' && value[index] !== '\r') {
+      value[index] = ' ';
+    }
+  }
 }

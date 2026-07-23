@@ -300,12 +300,12 @@ fn is_private_ip(ip: IpAddr) -> bool {
 fn display_url(url: &Url) -> String {
     let mut redacted = url.clone();
 
-    if redacted.query().is_some() {
-        redacted.set_query(Some("redacted"));
-    }
+    redacted.set_query(None);
     redacted.set_fragment(None);
+    let _ = redacted.set_username("");
+    let _ = redacted.set_password(None);
 
-    if redacted.path() == "/" && redacted.query().is_none() {
+    if redacted.path() == "/" {
         let mut normalized = format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default());
 
         if let Some(port) = url.port() {
@@ -317,4 +317,27 @@ fn display_url(url: &Url) -> String {
     }
 
     redacted.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_url;
+    use reqwest::Url;
+
+    #[test]
+    fn display_url_removes_query_credentials_and_fragment() {
+        let target =
+            Url::parse("https://user:password@example.com/path?token=secret#private-fragment")
+                .expect("test URL should parse");
+
+        assert_eq!(display_url(&target), "https://example.com/path");
+    }
+
+    #[test]
+    fn display_url_keeps_root_origins_compact_after_query_removal() {
+        let target =
+            Url::parse("https://example.com:8443/?token=secret").expect("test URL should parse");
+
+        assert_eq!(display_url(&target), "https://example.com:8443");
+    }
 }

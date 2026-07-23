@@ -61,7 +61,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     && cp -a "$(dirname "$chrome_executable")/." /opt/google/chrome/ \
     && rm -rf /opt/chrome; \
   fi
-RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox \) -print -quit 2>/dev/null)" \
+RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox -o -name chromium-sandbox \) -print -quit 2>/dev/null)" \
   && test -n "$sandbox_path" \
   && chown root:root "$sandbox_path" \
   && chmod 4755 "$sandbox_path" \

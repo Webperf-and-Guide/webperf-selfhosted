@@ -1,10 +1,12 @@
 import {
   browserAuditArtifactRefSchema,
   browserAuditResultSchema,
+  standardBrowserAuditArtifactContentTypes,
   type BrowserAuditArtifactKind,
   type BrowserAuditArtifactRef,
   type BrowserAuditCapabilities,
   type BrowserAuditFlowStep,
+  type BrowserAuditStandardArtifactKind,
   type BrowserAuditToolchain,
   type BrowserAuditWorkerRequest
 } from '@webperf/contracts';
@@ -34,6 +36,27 @@ const presetViewport = {
     hasTouch: false
   }
 } as const;
+const lighthouseArtifactContentTypes = {
+  html: requireRegisteredArtifactContentType('lighthouse-html', 'text/html'),
+  json: requireRegisteredArtifactContentType('lighthouse-json', 'application/json'),
+  screenshot: requireRegisteredArtifactContentType('screenshot', 'image/png'),
+  trace: requireRegisteredArtifactContentType('trace', 'application/json')
+};
+
+function requireRegisteredArtifactContentType(
+  kind: BrowserAuditStandardArtifactKind,
+  expected: string
+) {
+  const registered = standardBrowserAuditArtifactContentTypes[kind].find(
+    (contentType) => contentType === expected
+  );
+
+  if (!registered) {
+    throw new Error(`Browser Audit artifact registry is missing ${kind} content type ${expected}`);
+  }
+
+  return registered;
+}
 
 export const runBrowserAudit = async ({
   config,
@@ -149,7 +172,13 @@ export const runBrowserAudit = async ({
           type: 'png',
           fullPage: true
         })) as Uint8Array;
-        artifacts.push(...(await uploadArtifact(input, 'screenshot', 'screenshot.png', 'image/png', screenshot)));
+        artifacts.push(...(await uploadArtifact(
+          input,
+          'screenshot',
+          'screenshot.png',
+          lighthouseArtifactContentTypes.screenshot,
+          screenshot
+        )));
       } catch (error) {
         issues.push({
           code: 'screenshot_failed',
@@ -181,7 +210,7 @@ export const runBrowserAudit = async ({
           input,
           'lighthouse-json',
           'flow-result.json',
-          'application/json',
+          lighthouseArtifactContentTypes.json,
           new TextEncoder().encode(redactBrowserAuditText(JSON.stringify(rawFlowResult, null, 2), input))
         ))
       );
@@ -193,7 +222,7 @@ export const runBrowserAudit = async ({
           input,
           'lighthouse-html',
           'report.html',
-          'text/html; charset=utf-8',
+          lighthouseArtifactContentTypes.html,
           new TextEncoder().encode(redactBrowserAuditText(reportHtml, input))
         ))
       );
@@ -205,7 +234,7 @@ export const runBrowserAudit = async ({
           input,
           'trace',
           'trace.json',
-          'application/json',
+          lighthouseArtifactContentTypes.trace,
           redactBrowserAuditBytesInPlace(traceBuffer, input)
         ))
       );

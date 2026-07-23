@@ -3,6 +3,7 @@ import {
   BrowserAuditPollingError,
   ReportsController,
   createBrowserAuditPollingHttpError,
+  describeBrowserAuditTerminalRefreshFailure,
   fetchBrowserAuditStatus,
   isBrowserAuditTargetUrl,
   isRetryableBrowserAuditStatus,
@@ -131,6 +132,15 @@ describe('Reports Browser Audit response handling', () => {
     expect(controller.state.browserAuditStatusMessage)
       .toBe('Browser Audit was queued; refresh Reports to follow its latest status.');
     expect(controller.state.browserAuditSubmitting).toBe(false);
+  });
+
+  test('keeps terminal status distinct when the final refresh fails', () => {
+    expect(describeBrowserAuditTerminalRefreshFailure('succeeded')).toBe(
+      'Browser Audit completed, but Reports could not refresh. Refresh to see recent history.'
+    );
+    expect(describeBrowserAuditTerminalRefreshFailure('failed')).toBe(
+      'Browser Audit finished with status failed, but Reports could not refresh. Refresh to see details.'
+    );
   });
 
   test('accepts only HTTP and HTTPS audit targets', () => {

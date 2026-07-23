@@ -95,6 +95,12 @@ export const createBrowserAuditPollingHttpError = (status: number) =>
     `Browser Audit status request failed with HTTP ${status}`
   );
 
+export const describeBrowserAuditTerminalRefreshFailure = (
+  status: BrowserAuditExecutionStatus
+) => status === 'succeeded'
+  ? 'Browser Audit completed, but Reports could not refresh. Refresh to see recent history.'
+  : `Browser Audit finished with status ${status}, but Reports could not refresh. Refresh to see details.`;
+
 export const readBrowserAuditResponsePayload = async (response: Response): Promise<unknown> => {
   try {
     return await response.json();
@@ -339,7 +345,16 @@ export class ReportsController {
           submissionController.signal
         );
         if (completed) {
-          await this.accessors.refreshControlData();
+          try {
+            await this.accessors.refreshControlData();
+          } catch (error) {
+            if (isAbortError(error) || submissionController.signal.aborted) {
+              return;
+            }
+            this.state.browserAuditStatusMessage =
+              describeBrowserAuditTerminalRefreshFailure(completed.status);
+            return;
+          }
         }
         if (submissionController.signal.aborted) {
           return;

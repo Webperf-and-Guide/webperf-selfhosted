@@ -1,9 +1,13 @@
 import {
   chmodSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +64,38 @@ describe('self-host process heartbeat', () => {
     }
   });
 
+  test('atomically replaces a symlink without following it', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'webperf-heartbeat-symlink-'));
+    const outsidePath = join(directory, 'outside');
+    const heartbeatPath = join(directory, 'worker');
+    writeFileSync(outsidePath, 'outside\n', { mode: 0o600 });
+    symlinkSync(outsidePath, heartbeatPath);
+
+    const stop = await startProcessHeartbeat({ heartbeatPath });
+    try {
+      expect(lstatSync(heartbeatPath).isSymbolicLink()).toBe(false);
+      expect(Number.parseInt(readFileSync(heartbeatPath, 'utf8'), 10)).toBeGreaterThan(0);
+      expect(readFileSync(outsidePath, 'utf8')).toBe('outside\n');
+      expect(statSync(heartbeatPath).mode & 0o777).toBe(0o600);
+    } finally {
+      stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('removes a private temporary file when publication fails', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'webperf-heartbeat-cleanup-'));
+    const heartbeatPath = join(directory, 'worker');
+    mkdirSync(heartbeatPath);
+
+    try {
+      await expect(startProcessHeartbeat({ heartbeatPath })).rejects.toThrow();
+      expect(readdirSync(directory)).toEqual(['worker']);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test('bounds a periodic write that only settles after abort', async () => {
     let writeCount = 0;
     let failureCount = 0;
@@ -89,5 +125,41 @@ describe('self-host process heartbeat', () => {
     } finally {
       stop();
     }
+  });
+
+  test('uses a generic fallback when the failure reporter throws', async () => {
+    const originalConsoleError = console.error;
+    const fallbackLogs: string[] = [];
+    let writeCount = 0;
+    let stop: (() => void) | undefined;
+    console.error = (...values: unknown[]) => {
+      fallbackLogs.push(values.map(String).join(' '));
+    };
+
+    try {
+      stop = await startProcessHeartbeat({
+        heartbeatPath: '/unused/test-heartbeat',
+        intervalMs: 2,
+        failureReportIntervalMs: 1,
+        writeHeartbeat: async () => {
+          writeCount += 1;
+          if (writeCount > 1) {
+            throw new Error('must-not-appear');
+          }
+        },
+        onWriteFailure: () => {
+          throw new Error('failure-reporter-secret');
+        }
+      });
+      await Bun.sleep(15);
+    } finally {
+      stop?.();
+      console.error = originalConsoleError;
+    }
+
+    expect(fallbackLogs.length).toBeGreaterThanOrEqual(1);
+    expect(fallbackLogs.join('\n')).toContain('process_heartbeat_failure_report_failed');
+    expect(fallbackLogs.join('\n')).not.toContain('must-not-appear');
+    expect(fallbackLogs.join('\n')).not.toContain('failure-reporter-secret');
   });
 });

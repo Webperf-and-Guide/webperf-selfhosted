@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, rename, unlink } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 
 export const defaultProcessHeartbeatIntervalMs = 10_000;
 export const defaultProcessHeartbeatFailureReportIntervalMs = 5 * 60_000;
@@ -73,6 +75,7 @@ export const startProcessHeartbeat = async ({
       onWriteFailure();
     } catch {
       // A diagnostic callback must not turn a stale heartbeat into a process crash.
+      reportHeartbeatDiagnosticFailure();
     }
   };
 
@@ -150,19 +153,47 @@ const writePrivateHeartbeatFile: ProcessHeartbeatWriter = async (
   contents,
   signal
 ) => {
+  const temporaryPath = join(
+    dirname(heartbeatPath),
+    `.${basename(heartbeatPath)}.${process.pid}.${randomUUID()}.tmp`
+  );
   const handle = await open(
-    heartbeatPath,
+    temporaryPath,
     constants.O_WRONLY
       | constants.O_CREAT
-      | constants.O_TRUNC
+      | constants.O_EXCL
       | constants.O_NOFOLLOW,
     0o600
   );
+  let closed = false;
+  let published = false;
 
   try {
     await handle.chmod(0o600);
     await handle.writeFile(contents, { encoding: 'utf8', signal });
+    await handle.sync();
+    await handle.close();
+    closed = true;
+    signal.throwIfAborted();
+    await rename(temporaryPath, heartbeatPath);
+    published = true;
   } finally {
-    await handle.close().catch(() => undefined);
+    if (!closed) {
+      await handle.close().catch(() => undefined);
+    }
+    if (!published) {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
+  }
+};
+
+const reportHeartbeatDiagnosticFailure = () => {
+  try {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'process_heartbeat_failure_report_failed'
+    }));
+  } catch {
+    // There is no safer fallback when the process console itself is unavailable.
   }
 };

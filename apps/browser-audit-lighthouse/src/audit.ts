@@ -37,7 +37,7 @@ const presetViewport = {
   }
 } as const;
 const lighthouseArtifactContentTypes = {
-  html: requireRegisteredArtifactContentType('lighthouse-html', 'text/html'),
+  html: `${requireRegisteredArtifactContentType('lighthouse-html', 'text/html')}; charset=utf-8`,
   json: requireRegisteredArtifactContentType('lighthouse-json', 'application/json'),
   screenshot: requireRegisteredArtifactContentType('screenshot', 'image/png'),
   trace: requireRegisteredArtifactContentType('trace', 'application/json')
@@ -531,7 +531,9 @@ const uploadArtifact = async (
     throw new Error('Artifact exceeds the configured upload byte limit');
   }
 
-  if (!input.artifactUpload.allowedContentTypes.includes(contentType)) {
+  const registeredContentType = normalizeArtifactContentType(contentType);
+
+  if (!input.artifactUpload.allowedContentTypes.includes(registeredContentType)) {
     throw new Error('Artifact content type is not allowed by the upload policy');
   }
 
@@ -559,7 +561,7 @@ const uploadArtifact = async (
   if (
     uploaded.kind !== kind
     || uploaded.filename !== filename
-    || uploaded.contentType !== contentType
+    || uploaded.contentType !== registeredContentType
     || uploaded.byteSize !== payload.byteLength
     || !uploaded.sha256
   ) {
@@ -568,3 +570,6 @@ const uploadArtifact = async (
 
   return [uploaded];
 };
+
+const normalizeArtifactContentType = (value: string) =>
+  value.split(';', 1)[0]!.trim().toLowerCase();

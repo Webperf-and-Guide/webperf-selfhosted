@@ -12,6 +12,8 @@ import { createWebhookExecutionHandler } from './webhook-handler';
 
 const defaultProcessHeartbeatPath = '/tmp/webperf-executor-heartbeat';
 const forcedShutdownTimeoutMs = 10_000;
+type ExecutorShutdownReason = NodeJS.Signals | 'unhandledRejection' | 'uncaughtException';
+let requestActiveShutdown: ((reason: ExecutorShutdownReason) => void) | undefined;
 
 const main = async () => {
   const runtime = parseSelfhostExecutorVars({
@@ -41,31 +43,44 @@ const main = async () => {
     });
   const shutdownController = new AbortController();
   let forcedShutdownTimer: ReturnType<typeof setTimeout> | null = null;
-  const requestShutdown = (signal: NodeJS.Signals) => {
-    if (!shutdownController.signal.aborted) {
-      console.log(
-        JSON.stringify({
-          service: 'webperf-executor',
-          event: 'shutdown_requested',
-          signal
-        })
-      );
-      shutdownController.abort();
-      forcedShutdownTimer = setTimeout(() => {
+  const requestShutdown = (reason: ExecutorShutdownReason) => {
+    if (shutdownController.signal.aborted) {
+      if (reason === 'SIGINT' || reason === 'SIGTERM') {
         console.error(JSON.stringify({
           service: 'webperf-executor',
           event: 'forced_shutdown',
-          timeoutMs: forcedShutdownTimeoutMs
+          reason: 'second_signal'
         }));
         process.exit(1);
-      }, forcedShutdownTimeoutMs);
-      forcedShutdownTimer.unref?.();
+      }
+      return;
     }
+    console.log(
+      JSON.stringify({
+        service: 'webperf-executor',
+        event: 'shutdown_requested',
+        reason,
+        ...(reason === 'SIGINT' || reason === 'SIGTERM' ? { signal: reason } : {})
+      })
+    );
+    shutdownController.abort();
+    forcedShutdownTimer = setTimeout(() => {
+      console.error(JSON.stringify({
+        service: 'webperf-executor',
+        event: 'forced_shutdown',
+        reason: 'grace_timeout',
+        timeoutMs: forcedShutdownTimeoutMs
+      }));
+      process.exit(1);
+    }, forcedShutdownTimeoutMs);
+    forcedShutdownTimer.unref?.();
   };
 
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, requestShutdown);
-  }
+  const onSigint = () => requestShutdown('SIGINT');
+  const onSigterm = () => requestShutdown('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  requestActiveShutdown = requestShutdown;
 
   console.log(
     JSON.stringify({
@@ -174,25 +189,61 @@ const main = async () => {
       clearTimeout(forcedShutdownTimer);
       forcedShutdownTimer = null;
     }
-    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-      process.off(signal, requestShutdown);
-    }
+    requestActiveShutdown = undefined;
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
   }
 
   console.log(JSON.stringify({ service: 'webperf-executor', event: 'stopped' }));
 };
 
-try {
-  await main();
-} catch (error) {
+let fatalErrorReported = false;
+const reportFatalError = (
+  source: 'main' | 'unhandledRejection' | 'uncaughtException',
+  error: unknown
+) => {
+  if (fatalErrorReported) {
+    return;
+  }
+  fatalErrorReported = true;
   const incidentId = randomUUID();
   console.error(
     JSON.stringify({
       service: 'webperf-executor',
       event: 'fatal_error',
       incidentId,
+      source,
       ...describeSafeError(error)
     })
   );
   process.exitCode = 1;
+  if (source !== 'main') {
+    if (requestActiveShutdown) {
+      requestActiveShutdown(source);
+    } else {
+      console.error(JSON.stringify({
+        service: 'webperf-executor',
+        event: 'forced_shutdown',
+        reason: 'shutdown_not_ready'
+      }));
+      process.exit(1);
+    }
+  }
+};
+const onUnhandledRejection = (reason: unknown) => {
+  reportFatalError('unhandledRejection', reason);
+};
+const onUncaughtException = (error: Error) => {
+  reportFatalError('uncaughtException', error);
+};
+process.on('unhandledRejection', onUnhandledRejection);
+process.on('uncaughtException', onUncaughtException);
+
+try {
+  await main();
+} catch (error) {
+  reportFatalError('main', error);
+} finally {
+  process.off('unhandledRejection', onUnhandledRejection);
+  process.off('uncaughtException', onUncaughtException);
 }

@@ -325,8 +325,9 @@ const applyMeasurement = (
   response: ProbeMeasurementResponse
 ) => {
   const measurement = response.measurement;
-  const success = measurement.error == null
-    && measurement.statusCode != null
+  const success = (measurement.error === null || measurement.error === undefined)
+    && measurement.statusCode !== null
+    && measurement.statusCode !== undefined
     && measurement.statusCode >= 200
     && measurement.statusCode < 400;
   target.status = success ? 'succeeded' : 'failed';
@@ -521,6 +522,6 @@ const defaultNetworkLogger = {
 };
 
 const buildStatusFailureMessage = (statusCode: number | null | undefined) =>
-  statusCode == null
+  statusCode === null || statusCode === undefined
     ? 'Network probe did not return an HTTP status'
     : `Status ${statusCode} did not satisfy status_2xx_3xx`;

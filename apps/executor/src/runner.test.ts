@@ -309,6 +309,102 @@ describe('executor runner', () => {
     }));
   });
 
+  test('retries a transient lease renewal failure before the local deadline', async () => {
+    const testLogger = logger();
+    let renewCalls = 0;
+    let completed = false;
+    let failed = false;
+    let notifyRenewed!: () => void;
+    const renewed = new Promise<void>((resolve) => {
+      notifyRenewed = resolve;
+    });
+    const client: ExecutorLeaseClient = {
+      claim: async () => null,
+      start: async () => runningJob,
+      renew: async () => {
+        renewCalls += 1;
+        if (renewCalls === 1) {
+          throw new ExecutorApiError('temporary service failure', 503);
+        }
+        notifyRenewed();
+        return runningJob;
+      },
+      complete: async () => {
+        completed = true;
+        return completedJob;
+      },
+      fail: async () => {
+        failed = true;
+        return runningJob;
+      }
+    };
+
+    await processExecutionJob({
+      client,
+      handler: async () => await renewed,
+      executionJob: queuedJob,
+      lease: { leaseOwner: 'executor-test', leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 1,
+      maxExecutionMs: 60_000,
+      logger: testLogger,
+      now: () => 1_000
+    });
+
+    expect(renewCalls).toBe(2);
+    expect(completed).toBe(true);
+    expect(failed).toBe(false);
+    expect(testLogger.events).toContainEqual(expect.objectContaining({
+      event: 'execution_lease_renew_retry',
+      retryInMs: 1,
+      status: 503
+    }));
+  });
+
+  test('aborts work when transient renewal failures consume the local lease deadline', async () => {
+    const testLogger = logger();
+    let nowMs = 0;
+    let failureCode: string | undefined;
+    let renewCalls = 0;
+    const client: ExecutorLeaseClient = {
+      claim: async () => null,
+      start: async () => runningJob,
+      renew: async () => {
+        renewCalls += 1;
+        throw new ExecutorApiError('temporary network failure', null);
+      },
+      complete: async () => {
+        throw new Error('complete should not be called');
+      },
+      fail: async (_id, input) => {
+        failureCode = input.error.code;
+        return { ...runningJob, status: 'queued', leaseOwner: null, leaseExpiresAt: null };
+      }
+    };
+
+    await processExecutionJob({
+      client,
+      handler: async (_job, signal) => await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+      executionJob: queuedJob,
+      lease: { leaseOwner: 'executor-test', leaseDurationMs: 5 },
+      heartbeatIntervalMs: 1,
+      maxExecutionMs: 60_000,
+      logger: testLogger,
+      now: () => {
+        nowMs += 2;
+        return nowMs;
+      }
+    });
+
+    expect(renewCalls).toBe(1);
+    expect(failureCode).toBe('lease_lost');
+    expect(testLogger.events).toContainEqual(expect.objectContaining({
+      event: 'execution_lease_lost',
+      errorType: 'ExecutionFailure'
+    }));
+  });
+
   test('aborts and retries a handler that exceeds its execution limit', async () => {
     const testLogger = logger();
     let aborted = false;

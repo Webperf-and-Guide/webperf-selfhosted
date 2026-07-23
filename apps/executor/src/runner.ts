@@ -107,7 +107,8 @@ export const processExecutionJob = async ({
   maxExecutionMs,
   logger,
   shutdownSignal,
-  heartbeatShutdownTimeoutMs = defaultHeartbeatShutdownTimeoutMs
+  heartbeatShutdownTimeoutMs = defaultHeartbeatShutdownTimeoutMs,
+  now = Date.now
 }: {
   client: ExecutorLeaseClient;
   handler: ExecutionHandler;
@@ -118,11 +119,17 @@ export const processExecutionJob = async ({
   logger: ExecutorLogger;
   shutdownSignal?: AbortSignal;
   heartbeatShutdownTimeoutMs?: number;
+  now?: () => number;
 }) => {
   let running: ExecutionJob;
+  const startRequestedAtMs = now();
+  const initialLeaseDeadlineMs = startRequestedAtMs + lease.leaseDurationMs;
 
   try {
     running = await client.start(executionJob.id, lease);
+    if (now() >= initialLeaseDeadlineMs) {
+      throw createLeaseRenewalExpiredFailure();
+    }
   } catch (error) {
     logger.error({
       event: 'execution_start_failed',
@@ -173,6 +180,7 @@ export const processExecutionJob = async ({
     executionJob: running,
     lease,
     heartbeatIntervalMs,
+    initialLeaseDeadlineMs,
     stopSignal: heartbeatController.signal,
     onLeaseLost: (error) => {
       logger.error({
@@ -182,7 +190,17 @@ export const processExecutionJob = async ({
         ...describeSafeError(error)
       });
       workController.abort(createLeaseLostFailure());
-    }
+    },
+    onRenewRetry: (error, retryInMs) => {
+      logger.error({
+        event: 'execution_lease_renew_retry',
+        executionJobId: running.id,
+        kind: running.kind,
+        retryInMs,
+        ...describeSafeError(error)
+      });
+    },
+    now
   });
 
   try {
@@ -270,30 +288,80 @@ const renewLeaseUntilStopped = async ({
   executionJob,
   lease,
   heartbeatIntervalMs,
+  initialLeaseDeadlineMs,
   stopSignal,
-  onLeaseLost
+  onLeaseLost,
+  onRenewRetry,
+  now
 }: {
   client: ExecutorLeaseClient;
   executionJob: ExecutionJob;
   lease: { leaseOwner: string; leaseDurationMs: number };
   heartbeatIntervalMs: number;
+  initialLeaseDeadlineMs: number;
   stopSignal: AbortSignal;
   onLeaseLost: (error: unknown) => void;
+  onRenewRetry: (error: unknown, retryInMs: number) => void;
+  now: () => number;
 }) => {
+  let leaseDeadlineMs = initialLeaseDeadlineMs;
+  let nextRenewalDelayMs = heartbeatIntervalMs;
+
   while (!stopSignal.aborted) {
-    const shouldContinue = await waitForNextPoll(heartbeatIntervalMs, stopSignal);
+    const shouldContinue = await waitForNextPoll(nextRenewalDelayMs, stopSignal);
 
     if (!shouldContinue) {
       return;
     }
 
-    try {
-      await client.renew(executionJob.id, lease);
-    } catch (error) {
-      onLeaseLost(error);
+    const renewalStartedAtMs = now();
+    if (renewalStartedAtMs >= leaseDeadlineMs) {
+      onLeaseLost(createLeaseRenewalExpiredFailure());
       return;
     }
+
+    try {
+      const renewed = await client.renew(executionJob.id, lease);
+      const renewalCompletedAtMs = now();
+      const nextLeaseDeadlineMs = renewalStartedAtMs + lease.leaseDurationMs;
+      if (
+        renewalCompletedAtMs >= nextLeaseDeadlineMs
+        || renewed.leaseOwner !== lease.leaseOwner
+        || (renewed.status !== 'leased' && renewed.status !== 'running')
+      ) {
+        onLeaseLost(createLeaseRenewalExpiredFailure());
+        return;
+      }
+      leaseDeadlineMs = nextLeaseDeadlineMs;
+      nextRenewalDelayMs = heartbeatIntervalMs;
+    } catch (error) {
+      const failedAtMs = now();
+      if (isDefinitiveLeaseRenewalError(error)) {
+        onLeaseLost(error);
+        return;
+      }
+      if (failedAtMs >= leaseDeadlineMs) {
+        onLeaseLost(createLeaseRenewalExpiredFailure());
+        return;
+      }
+      const remainingMs = leaseDeadlineMs - failedAtMs;
+      nextRenewalDelayMs = Math.min(
+        heartbeatIntervalMs,
+        Math.max(1, Math.floor(remainingMs / 2))
+      );
+      onRenewRetry(error, nextRenewalDelayMs);
+    }
   }
+};
+
+const isDefinitiveLeaseRenewalError = (error: unknown) => {
+  if (!(error instanceof ExecutorApiError)) {
+    return true;
+  }
+  return error.status !== null
+    && error.status !== 408
+    && error.status !== 429
+    && error.status < 500;
 };
 
 const normalizeExecutionFailure = (error: unknown): {
@@ -407,6 +475,13 @@ const createLeaseLostFailure = () => new ExecutionFailure(
   1_000
 );
 
+const createLeaseRenewalExpiredFailure = () => new ExecutionFailure(
+  'lease_renewal_expired',
+  'Execution lease could not be renewed before its deadline',
+  true,
+  1_000
+);
+
 const createShutdownFailure = () => new ExecutionFailure(
   'executor_shutdown',
   'Executor shutdown interrupted active work',
@@ -436,7 +511,7 @@ const calculateClaimBackoff = (
 };
 
 const normalizeRetryDelay = (value: number | undefined) =>
-  value != null && Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000
+  value !== undefined && Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000
     ? value
     : undefined;
 

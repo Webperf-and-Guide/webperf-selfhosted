@@ -18,9 +18,13 @@ const DEFAULT_REGION_CODE: &str = "tokyo";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
-    #[error("PROBE_SHARED_SECRET is required and must contain at least 16 characters")]
+    #[error(
+        "PROBE_SHARED_SECRET is required and must contain at least 16 bytes after trimming surrounding whitespace"
+    )]
     InvalidSharedSecret,
-    #[error("PROBE_SHARED_SECRET_NEXT must contain at least 16 characters when configured")]
+    #[error(
+        "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
+    )]
     InvalidSharedSecretNext,
 }
 
@@ -495,6 +499,18 @@ mod tests {
         assert_eq!(
             parse_shared_secret_next("  next-probe-secret  "),
             Ok(Some("next-probe-secret".to_string()))
+        );
+    }
+
+    #[test]
+    fn config_errors_explain_the_trimmed_byte_requirement() {
+        assert_eq!(
+            ConfigError::InvalidSharedSecret.to_string(),
+            "PROBE_SHARED_SECRET is required and must contain at least 16 bytes after trimming surrounding whitespace"
+        );
+        assert_eq!(
+            ConfigError::InvalidSharedSecretNext.to_string(),
+            "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
         );
     }
 }

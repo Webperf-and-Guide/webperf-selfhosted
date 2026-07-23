@@ -176,8 +176,9 @@ export class ReportsController {
         if (isAbortError(error)) {
           return;
         }
-        this.state.browserAuditStatusMessage =
-          'Browser Audit was queued; refresh Reports to follow its latest status.';
+        this.state.browserAuditStatusMessage = error instanceof BrowserAuditPollingError
+          ? error.message
+          : 'Browser Audit was queued; refresh Reports to follow its latest status.';
       }
     } catch (error) {
       if (isAbortError(error)) {
@@ -201,6 +202,7 @@ export class ReportsController {
     timeoutMs = 180_000
   ): Promise<BrowserAuditResource | null> => {
     const deadline = Date.now() + timeoutMs;
+    let consecutiveNotFound = 0;
 
     while (Date.now() < deadline) {
       await waitForPollingInterval(signal, 1_000);
@@ -213,8 +215,15 @@ export class ReportsController {
         }
       );
       if (response.status === 404) {
+        consecutiveNotFound += 1;
+        if (consecutiveNotFound >= 5) {
+          throw new BrowserAuditPollingError(
+            'Browser Audit could not be found after repeated status checks.'
+          );
+        }
         continue;
       }
+      consecutiveNotFound = 0;
       if (!response.ok) {
         throw new Error(`Browser Audit status request failed with HTTP ${response.status}`);
       }
@@ -239,13 +248,24 @@ export const createReportsController = (accessors: ReportsAccessors) =>
   new ReportsController(accessors);
 
 const createAbortError = () => {
-  const error = new Error('Browser Audit polling was cancelled');
-  error.name = 'AbortError';
-  return error;
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('Browser Audit polling was cancelled', 'AbortError');
+  }
+
+  return Object.assign(new Error('Browser Audit polling was cancelled'), {
+    name: 'AbortError'
+  });
 };
 
 const isAbortError = (error: unknown) =>
-  error instanceof Error && error.name === 'AbortError';
+  typeof error === 'object'
+  && error !== null
+  && 'name' in error
+  && error.name === 'AbortError';
+
+class BrowserAuditPollingError extends Error {
+  override name = 'BrowserAuditPollingError';
+}
 
 const waitForPollingInterval = (signal: AbortSignal, timeoutMs: number) =>
   new Promise<void>((resolve, reject) => {

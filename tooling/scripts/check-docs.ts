@@ -67,24 +67,35 @@ for (const relativePath of (await files).sort()) {
   }
 
   const referenceDefinitions = new Map<string, string>();
+  const validatedReferenceLabels = new Set<string>();
   for (const match of source.matchAll(referenceDefinitionPattern)) {
     const label = normalizeReferenceLabel(match[1]);
     const rawTarget = match[2];
     referenceDefinitions.set(label, rawTarget);
-    validateLocalLinkTarget(rawTarget, relativePath, absolutePath);
   }
 
   for (const match of source.matchAll(referenceLinkPattern)) {
     const label = normalizeReferenceLabel(match[2] || match[1]);
     if (!referenceDefinitions.has(label)) {
       errors.push(`${relativePath}: unresolved reference-style link [${match[2] || match[1]}]`);
+    } else {
+      validateReferenceDefinition(
+        label,
+        referenceDefinitions,
+        validatedReferenceLabels,
+        relativePath,
+        absolutePath
+      );
     }
   }
 
   // A CommonMark shortcut reference is a link only when a matching definition
   // exists; otherwise it is ordinary bracketed text. Resolve the defined forms
   // here while leaving ordinary prose such as `[main]` untouched.
-  for (const match of source.matchAll(shortcutReferencePattern)) {
+  const sourceWithoutCode = source
+    .replace(/(`{3,}|~{3,})[\s\S]*?\1/g, '')
+    .replace(/(`+)[^`\n]*?\1/g, '');
+  for (const match of sourceWithoutCode.matchAll(shortcutReferencePattern)) {
     const matchIndex = match.index ?? 0;
     const previousCharacter = source[matchIndex - 1];
     const nextCharacter = source[matchIndex + match[0].length];
@@ -92,10 +103,26 @@ for (const relativePath of (await files).sort()) {
       continue;
     }
 
-    const target = referenceDefinitions.get(normalizeReferenceLabel(match[1]));
-    if (target) {
-      validateLocalLinkTarget(target, relativePath, absolutePath);
+    const label = normalizeReferenceLabel(match[1]);
+    if (referenceDefinitions.has(label)) {
+      validateReferenceDefinition(
+        label,
+        referenceDefinitions,
+        validatedReferenceLabels,
+        relativePath,
+        absolutePath
+      );
     }
+  }
+
+  for (const label of referenceDefinitions.keys()) {
+    validateReferenceDefinition(
+      label,
+      referenceDefinitions,
+      validatedReferenceLabels,
+      relativePath,
+      absolutePath
+    );
   }
 
   for (const match of source.matchAll(markdownLinkPattern)) {
@@ -196,4 +223,24 @@ function validateLocalLinkTarget(
   if (decodedTarget.endsWith('/') && !statSync(resolvedTarget).isDirectory()) {
     errors.push(`${sourcePath}: link expects a directory ${rawTarget}`);
   }
+}
+
+function validateReferenceDefinition(
+  label: string,
+  definitions: ReadonlyMap<string, string>,
+  validatedLabels: Set<string>,
+  sourcePath: string,
+  sourceAbsolutePath: string
+) {
+  if (validatedLabels.has(label)) {
+    return;
+  }
+
+  const target = definitions.get(label);
+  if (target === undefined) {
+    return;
+  }
+
+  validatedLabels.add(label);
+  validateLocalLinkTarget(target, sourcePath, sourceAbsolutePath);
 }

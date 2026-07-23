@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
+import { dlopen, FFIType, ptr, read } from 'bun:ffi';
 import {
   link,
   lstat,
@@ -284,7 +285,10 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         auditDirectory,
         'Browser Audit artifact directory changed before delete'
       );
-      await rm(path, { force: true });
+      unlinkDirectoryEntry(
+        auditDirectory,
+        path.slice(auditPath.length + 1)
+      );
       await assertPinnedDirectory(
         auditPath,
         auditDirectory,
@@ -482,7 +486,9 @@ const openPrivateDirectory = async (path: string, unsafeMessage: string) => {
       ? process.geteuid()
       : undefined;
     if (effectiveUid !== undefined && directory.uid !== effectiveUid) {
-      throw new Error(unsafeMessage);
+      throw new Error(
+        `${unsafeMessage}: directory owner uid ${directory.uid} does not match process uid ${effectiveUid}`
+      );
     }
 
     await handle.chmod(0o700);
@@ -523,6 +529,92 @@ const assertPinnedDirectory = async (
   } finally {
     await currentHandle?.close().catch(() => undefined);
   }
+};
+
+const unlinkDirectoryEntry = (
+  directoryHandle: Awaited<ReturnType<typeof open>>,
+  entryName: string
+) => {
+  assertStorageSegment(entryName, 'artifact ID');
+
+  if (process.platform === 'darwin') {
+    unlinkDirectoryEntryDarwin(directoryHandle.fd, entryName);
+    return;
+  }
+  if (process.platform === 'linux') {
+    unlinkDirectoryEntryLinux(directoryHandle.fd, entryName);
+    return;
+  }
+
+  throw new Error(
+    `Browser Audit artifact deletion is unsupported on ${process.platform}`
+  );
+};
+
+const unlinkDirectoryEntryDarwin = (directoryFd: number, entryName: string) => {
+  const library = dlopen('/usr/lib/libSystem.B.dylib', {
+    unlinkat: {
+      args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+      returns: FFIType.i32
+    },
+    __error: {
+      args: [],
+      returns: FFIType.ptr
+    }
+  });
+
+  try {
+    const name = Buffer.from(`${entryName}\0`);
+    const result = library.symbols.unlinkat(directoryFd, ptr(name), 0);
+    if (result !== 0) {
+      const errnoPointer = library.symbols.__error();
+      if (errnoPointer === null) {
+        throw new Error('Browser Audit artifact deletion could not read errno');
+      }
+      handleUnlinkError(read.i32(errnoPointer, 0));
+    }
+  } finally {
+    library.close();
+  }
+};
+
+const unlinkDirectoryEntryLinux = (directoryFd: number, entryName: string) => {
+  const library = dlopen('libc.so.6', {
+    unlinkat: {
+      args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+      returns: FFIType.i32
+    },
+    __errno_location: {
+      args: [],
+      returns: FFIType.ptr
+    }
+  });
+
+  try {
+    const name = Buffer.from(`${entryName}\0`);
+    const result = library.symbols.unlinkat(directoryFd, ptr(name), 0);
+    if (result !== 0) {
+      const errnoPointer = library.symbols.__errno_location();
+      if (errnoPointer === null) {
+        throw new Error('Browser Audit artifact deletion could not read errno');
+      }
+      handleUnlinkError(read.i32(errnoPointer, 0));
+    }
+  } finally {
+    library.close();
+  }
+};
+
+const handleUnlinkError = (errno: number) => {
+  if (errno === 2) {
+    return;
+  }
+
+  const error = new Error(
+    `Browser Audit artifact deletion failed with errno ${errno}`
+  ) as NodeJS.ErrnoException;
+  error.errno = errno;
+  throw error;
 };
 
 const readableFileHandle = (

@@ -43,8 +43,10 @@ index. `bun run selfhost:maintenance` performs the same reconciliation; use
 The reconciliation root may not be a filesystem root. It does not follow
 symlinks. The API requires the root and managed audit directories to be owned
 by its effective user and makes them owner-only (`0700`). It pins a validated
-audit-directory descriptor across download and delete operations and rejects a
-path whose directory identity changes during the operation. Compose mounts the
+audit-directory descriptor across download and delete operations, deletes with
+POSIX `unlinkat` relative to that descriptor, and rejects a path whose directory
+identity changes during the operation. This local backend supports Linux and
+macOS, including the canonical Linux container images. Compose mounts the
 `webperf-data` volume only into the API service; executors and Browser Audit
 runtimes do not receive filesystem access to it. At the root, reconciliation
 owns only names that match the generated artifact-ID namespace, so filesystem

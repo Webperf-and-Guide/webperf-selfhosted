@@ -296,6 +296,24 @@ describe('local Browser Audit artifact storage', () => {
       .toBe('outside secret');
   });
 
+  test('deletes artifacts relative to the validated audit directory', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const body = new TextEncoder().encode('delete by descriptor');
+    const stored = await store.write({
+      auditId: 'audit_delete_descriptor',
+      artifactId: 'artifact_delete_descriptor',
+      body: new Response(body).body,
+      expectedBytes: body.byteLength,
+      maxBytes: 1_024
+    });
+
+    await store.delete(stored.storageKey);
+    await store.delete(stored.storageKey);
+    await expect(store.openDownload(stored.storageKey, body.byteLength))
+      .rejects.toThrow('missing or inconsistent');
+  });
+
   test('normalizes a missing audit directory as an unavailable artifact', async () => {
     const root = join(createTempDirectory(), 'artifacts');
     const store = new LocalBrowserAuditArtifactStore(root);

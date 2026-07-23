@@ -64,7 +64,7 @@ describe('Reports Browser Audit response handling', () => {
         await new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener(
             'abort',
-            () => reject(init.signal?.reason),
+            () => reject(new DOMException('The operation was aborted', 'AbortError')),
             { once: true }
           );
         }),

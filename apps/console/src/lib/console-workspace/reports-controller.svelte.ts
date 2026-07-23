@@ -114,20 +114,24 @@ export const fetchBrowserAuditStatus = async ({
   timeoutMs: number;
   fetchImpl?: typeof fetch;
 }) => {
+  const requestSignal = AbortSignal.any([
+    signal,
+    AbortSignal.timeout(timeoutMs)
+  ]);
   try {
     return await fetchImpl(
       `/api/control/browser-audits/${encodeURIComponent(auditId)}`,
       {
         cache: 'no-store',
         headers: { accept: 'application/json' },
-        signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        signal: requestSignal
       }
     );
   } catch (error) {
     if (signal.aborted) {
       throw isAbortError(signal.reason) ? signal.reason : createAbortError();
     }
-    if (isTimeoutError(error)) {
+    if (requestSignal.aborted && isTimeoutError(requestSignal.reason)) {
       throw new BrowserAuditPollingError('Browser Audit status request timed out.');
     }
     throw error;

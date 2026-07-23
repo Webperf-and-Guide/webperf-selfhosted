@@ -46,8 +46,9 @@ export const redactBrowserAuditBytesInPlace = (
   // This Buffer must remain an alias of payload so a large trace can be
   // redacted without allocating another full-size artifact.
   const bytes = Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
+  const sensitiveValues = getSensitiveValueGroups(input);
 
-  for (const sensitiveValue of getBroadSensitiveValues(input)) {
+  for (const sensitiveValue of sensitiveValues.broad) {
     const sensitiveBytes = Buffer.from(sensitiveValue, 'utf8');
     let offset = 0;
 
@@ -63,7 +64,7 @@ export const redactBrowserAuditBytesInPlace = (
     }
   }
 
-  redactQuotedShortValuesInPlace(bytes, getShortSensitiveValues(input));
+  redactQuotedShortValuesInPlace(bytes, sensitiveValues.short);
   redactShortContextsInPlace(bytes, getShortSensitivePairs(input));
 
   redactUrlSectionsInPlace(bytes);
@@ -72,12 +73,13 @@ export const redactBrowserAuditBytesInPlace = (
 
 const redactKnownValues = (value: string, input: BrowserAuditWorkerRequest) => {
   let redacted = value;
+  const sensitiveValues = getSensitiveValueGroups(input);
 
-  for (const sensitiveValue of getBroadSensitiveValues(input)) {
+  for (const sensitiveValue of sensitiveValues.broad) {
     redacted = redacted.replaceAll(sensitiveValue, redactedValue);
   }
 
-  redacted = redactQuotedShortValues(redacted, getShortSensitiveValues(input));
+  redacted = redactQuotedShortValues(redacted, sensitiveValues.short);
   return redactShortContexts(redacted, getShortSensitivePairs(input));
 };
 
@@ -87,15 +89,16 @@ const getSensitiveValues = (input: BrowserAuditWorkerRequest) => [...new Set([
   input.artifactUpload?.bearerToken
 ].filter((candidate): candidate is string => Boolean(candidate)))];
 
-const getBroadSensitiveValues = (input: BrowserAuditWorkerRequest) =>
-  getSensitiveValues(input)
-    .filter((candidate) => candidate.length >= broadRedactionMinimumLength)
-    .sort((left, right) => right.length - left.length);
+const getSensitiveValueGroups = (input: BrowserAuditWorkerRequest) => {
+  const broad: string[] = [];
+  const short: string[] = [];
 
-const getShortSensitiveValues = (input: BrowserAuditWorkerRequest) =>
-  getSensitiveValues(input).filter(
-    (candidate) => candidate.length < broadRedactionMinimumLength
-  );
+  for (const candidate of getSensitiveValues(input)) {
+    (candidate.length >= broadRedactionMinimumLength ? broad : short).push(candidate);
+  }
+  broad.sort((left, right) => right.length - left.length);
+  return { broad, short };
+};
 
 type SensitivePair = { name: string; value: string };
 
@@ -183,8 +186,8 @@ const redactShortContexts = (value: string, pairs: SensitivePair[]) => {
 
   for (const pair of pairs) {
     const pattern = new RegExp(
-      `(^|[^A-Za-z0-9_.-])(${escapeRegExp(pair.name)}\\s*[:=]\\s*)${escapeRegExp(pair.value)}(?![A-Za-z0-9_.-])`,
-      'gim'
+      `(^|[^A-Za-z0-9_.-])(${escapeCaseInsensitiveAscii(pair.name)}\\s*[:=]\\s*)${escapeRegExp(pair.value)}(?![A-Za-z0-9_.-])`,
+      'gm'
     );
     redacted = redacted.replace(pattern, `$1$2${redactedValue}`);
   }
@@ -194,10 +197,19 @@ const redactShortContexts = (value: string, pairs: SensitivePair[]) => {
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const escapeCaseInsensitiveAscii = (value: string) => [...value]
+  .map((character) => /[A-Za-z]/.test(character)
+    ? `[${character.toLowerCase()}${character.toUpperCase()}]`
+    : escapeRegExp(character))
+  .join('');
+
 const redactQuotedShortValuesInPlace = (
   bytes: Buffer,
   sensitiveValues: string[]
 ) => {
+  if (sensitiveValues.length === 0) {
+    return;
+  }
   const sensitiveBuffers = sensitiveValues.map((value) => Buffer.from(value, 'utf8'));
 
   for (let index = 0; index < bytes.length; index += 1) {
@@ -243,6 +255,9 @@ const findClosingQuoteInBytes = (bytes: Buffer, openingQuote: number, quote: num
 };
 
 const redactShortContextsInPlace = (bytes: Buffer, pairs: SensitivePair[]) => {
+  if (pairs.length === 0) {
+    return;
+  }
   const patterns = pairs.map(({ name, value }) => ({
     name: Buffer.from(name, 'utf8'),
     value: Buffer.from(value, 'utf8')

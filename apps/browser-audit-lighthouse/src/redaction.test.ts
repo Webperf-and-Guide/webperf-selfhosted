@@ -83,27 +83,36 @@ describe('browser audit redaction', () => {
 
   test('redacts short values only in string and named credential contexts', () => {
     const input = {
-      customHeaders: [{ name: 'Authorization', value: '1' }],
+      customHeaders: [
+        { name: 'Authorization', value: '1' },
+        { name: 'X-Code', value: 'abc' }
+      ],
       cookies: [{ name: 'session', value: 'ok' }],
       artifactUpload: null
     } as BrowserAuditWorkerRequest;
-    const source = '{"score":1,"header":"1","cookie":"ok","word":"101"}\nAuthorization:\t1 session =  ok';
+    const source = '{"score":1,"header":"1","cookie":"ok","word":"101","lower":"abc","upper":"ABC"}\nAuthorization:\t1 session =  ok X-CODE: abc x-code: ABC';
     const redacted = redactBrowserAuditText(source, input);
 
     expect(redacted).toContain('"score":1');
     expect(redacted).toContain('"word":"101"');
+    expect(redacted).toContain('"upper":"ABC"');
     expect(redacted).not.toContain('"header":"1"');
     expect(redacted).not.toContain('"cookie":"ok"');
     expect(redacted).not.toContain('Authorization:\t1');
     expect(redacted).not.toContain('session =  ok');
+    expect(redacted).not.toContain('X-CODE: abc');
+    expect(redacted).toContain('x-code: ABC');
 
     const bytes = new TextEncoder().encode(source);
     const byteText = new TextDecoder().decode(redactBrowserAuditBytesInPlace(bytes, input));
     expect(byteText).toContain('"score":1');
     expect(byteText).toContain('"word":"101"');
+    expect(byteText).toContain('"upper":"ABC"');
     expect(byteText).toContain('"header":"*"');
     expect(byteText).toContain('"cookie":"**"');
     expect(byteText).not.toContain('Authorization:\t1');
     expect(byteText).not.toContain('session =  ok');
+    expect(byteText).not.toContain('X-CODE: abc');
+    expect(byteText).toContain('x-code: ABC');
   });
 });

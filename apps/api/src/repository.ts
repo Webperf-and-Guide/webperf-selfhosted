@@ -24,6 +24,7 @@ import {
   checkProfileSchema,
   checkProfileRunSchema,
   comparisonResourceSchema,
+  defaultExecutionRetryDelayMs,
   enqueueExecutionJobSchema,
   executionJobErrorSchema,
   executionJobSchema,
@@ -1161,7 +1162,7 @@ export const createSqliteJobRepository = ({
     failExecutionJob(input, now = new Date()) {
       assertLeaseOwner(input.leaseOwner);
       const error = executionJobErrorSchema.parse(input.error);
-      const retryDelayMs = input.retryDelayMs ?? 1_000;
+      const retryDelayMs = input.retryDelayMs ?? defaultExecutionRetryDelayMs;
 
       if (!Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 86_400_000) {
         throw new Error('Execution retry delay must be an integer between 0 and 86400000ms');

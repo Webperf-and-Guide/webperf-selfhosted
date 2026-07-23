@@ -26,6 +26,9 @@ const browserAuditIdentifierSchema = z
   .regex(/^[a-z0-9][a-z0-9._-]*$/);
 const browserAuditScoreKeyIdentifierPattern = /^[a-z][a-zA-Z0-9]*$/;
 const browserAuditLegacyUrlSchema = z.string().url();
+const browserAuditArtifactStorageSegmentSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/);
 
 export const browserAuditPresetSchema = z.enum(['mobile', 'desktop']);
 export type BrowserAuditPreset = z.infer<typeof browserAuditPresetSchema>;
@@ -437,8 +440,8 @@ export const browserAuditArtifactRefSchema = z.object({
 export type BrowserAuditArtifactRef = z.infer<typeof browserAuditArtifactRefSchema>;
 
 export const browserAuditArtifactLocatorSchema = z.object({
-  auditId: z.string().min(1).max(160),
-  artifactId: z.string().min(1).max(160)
+  auditId: browserAuditArtifactStorageSegmentSchema,
+  artifactId: browserAuditArtifactStorageSegmentSchema
 });
 export type BrowserAuditArtifactLocator = z.infer<typeof browserAuditArtifactLocatorSchema>;
 
@@ -626,22 +629,29 @@ function normalizeLegacyBrowserAuditToolchain(value: unknown) {
     return value;
   }
 
-  if (
-    typeof toolchain.bunVersion !== 'string'
-    || typeof toolchain.chromeVersion !== 'string'
-    || typeof toolchain.puppeteerVersion !== 'string'
-    || typeof toolchain.lighthouseVersion !== 'string'
-  ) {
+  const legacyFields = [
+    'flowDslVersion',
+    'bunVersion',
+    'chromeVersion',
+    'puppeteerVersion',
+    'lighthouseVersion'
+  ];
+  if (!legacyFields.some((field) => field in toolchain)) {
     return value;
   }
 
   return {
-    engine: { id: 'lighthouse', version: toolchain.lighthouseVersion },
-    browser: { name: 'Chrome', version: toolchain.chromeVersion },
-    runtime: { name: 'Bun', version: toolchain.bunVersion },
-    components: [{ name: 'puppeteer-core', version: toolchain.puppeteerVersion }]
+    engine: { id: 'lighthouse', version: legacyVersion(toolchain.lighthouseVersion) },
+    browser: { name: 'Chrome', version: legacyVersion(toolchain.chromeVersion) },
+    runtime: { name: 'Bun', version: legacyVersion(toolchain.bunVersion) },
+    components: [{ name: 'puppeteer-core', version: legacyVersion(toolchain.puppeteerVersion) }]
   };
 }
+
+const legacyVersion = (value: unknown) =>
+  typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : 'unknown';
 
 function normalizeLegacyBrowserAuditCheckpoint(value: unknown) {
   const checkpoint = asRecord(value);

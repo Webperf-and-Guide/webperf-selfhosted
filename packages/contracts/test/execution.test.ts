@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { JsonValue } from '../src/execution';
 import {
+  defaultExecutionRetryDelayMs,
   enqueueExecutionJobSchema,
+  executionJobFailRequestSchema,
   executionJobSchema,
   executionPayloadMaxBytes,
   executionPayloadMaxDepth
@@ -129,6 +131,33 @@ describe('execution job contracts', () => {
         payload: 'x'.repeat(executionPayloadMaxBytes - 1)
       }).success
     ).toBe(false);
+  });
+
+  test('rejects prototype-related keys at every payload depth', () => {
+    for (const payload of [
+      JSON.parse('{"__proto__":{"polluted":true}}'),
+      JSON.parse('{"nested":{"constructor":{"polluted":true}}}'),
+      JSON.parse('{"items":[{"prototype":"blocked"}]}')
+    ]) {
+      expect(enqueueExecutionJobSchema.safeParse({
+        id: 'exec_reserved_key',
+        kind: 'network_probe',
+        resourceId: 'job_reserved_key',
+        payload
+      }).success).toBe(false);
+    }
+  });
+
+  test('documents but does not inject the repository retry-delay default', () => {
+    const parsed = executionJobFailRequestSchema.parse({
+      leaseOwner: 'executor-contract',
+      error: { code: 'temporary', message: 'Temporary failure', retryable: true }
+    });
+
+    expect(parsed.retryDelayMs).toBeUndefined();
+    expect(defaultExecutionRetryDelayMs).toBe(1_000);
+    expect(executionJobFailRequestSchema.shape.retryDelayMs.description)
+      .toContain('defaults to 1000ms');
   });
 
   test('enforces retry and lease state invariants', () => {

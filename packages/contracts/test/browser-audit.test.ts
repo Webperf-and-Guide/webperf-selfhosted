@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   browserAuditArtifactKindSchema,
   browserAuditArtifactContentTypesForKind,
+  browserAuditArtifactLocatorSchema,
   browserAuditScoreKeyLimit,
   browserAuditPolicySchema,
   browserAuditResultSchema,
@@ -186,5 +187,40 @@ describe('engine-neutral Browser Audit Protocol', () => {
       finalUrl: null,
       statusCode: null
     });
+  });
+
+  test('normalizes partial legacy Lighthouse toolchain versions', () => {
+    const normalized = browserAuditResultSchema.parse({
+      coreMetrics: { lcpMs: null, cls: null },
+      scores: { performance: null },
+      extendedMetrics: [],
+      checkpoints: [],
+      issues: [],
+      artifacts: [],
+      toolchain: {
+        flowDslVersion: 'v1',
+        lighthouseVersion: '12.6.0'
+      },
+      startedAt: '2026-07-22T00:00:01.000Z',
+      completedAt: '2026-07-22T00:00:03.000Z'
+    });
+
+    expect(normalized.toolchain).toEqual({
+      engine: { id: 'lighthouse', version: '12.6.0' },
+      browser: { name: 'Chrome', version: 'unknown' },
+      runtime: { name: 'Bun', version: 'unknown' },
+      components: [{ name: 'puppeteer-core', version: 'unknown' }]
+    });
+  });
+
+  test('aligns artifact locator identifiers with storage segments', () => {
+    expect(browserAuditArtifactLocatorSchema.safeParse({
+      auditId: 'audit_safe-1',
+      artifactId: 'artifact_safe-1'
+    }).success).toBe(true);
+    expect(browserAuditArtifactLocatorSchema.safeParse({
+      auditId: '../audit',
+      artifactId: 'artifact/escape'
+    }).success).toBe(false);
   });
 });

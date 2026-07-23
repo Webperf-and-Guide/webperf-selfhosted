@@ -27,7 +27,9 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 
 export const executionPayloadMaxDepth = 32;
 export const executionPayloadMaxBytes = 256 * 1_024;
+export const defaultExecutionRetryDelayMs = 1_000;
 const utf8Encoder = new TextEncoder();
+const reservedJsonObjectKeys = new Set(['__proto__', 'constructor', 'prototype']);
 
 const jsonLiteralSchema = z.union([z.null(), z.boolean(), z.number(), z.string()]);
 
@@ -37,16 +39,36 @@ const createJsonValueSchema = (depth: number): z.ZodType<JsonValue> => {
   }
 
   const childSchema = createJsonValueSchema(depth + 1);
+  const objectSchema = z
+    .custom<Record<string, unknown>>(isSafeJsonRecord, {
+      message: 'JSON objects must not contain reserved keys or custom prototypes'
+    })
+    .pipe(z.record(z.string(), childSchema));
   return z.union([
     jsonLiteralSchema,
     z.array(childSchema),
-    z.record(z.string(), childSchema)
+    objectSchema
   ]);
+};
+
+const isSafeJsonRecord = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return (
+    (prototype === Object.prototype || prototype === null)
+    && !Object.keys(value).some((key) => reservedJsonObjectKeys.has(key))
+  );
 };
 
 const rawJsonValueSchema = createJsonValueSchema(0);
 
 export const jsonValueSchema = rawJsonValueSchema.superRefine((value, context) => {
+  // This public contract accepts an in-memory JSON value rather than raw body
+  // bytes. Serializing once is therefore the authoritative way to enforce the
+  // exact UTF-8 wire-size limit, including escaping and surrogate handling.
   const serialized = JSON.stringify(value);
   const byteSize = utf8Encoder.encode(serialized).byteLength;
 
@@ -141,6 +163,14 @@ export type ExecutionJobOwnerRequest = z.infer<typeof executionJobOwnerRequestSc
 
 export const executionJobFailRequestSchema = executionJobOwnerRequestSchema.extend({
   error: executionJobErrorSchema,
-  retryDelayMs: z.number().int().min(0).max(86_400_000).optional()
+  retryDelayMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(86_400_000)
+    .optional()
+    .describe(
+      `Delay before a retry becomes claimable; defaults to ${defaultExecutionRetryDelayMs}ms when omitted.`
+    )
 });
 export type ExecutionJobFailRequest = z.infer<typeof executionJobFailRequestSchema>;

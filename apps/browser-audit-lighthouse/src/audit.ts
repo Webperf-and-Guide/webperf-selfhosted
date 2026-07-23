@@ -12,12 +12,12 @@ import {
 } from '@webperf/contracts';
 import { createHash } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
-import type { Browser, KeyInput, Page, WaitForSelectorOptions } from 'puppeteer-core';
-import { _keyDefinitions } from 'puppeteer-core/internal/common/USKeyboardLayout.js';
+import type { Browser, Page, WaitForSelectorOptions } from 'puppeteer-core';
 import { RE2JS } from 're2js';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
 import { startBrowserNetworkProxy } from './network-proxy';
+import { isPuppeteerKeyInput } from './puppeteer-key-input';
 import {
   redactBrowserAuditBytesInPlace,
   redactBrowserAuditText,
@@ -599,9 +599,6 @@ export const runWithinAuditDeadline = async <Result>(
   }
 };
 
-export const isPuppeteerKeyInput = (value: string): value is KeyInput =>
-  Object.hasOwn(_keyDefinitions, value);
-
 export const launchBrowser = async (
   config: BrowserAuditWorkerConfig,
   networkProxyUrl?: string
@@ -839,7 +836,7 @@ export const uploadArtifact = async (
   }
 
   const uploadBody: Uint8Array<ArrayBuffer> = payload.buffer instanceof ArrayBuffer
-    ? payload as Uint8Array<ArrayBuffer>
+    ? new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
     : Uint8Array.from(payload);
 
   const response = await (options.fetchImpl ?? fetch)(

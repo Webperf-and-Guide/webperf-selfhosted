@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
 import { createHash } from 'node:crypto';
+import { _keyDefinitions } from 'puppeteer-core/internal/common/USKeyboardLayout.js';
 import type { BrowserAuditWorkerConfig } from './config';
 import {
   buildChromeLaunchArgs,
   createWaitForUrlMatcher,
-  isPuppeteerKeyInput,
   lighthouseArtifactContentTypes,
   launchBrowser,
   runWithinAuditDeadline,
@@ -13,6 +13,10 @@ import {
   waitForDetachedSelector,
   uploadArtifact
 } from './audit';
+import {
+  isPuppeteerKeyInput,
+  supportedPuppeteerKeyInputs
+} from './puppeteer-key-input';
 
 describe('Lighthouse Chrome launch policy', () => {
   test('forces browser traffic through the pinned proxy', () => {
@@ -83,6 +87,7 @@ describe('Lighthouse Chrome launch policy', () => {
   });
 
   test('validates press keys against the pinned Puppeteer keyboard layout', () => {
+    expect(Object.keys(_keyDefinitions)).toEqual([...supportedPuppeteerKeyInputs]);
     expect(isPuppeteerKeyInput('Enter')).toBe(true);
     expect(isPuppeteerKeyInput('a')).toBe(true);
     expect(isPuppeteerKeyInput('not-a-puppeteer-key')).toBe(false);
@@ -172,7 +177,11 @@ describe('Lighthouse Chrome launch policy', () => {
         }
       }
     )).resolves.toHaveLength(1);
-    expect(submittedBody).toBe(payload);
+    const submittedBytes = submittedBody as Uint8Array;
+    expect(submittedBytes).not.toBe(payload);
+    expect(submittedBytes.buffer).toBe(payload.buffer);
+    expect(submittedBytes.byteOffset).toBe(payload.byteOffset);
+    expect(submittedBytes.byteLength).toBe(payload.byteLength);
   });
 
   test('refuses artifact uploads after the shared audit deadline', async () => {

@@ -71,6 +71,10 @@ impl Config {
     }
 }
 
+/// Parses the optional rotation key while preserving the Compose empty-string
+/// convention. Compose commonly injects `PROBE_SHARED_SECRET_NEXT=""` for an
+/// unset optional variable, but any non-empty raw value that trims below the
+/// minimum is treated as an operator misconfiguration rather than as unset.
 fn parse_shared_secret_next(value: &str) -> Result<Option<String>, ConfigError> {
     if value.is_empty() {
         return Ok(None);

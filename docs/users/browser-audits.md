@@ -23,12 +23,12 @@ docker compose --env-file .env --profile browser-audit -f compose.yml ps
 ```
 
 The runner remains on its dedicated internal network with no host port. The
-production profile uses the image's setuid Chrome sandbox, a non-root runtime,
-1 GiB of `/dev/shm`, writable temporary mounts, no default `SYS_ADMIN`, and one
-in-flight audit per worker. The image installs the browser-matched sandbox
-helper as root-owned mode `4755` under `/usr/local/sbin` and selects it through
-`CHROME_DEVEL_SANDBOX`; do not replace that variable with `--no-sandbox` in a
-production deployment. The amd64 image pins its exact Chrome for Testing
+production profile uses Chromium's user-namespace sandbox, a non-root runtime,
+`no-new-privileges`, non-executable temporary mounts, 1 GiB of `/dev/shm`, no
+default `SYS_ADMIN`, and one in-flight audit per worker. Packaged setuid helpers
+are kept non-setuid and the runner explicitly disables the setuid sandbox path;
+do not replace that policy with `--no-sandbox` in a production deployment. The
+amd64 image pins its exact Chrome for Testing
 revision in the Dockerfile, keeps it aligned with the locked `puppeteer-core`
 package, and never follows the mutable `stable` channel.
 
@@ -70,8 +70,8 @@ an explicit SSRF-policy exception, remain DNS-pinned, and should be used only
 on an isolated runner network.
 
 Do not set `BROWSER_AUDIT_ALLOW_NO_SANDBOX=true` merely to make a host boot.
-First enable user namespaces or preserve the image's root-owned mode-4755
-`chrome-sandbox`. A no-sandbox runner is a degraded security mode and should
+First enable unprivileged user namespaces for the container host. A no-sandbox
+runner is a degraded security mode and should
 not share a host with sensitive workloads.
 
 ## Artifacts and failures

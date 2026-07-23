@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-07-22
+Last updated: 2026-07-24
 
 ## Mission
 
@@ -186,11 +186,11 @@ Current repo state as of 2026-07-22:
 - Browser Audit Protocol v1 now normalizes core metrics, scores, open extended metrics, checkpoints, issues, artifacts, timestamps, and engine/browser/runtime/component toolchains; artifact registry v1 keeps standard kinds while accepting safe extensions, legacy Lighthouse-shaped SQLite records normalize on read, and checked-in Lighthouse plus sitespeed.io fixtures prove the public contract is engine-neutral
 - production Compose now consumes one versioned GHCR tag for console, API, scheduler, executor, probe, and the optional Lighthouse runner, while `compose.dev.yml` restores source builds for contributor smoke tests
 - default Compose publishes only the console on `127.0.0.1`; loopback API/runner access is opt-in through the `debug` profile, and all runtime services now have non-root/read-only policies, health checks, bounded resources, log rotation, and explicit stop behavior
-- the optional Lighthouse container now prepares Chrome's setuid sandbox, stays host-port free with 1 GiB shared memory and one in-flight audit, and no longer receives default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
+- the optional Lighthouse container now uses Chrome's user-namespace sandbox with no-new-privileges, non-setuid helpers, non-executable temp mounts, no host port, 1 GiB shared memory, one in-flight audit, and no default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing
 - one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 100 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, and both default and Browser Audit Compose smokes
 - Compose smoke port-isolation assertions now inspect actual container port bindings instead of relying on version-dependent `docker compose port` output for exposed-but-unpublished ports
 - the Lighthouse runner toolchain now reports the Compose-selected WebPerf runtime version instead of reading a missing version from its private package manifest, and release bundles resolve that runtime version alongside image digests
-- the Lighthouse image now installs its browser-matched setuid sandbox helper at a stable root-owned `4755` path selected by `CHROME_DEVEL_SANDBOX`, preserving the no-`SYS_ADMIN` production profile on Ubuntu hosts that restrict unprivileged user namespaces
+- the Lighthouse image keeps packaged sandbox helpers root-owned but non-setuid, explicitly selects the user-namespace sandbox, and relies on its AppArmor-recognized Chrome path plus the checked-in seccomp policy instead of a privileged helper
 - amd64 Lighthouse image builds now install the exact Chrome for Testing revision declared by the locked `puppeteer-core` package rather than following the mutable `stable` channel
 - the amd64 Lighthouse image places that pinned browser at Ubuntu's AppArmor-recognized `/opt/google/chrome/chrome` path, while production Compose applies a Moby `seccomp/v0.2.1`-based default-deny profile with only Chromium's `clone`, `setns`, and `unshare` namespace operations added; the worker remains non-root and receives neither `SYS_ADMIN` nor `--no-sandbox`
 - all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links

@@ -105,8 +105,9 @@ Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` when
 enabling the profile. The worker remains on its dedicated Compose network and
 does not publish a host port. On amd64, the image installs the explicitly pinned
 Chrome for Testing revision at `/opt/google/chrome/chrome`, matching Ubuntu's
-Chrome AppArmor profile path, and preserves a root-owned setuid helper as a
-fallback. Compose applies a default-deny seccomp profile derived from Moby
+Chrome AppArmor profile path. Packaged sandbox helpers remain non-setuid and
+the runner explicitly selects Chromium's user-namespace sandbox. Compose
+applies `no-new-privileges` and a default-deny seccomp profile derived from Moby
 `seccomp/v0.2.1` with only `clone`, `setns`, and `unshare` added for Chromium's
 user-namespace sandbox; the production profile does not add `SYS_ADMIN`.
 
@@ -188,12 +189,11 @@ Recommended Docker runtime settings for local validation:
 - keep `infra/docker-compose/browser-audit-seccomp.json` attached to the
   service; it preserves Moby's default syscall policy while allowing the three
   namespace operations required by Chromium
-- run as the image's non-root `bun` user with a writable `/tmp`, writable home
-  tmpfs, and at least 1 GiB of `/dev/shm`
-- preserve the image's root-owned mode-4755 `chrome-sandbox` binary; do not set
-  `no-new-privileges` on this one service because that disables the setuid
-  sandbox transition
+- run as the image's non-root `bun` user with non-executable writable `/tmp`
+  and home tmpfs mounts, plus at least 1 GiB of `/dev/shm`
+- preserve `no-new-privileges` and ensure the host permits unprivileged user
+  namespaces for the container runtime
 - do not grant `SYS_ADMIN`; if a host policy blocks the bundled sandbox, fix
-  user-namespace/setuid support instead
+  user-namespace support instead
 - only as a documented last resort, opt into
   `BROWSER_AUDIT_ALLOW_NO_SANDBOX=true` and treat that host as degraded

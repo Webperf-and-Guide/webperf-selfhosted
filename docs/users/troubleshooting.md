@@ -60,7 +60,7 @@ too short, or still a placeholder. Never solve it by adding a fallback value.
 - Confirm `SELFHOST_BROWSER_AUDIT_BASE_URL` is set and the
   `browser-audit` profile is healthy.
 - Verify executor and runner share `BROWSER_AUDIT_SHARED_SECRET`.
-- Keep 1 GiB of shared memory and the setuid sandbox available.
+- Keep 1 GiB of shared memory and unprivileged user namespaces available.
 - A private target, redirect, subresource, download, popup, or unapproved port
   is blocked by design.
 - Review the persisted normalized failure and checkpoints in **Reports** before

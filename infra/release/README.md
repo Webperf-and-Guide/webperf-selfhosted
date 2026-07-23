@@ -10,6 +10,7 @@ Each release contains:
 - OCI-native SBOM and max-mode provenance attestations;
 - GitHub provenance and SPDX SBOM attestations bound to each image digest;
 - a tarball whose `compose.yml` pins all six image repositories by digest;
+- the `browser-audit-seccomp.json` referenced by that Compose file;
 - `runtime-metadata.json` following `runtime-metadata.schema.json`;
 - one SPDX JSON SBOM per image and SHA-256 checksums.
 

@@ -19,6 +19,7 @@ type ComposeService = {
   logging?: { options?: { 'max-file'?: string; 'max-size'?: string } };
   ports?: ComposePort[];
   profiles?: string[];
+  privileged?: boolean;
   cap_add?: string[];
   cap_drop?: string[];
   security_opt?: string[];
@@ -78,6 +79,9 @@ for (const [name, expectedImage] of Object.entries(expectedImages)) {
 }
 
 for (const [name, service] of Object.entries(productionWithProfiles.services)) {
+  const privilegeOptions = service.security_opt?.filter(
+    (entry) => entry.startsWith('no-new-privileges:')
+  ) ?? [];
   assert(
     nonRootNumericUserPattern.test(service.user ?? ''),
     `${name} must run as an explicit non-root numeric user`
@@ -85,6 +89,12 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
   assert(
     service.cap_drop?.includes('ALL'),
     `${name} must drop all Linux capabilities`
+  );
+  assert((service.cap_add?.length ?? 0) === 0, `${name} must not add Linux capabilities`);
+  assert(service.privileged !== true, `${name} must not run privileged`);
+  assert(
+    privilegeOptions.length === 1 && privilegeOptions[0] === 'no-new-privileges:true',
+    `${name} must prevent privilege escalation`
   );
   assert(service.read_only === true, `${name} must use a read-only root filesystem`);
   assert(service.restart === 'unless-stopped', `${name} must restart unless stopped`);
@@ -97,10 +107,7 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
 }
 
 for (const name of ['api', 'console', 'executor', 'scheduler', 'api-debug', 'browser-audit-debug']) {
-  assert(
-    productionWithProfiles.services[name]?.tmpfs?.some((entry) => entry.startsWith('/tmp:')),
-    `${name} must use a tmpfs for /tmp`
-  );
+  assertSecureTmpfs(productionWithProfiles.services[name], '/tmp', name);
 }
 
 for (const [name, heartbeatPath] of Object.entries({
@@ -148,6 +155,8 @@ assert(
   ),
   'Browser Audit runner must use the checked-in Chromium seccomp profile'
 );
+assertSecureTmpfs(browser, '/tmp', 'Browser Audit runner');
+assertSecureTmpfs(browser, '/home/bun', 'Browser Audit runner home');
 assertBrowserSeccompProfile();
 assert(
   parseSizeToBytes(browser.shm_size) >= 1024 ** 3,
@@ -172,6 +181,8 @@ assertLoopbackPort(
   8789,
   'Browser Audit debug proxy'
 );
+assertAllPublishedPortsLoopback(productionWithProfiles, 'production Compose');
+assertAllPublishedPortsLoopback(developmentWithProfiles, 'development Compose');
 
 for (const name of Object.keys(expectedImages)) {
   assert(
@@ -182,6 +193,12 @@ for (const name of Object.keys(expectedImages)) {
     developmentWithProfiles.services[name]?.image?.endsWith(':dev') === true,
     `${name} development image must use a local :dev tag`
   );
+}
+
+for (const [name, productionService] of Object.entries(productionWithProfiles.services)) {
+  const developmentService = developmentWithProfiles.services[name];
+  assert(developmentService, `${name} must exist in the development model`);
+  assertSecurityParity(name, productionService, developmentService);
 }
 
 console.log(
@@ -232,8 +249,60 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
 }
 
 function assertLoopbackPort(service: ComposeService | undefined, target: number, label: string) {
-  const port = service?.ports?.find((candidate) => candidate.target === target);
-  assert(port?.host_ip === '127.0.0.1', `${label} must bind ${target} on 127.0.0.1`);
+  const ports = service?.ports?.filter((candidate) => candidate.target === target) ?? [];
+  assert(ports.length > 0, `${label} must publish ${target}`);
+  assert(
+    ports.every((port) => port.host_ip === '127.0.0.1'),
+    `${label} must bind every ${target} publication on 127.0.0.1`
+  );
+}
+
+function assertAllPublishedPortsLoopback(model: ComposeModel, label: string) {
+  for (const [name, service] of Object.entries(model.services)) {
+    for (const port of service.ports ?? []) {
+      assert(
+        port.host_ip === '127.0.0.1',
+        `${label} ${name} must bind published port ${port.target ?? 'unknown'} on 127.0.0.1`
+      );
+    }
+  }
+}
+
+function assertSecureTmpfs(
+  service: ComposeService | undefined,
+  target: string,
+  label: string
+) {
+  const entry = service?.tmpfs?.find((candidate) => candidate.split(':', 1)[0] === target);
+  assert(entry, `${label} must use a tmpfs for ${target}`);
+  const options = new Set(entry.slice(target.length + 1).split(','));
+  for (const option of ['rw', 'nosuid', 'nodev', 'noexec']) {
+    assert(options.has(option), `${label} ${target} tmpfs must include ${option}`);
+  }
+}
+
+function assertSecurityParity(
+  name: string,
+  productionService: ComposeService,
+  developmentService: ComposeService
+) {
+  for (const field of ['user', 'read_only', 'privileged'] as const) {
+    assert(
+      developmentService[field] === productionService[field],
+      `${name} development ${field} must match production`
+    );
+  }
+  for (const field of ['cap_add', 'cap_drop', 'security_opt', 'tmpfs'] as const) {
+    assertStringArrayEqual(
+      [...(developmentService[field] ?? [])].sort(),
+      [...(productionService[field] ?? [])].sort(),
+      `${name} development ${field}`
+    );
+  }
+  assert(
+    JSON.stringify(developmentService.ports ?? []) === JSON.stringify(productionService.ports ?? []),
+    `${name} development ports must match production`
+  );
 }
 
 function assertBrowserSeccompProfile() {
@@ -242,7 +311,9 @@ function assertBrowserSeccompProfile() {
     syscalls?: Array<{
       names?: string[];
       action?: string;
+      args?: unknown[];
       includes?: { caps?: string[]; minKernel?: string } | null;
+      excludes?: Record<string, unknown> | null;
     }>;
   };
   assert(profile.defaultAction === 'SCMP_ACT_ERRNO', 'Browser seccomp must default-deny syscalls');
@@ -252,6 +323,9 @@ function assertBrowserSeccompProfile() {
       rule.action === 'SCMP_ACT_ALLOW'
       && rule.names?.length === requiredNamespaceSyscalls.length
       && requiredNamespaceSyscalls.every((name) => rule.names?.includes(name))
+      && (rule.args?.length ?? 0) === 0
+      && Object.keys(rule.includes ?? {}).length === 0
+      && Object.keys(rule.excludes ?? {}).length === 0
   );
   assert(namespaceRule, 'Browser seccomp must allow only the required namespace syscalls explicitly');
 
@@ -267,7 +341,6 @@ function assertBrowserSeccompProfile() {
     if (
       rule.action !== 'SCMP_ACT_ALLOW'
       || (rule.includes?.caps?.length ?? 0) > 0
-      || Boolean(rule.includes?.minKernel)
     ) {
       continue;
     }
@@ -275,7 +348,7 @@ function assertBrowserSeccompProfile() {
     const unsafe = rule.names?.filter((name) => highRiskSyscalls.has(name)) ?? [];
     assert(
       unsafe.length === 0,
-      `Browser seccomp must not unconditionally allow high-risk syscalls: ${unsafe.join(', ')}`
+      `Browser seccomp must not allow high-risk syscalls without a capability condition: ${unsafe.join(', ')}`
     );
   }
 }

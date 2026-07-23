@@ -89,17 +89,18 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     && cp -a "$(dirname "$chrome_executable")/." /opt/google/chrome/ \
     && rm -rf /opt/chrome; \
   fi
+# Production Compose uses Chromium's user-namespace sandbox together with
+# no-new-privileges. Keep packaged helpers non-setuid so alternate launch paths
+# cannot silently re-enable the privileged helper.
 RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox -o -name chromium-sandbox \) -print -quit 2>/dev/null)" \
   && test -n "$sandbox_path" \
   && chown root:root "$sandbox_path" \
-  && chmod 4755 "$sandbox_path" \
+  && chmod 0755 "$sandbox_path" \
   && if [ -x /opt/google/chrome/chrome ] && [ "$sandbox_path" != "/opt/google/chrome/chrome-sandbox" ]; then cp -p "$sandbox_path" /opt/google/chrome/chrome-sandbox; fi \
-  && if [ -f /opt/google/chrome/chrome-sandbox ]; then chown root:root /opt/google/chrome/chrome-sandbox && chmod 4755 /opt/google/chrome/chrome-sandbox; fi \
-  && cp -p "$sandbox_path" /usr/local/sbin/chrome-devel-sandbox \
-  && chown root:root /usr/local/sbin/chrome-devel-sandbox \
-  && chmod 4755 /usr/local/sbin/chrome-devel-sandbox \
-  && test -u /usr/local/sbin/chrome-devel-sandbox \
-  && test -x /usr/local/sbin/chrome-devel-sandbox
+  && chown root:root /opt/google/chrome/chrome-sandbox \
+  && chmod 0755 /opt/google/chrome/chrome-sandbox \
+  && test -x /opt/google/chrome/chrome-sandbox \
+  && test ! -u /opt/google/chrome/chrome-sandbox
 RUN chown -R bun:bun /workspace
 
 USER bun
@@ -110,7 +111,6 @@ ENV PORT=8080
 # Both architectures populate this path: amd64 copies the pinned Chrome build,
 # while arm64 links the distribution Chromium directory into it.
 ENV CHROME_INSTALL_DIR=/opt/google/chrome
-ENV CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
 
 EXPOSE 8080
 

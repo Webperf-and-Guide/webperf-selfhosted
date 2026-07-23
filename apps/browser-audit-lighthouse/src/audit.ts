@@ -560,6 +560,7 @@ export const buildChromeLaunchArgs = (
     '--headless=new',
     '--disable-dev-shm-usage',
     '--disable-gpu',
+    '--disable-setuid-sandbox',
     '--no-first-run',
     '--no-default-browser-check'
   ];

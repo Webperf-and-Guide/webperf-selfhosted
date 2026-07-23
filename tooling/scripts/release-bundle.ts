@@ -180,6 +180,10 @@ export function renderReleaseBundle({
   compose = compose.replace(/\$\{WEBPERF_VERSION:[^}]+\}/g, version);
   validateReleaseComposeImages(compose);
   writeFileSync(join(outputDirectory, 'compose.yml'), compose);
+  copyFileSync(
+    join(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json'),
+    join(outputDirectory, 'browser-audit-seccomp.json')
+  );
 
   const envExample = readFileSync(
     join(repositoryRoot, 'infra/docker-compose/.env.example'),
@@ -388,7 +392,10 @@ function compareReleaseVersions(left: ParsedReleaseVersion, right: ParsedRelease
 function writeChecksums(outputDirectory: string) {
   const files = walkFiles(outputDirectory)
     .filter((path) => basename(path) !== 'SHA256SUMS')
-    .sort((left, right) => left.localeCompare(right));
+    .sort((left, right) => Buffer.compare(
+      Buffer.from(relative(outputDirectory, left), 'utf8'),
+      Buffer.from(relative(outputDirectory, right), 'utf8')
+    ));
   const lines = files.map((path) => {
     const digest = createHash('sha256').update(readFileSync(path)).digest('hex');
     return `${digest}  ${relative(outputDirectory, path)}`;
@@ -408,7 +415,7 @@ function walkFiles(directory: string): string[] {
 }
 
 function releaseReadme(version: string) {
-  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
+  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\` beside \`compose.yml\` when enabling Browser Audit.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
 }
 
 function escapeRegExp(value: string) {

@@ -51,6 +51,17 @@ describe('release bundle generation', () => {
     expect(readFileSync(join(output, 'SHA256SUMS'), 'utf8')).toContain(
       'runtime-metadata.json'
     );
+    expect(JSON.parse(
+      readFileSync(join(output, 'browser-audit-seccomp.json'), 'utf8')
+    ).defaultAction).toBe('SCMP_ACT_ERRNO');
+    const checksumPaths = readFileSync(join(output, 'SHA256SUMS'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => line.split('  ')[1] ?? '');
+    expect(checksumPaths).toContain('browser-audit-seccomp.json');
+    expect(checksumPaths).toEqual([...checksumPaths].sort((left, right) =>
+      Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+    ));
   });
 
   test('identifies every invalid release metadata field', () => {

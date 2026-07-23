@@ -63,8 +63,9 @@ expansions. Use them only with isolated networks and documented ownership.
 
 ## Browser sandbox
 
-The optional runner uses a setuid Chrome sandbox and no default `SYS_ADMIN`.
-Do not add a public port. Do not disable the sandbox to work around an
+The optional runner uses Chromium's user-namespace sandbox with
+`no-new-privileges`, no executable temporary mounts, and no default
+`SYS_ADMIN`. Do not add a public port. Do not disable the sandbox to work around an
 unconfigured host; treat a no-sandbox exception as a degraded, isolated
 runtime with no access to sensitive workloads.
 

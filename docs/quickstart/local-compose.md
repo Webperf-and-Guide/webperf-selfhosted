@@ -124,8 +124,9 @@ Artifacts are written to `/data/artifacts` in the private data volume and are
 downloaded through the authenticated API/console. The size and upload lifetime
 can be tuned with `SELFHOST_MAX_ARTIFACT_BYTES` and
 `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`.
-The image configures Chrome's setuid sandbox and the profile does not grant
-`SYS_ADMIN`. One runner accepts at most one in-flight audit.
+The profile uses Chrome's user-namespace sandbox with `no-new-privileges`,
+non-executable temporary mounts, and no `SYS_ADMIN`. One runner accepts at most
+one in-flight audit.
 
 For direct API debugging only, start the loopback proxy and then send an
 administrator-authenticated request:

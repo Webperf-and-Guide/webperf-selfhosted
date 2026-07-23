@@ -23,6 +23,7 @@ describe('Lighthouse Chrome launch policy', () => {
     expect(args).toContain('--proxy-bypass-list=<-loopback>');
     expect(args).toContain('--disable-quic');
     expect(args).toContain('--force-webrtc-ip-handling-policy=disable_non_proxied_udp');
+    expect(args).toContain('--disable-setuid-sandbox');
     expect(args).not.toContain('--no-sandbox');
   });
 

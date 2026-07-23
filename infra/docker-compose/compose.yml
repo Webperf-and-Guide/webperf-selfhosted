@@ -216,11 +216,12 @@ services:
     cap_drop:
       - ALL
     security_opt:
+      - no-new-privileges:true
       - seccomp=./browser-audit-seccomp.json
     shm_size: 1073741824
     tmpfs:
-      - /tmp:rw,nosuid,nodev,size=1g,uid=1000,gid=1000
-      - /home/bun:rw,nosuid,nodev,size=256m,uid=1000,gid=1000
+      - /tmp:rw,nosuid,nodev,noexec,size=1g,uid=1000,gid=1000
+      - /home/bun:rw,nosuid,nodev,noexec,size=256m,uid=1000,gid=1000
     environment:
       HOST: "0.0.0.0"
       PORT: "8080"

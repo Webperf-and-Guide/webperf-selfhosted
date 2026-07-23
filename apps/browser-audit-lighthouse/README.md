@@ -31,10 +31,13 @@ Useful environment variables:
 - `HOST`
 - `CHROME_EXECUTABLE_PATH`
 - `CHROME_INSTALL_DIR`
-- `CHROME_DEVEL_SANDBOX` (the image points this at its root-owned setuid helper)
 - `BROWSER_AUDIT_SHARED_SECRET`
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT`
 - `BROWSER_AUDIT_ALLOW_NO_SANDBOX`
+
+The image uses Chromium's user-namespace sandbox and keeps packaged helpers
+non-setuid. The production Compose profile also requires
+`no-new-privileges` and the checked-in seccomp policy.
 
 ## Docker Build
 

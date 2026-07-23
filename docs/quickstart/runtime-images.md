@@ -25,6 +25,8 @@ is pinned by OCI digest. It also contains:
 - `runtime-metadata.json`, with the version, source commit, image tags, and
   digests;
 - one SPDX JSON SBOM per image;
+- `browser-audit-seccomp.json`, kept beside `compose.yml` for the optional
+  Chromium runtime;
 - `SHA256SUMS`, `CHANGELOG.md`, `SECURITY.md`, and the license;
 - a generated `.env.example` with no default secrets.
 

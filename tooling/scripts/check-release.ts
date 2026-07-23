@@ -90,6 +90,7 @@ for (const requiredFragment of [
   'provenance: mode=max',
   'actions/attest@',
   'environment: release',
+  'browser-audit-seccomp.json',
   'runtime-metadata.json',
   'SHA256SUMS'
 ]) {
@@ -163,8 +164,31 @@ try {
       'browser-audit-lighthouse Dockerfile: arm64 Chromium must use the pinned Debian security snapshot and package version'
     );
   }
+  if (
+    browserAuditDockerfile.includes('chmod 4755')
+    || browserAuditDockerfile.includes('ENV CHROME_DEVEL_SANDBOX=')
+    || !browserAuditDockerfile.includes('test ! -u /opt/google/chrome/chrome-sandbox')
+  ) {
+    violations.push(
+      'browser-audit-lighthouse Dockerfile: packaged sandbox helpers must remain non-setuid'
+    );
+  }
 } catch {
   violations.push('browser-audit-lighthouse Dockerfile is missing or unreadable');
+}
+
+try {
+  const browserAuditSource = readFileSync(
+    join(root, 'apps/browser-audit-lighthouse/src/audit.ts'),
+    'utf8'
+  );
+  if (!browserAuditSource.includes("'--disable-setuid-sandbox'")) {
+    violations.push(
+      'browser-audit-lighthouse: the user-namespace sandbox launch policy is missing'
+    );
+  }
+} catch {
+  violations.push('browser-audit-lighthouse launch policy is missing or unreadable');
 }
 
 for (const { path: retiredPath } of retiredReleasePaths) {

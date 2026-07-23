@@ -30,7 +30,7 @@ const isAbortError = (error: unknown) =>
   && 'name' in error
   && error.name === 'AbortError';
 
-class BrowserAuditPollingError extends Error {
+export class BrowserAuditPollingError extends Error {
   override name = 'BrowserAuditPollingError';
 }
 
@@ -62,6 +62,20 @@ export const readBrowserAuditApiError = (value: unknown, fallback: string) => {
 
 export const isRetryableBrowserAuditStatus = (status: number) =>
   status >= 500 && status <= 599;
+
+export const isBrowserAuditTargetUrl = (value: string) => {
+  try {
+    const target = new URL(value);
+    return target.protocol === 'http:' || target.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+export const createBrowserAuditPollingHttpError = (status: number) =>
+  new BrowserAuditPollingError(
+    `Browser Audit status request failed with HTTP ${status}`
+  );
 
 export const readBrowserAuditResponsePayload = async (response: Response): Promise<unknown> => {
   try {
@@ -206,9 +220,7 @@ export class ReportsController {
     this.state.browserAuditSubmitError = null;
     this.state.browserAuditStatusMessage = null;
 
-    try {
-      new URL(this.state.browserAuditTargetUrl);
-    } catch {
+    if (!isBrowserAuditTargetUrl(this.state.browserAuditTargetUrl)) {
       this.state.browserAuditSubmitError = 'Enter a valid URL to audit.';
       return;
     }
@@ -344,13 +356,13 @@ export class ReportsController {
       }
       if (!response.ok) {
         await discardResponseBody(response);
-        throw new Error(`Browser Audit status request failed with HTTP ${response.status}`);
+        throw createBrowserAuditPollingHttpError(response.status);
       }
       const audit = parseBrowserAuditResourcePayload(
         await readBrowserAuditResponsePayload(response)
       );
 
-      if (audit && isBrowserAuditTerminalExecutionStatus(audit.status)) {
+      if (isBrowserAuditTerminalExecutionStatus(audit.status)) {
         return audit;
       }
       pollingIntervalMs = audit.status === previousStatus

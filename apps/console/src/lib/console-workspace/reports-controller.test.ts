@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  BrowserAuditPollingError,
+  createBrowserAuditPollingHttpError,
+  isBrowserAuditTargetUrl,
   isRetryableBrowserAuditStatus,
   parseBrowserAuditResourcePayload,
   readBrowserAuditApiError,
@@ -28,6 +31,20 @@ describe('Reports Browser Audit response handling', () => {
     expect(isRetryableBrowserAuditStatus(599)).toBe(true);
     expect(isRetryableBrowserAuditStatus(404)).toBe(false);
     expect(isRetryableBrowserAuditStatus(429)).toBe(false);
+  });
+
+  test('accepts only HTTP and HTTPS audit targets', () => {
+    expect(isBrowserAuditTargetUrl('https://example.com/path')).toBe(true);
+    expect(isBrowserAuditTargetUrl('http://example.com')).toBe(true);
+    expect(isBrowserAuditTargetUrl('file:///etc/passwd')).toBe(false);
+    expect(isBrowserAuditTargetUrl('data:text/html,test')).toBe(false);
+    expect(isBrowserAuditTargetUrl('not a url')).toBe(false);
+  });
+
+  test('classifies non-retryable polling responses as polling failures', () => {
+    const error = createBrowserAuditPollingHttpError(403);
+    expect(error).toBeInstanceOf(BrowserAuditPollingError);
+    expect(error.message).toBe('Browser Audit status request failed with HTTP 403');
   });
 
   test('normalizes malformed or empty response JSON before schema handling', async () => {

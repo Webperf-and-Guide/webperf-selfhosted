@@ -5,8 +5,10 @@ import type { BrowserAuditWorkerConfig } from './config';
 import {
   buildChromeLaunchArgs,
   createWaitForUrlMatcher,
+  isPuppeteerKeyInput,
   lighthouseArtifactContentTypes,
   launchBrowser,
+  runWithinAuditDeadline,
   serializeFlowResult,
   waitForDetachedSelector,
   uploadArtifact
@@ -80,6 +82,32 @@ describe('Lighthouse Chrome launch policy', () => {
     expect(disposeCount).toBe(1);
   });
 
+  test('validates press keys against the pinned Puppeteer keyboard layout', () => {
+    expect(isPuppeteerKeyInput('Enter')).toBe(true);
+    expect(isPuppeteerKeyInput('a')).toBe(true);
+    expect(isPuppeteerKeyInput('not-a-puppeteer-key')).toBe(false);
+  });
+
+  test('bounds dependency work by the shared audit deadline', async () => {
+    let expiredFactoryCalls = 0;
+    await expect(runWithinAuditDeadline(
+      async () => {
+        expiredFactoryCalls += 1;
+        return 'too late';
+      },
+      999,
+      5_000,
+      () => 1_000
+    )).rejects.toThrow('Audit exceeded total timeout of 5000ms');
+    expect(expiredFactoryCalls).toBe(0);
+
+    await expect(runWithinAuditDeadline(
+      () => new Promise<never>(() => undefined),
+      Date.now() + 20,
+      5_000
+    )).rejects.toThrow('Audit exceeded total timeout of 5000ms');
+  });
+
   test('normalizes circular Lighthouse flow serialization failures', () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;
@@ -122,6 +150,7 @@ describe('Lighthouse Chrome launch policy', () => {
       createdAt: '2026-07-22T00:00:00.000Z'
     }), { headers: { 'content-type': 'application/json' } });
 
+    let submittedBody: BodyInit | null | undefined;
     await expect(uploadArtifact(
       input,
       'lighthouse-json',
@@ -137,9 +166,13 @@ describe('Lighthouse Chrome launch policy', () => {
       'application/json',
       payload,
       {
-        fetchImpl: responseFor(createHash('sha256').update(payload).digest('hex'))
+        fetchImpl: async (_request, init) => {
+          submittedBody = init?.body;
+          return responseFor(createHash('sha256').update(payload).digest('hex'))();
+        }
       }
     )).resolves.toHaveLength(1);
+    expect(submittedBody).toBe(payload);
   });
 
   test('refuses artifact uploads after the shared audit deadline', async () => {

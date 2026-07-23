@@ -13,6 +13,7 @@ import {
 import { createHash } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
 import type { Browser, KeyInput, Page, WaitForSelectorOptions } from 'puppeteer-core';
+import { _keyDefinitions } from 'puppeteer-core/internal/common/USKeyboardLayout.js';
 import { RE2JS } from 're2js';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
@@ -221,10 +222,14 @@ export const runBrowserAudit = async ({
 
     if (input.policy.artifacts.screenshot) {
       try {
-        const screenshot = (await page.screenshot({
-          type: 'png',
-          fullPage: true
-        })) as Uint8Array;
+        const screenshot = (await runWithinAuditDeadline(
+          () => page.screenshot({
+            type: 'png',
+            fullPage: true
+          }),
+          deadline,
+          input.policy.timeouts.totalTimeoutMs
+        )) as Uint8Array;
         artifacts.push(...(await uploadArtifact(
           input,
           'screenshot',
@@ -244,7 +249,11 @@ export const runBrowserAudit = async ({
 
     if (input.policy.artifacts.trace && tracingApi) {
       try {
-        traceBuffer = (await tracingApi.stop()) ?? null;
+        traceBuffer = (await runWithinAuditDeadline(
+          () => tracingApi.stop(),
+          deadline,
+          input.policy.timeouts.totalTimeoutMs
+        )) ?? null;
       } catch (error) {
         issues.push({
           code: 'trace_stop_failed',
@@ -254,9 +263,20 @@ export const runBrowserAudit = async ({
       }
     }
 
-    const rawFlowResult = await flow.createFlowResult();
+    const rawFlowResult = await runWithinAuditDeadline(
+      () => flow.createFlowResult(),
+      deadline,
+      input.policy.timeouts.totalTimeoutMs
+    );
     networkGuard.throwIfBlocked();
-    const reportHtml = flow.generateReport ? await flow.generateReport() : null;
+    const generateReport = flow.generateReport?.bind(flow);
+    const reportHtml = input.policy.artifacts.html && generateReport
+      ? await runWithinAuditDeadline(
+        generateReport,
+        deadline,
+        input.policy.timeouts.totalTimeoutMs
+      )
+      : null;
 
     if (input.policy.artifacts.json) {
       const serializedFlowResult = serializeFlowResult(rawFlowResult);
@@ -378,7 +398,10 @@ const runStep = async (
       });
       return;
     case 'press':
-      await page.keyboard.press(step.key as KeyInput);
+      if (!isPuppeteerKeyInput(step.key)) {
+        throw new Error('Press step key is unsupported by the Lighthouse runner');
+      }
+      await page.keyboard.press(step.key);
       return;
     case 'select':
       await page.waitForSelector(step.selector, { timeout: stepTimeoutMs });
@@ -535,9 +558,49 @@ const closeWithDiagnostic = async (
 
 const enforceDeadline = (deadline: number, totalTimeoutMs: number) => {
   if (Date.now() >= deadline) {
-    throw new Error(`Audit exceeded total timeout of ${totalTimeoutMs}ms`);
+    throw auditTimeoutError(totalTimeoutMs);
   }
 };
+
+const auditTimeoutError = (totalTimeoutMs: number) =>
+  new Error(`Audit exceeded total timeout of ${totalTimeoutMs}ms`);
+
+export const runWithinAuditDeadline = async <Result>(
+  operation: () => Promise<Result>,
+  deadline: number,
+  totalTimeoutMs: number,
+  now: () => number = Date.now
+): Promise<Result> => {
+  const remainingMs = deadline - now();
+  if (remainingMs <= 0) {
+    throw auditTimeoutError(totalTimeoutMs);
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const pending = Promise.resolve().then(operation);
+  // The browser is closed by the caller after a timeout, but the dependency
+  // promise can still reject later. Keep that late settlement observed.
+  void pending.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(auditTimeoutError(totalTimeoutMs)),
+          remainingMs
+        );
+      })
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
+export const isPuppeteerKeyInput = (value: string): value is KeyInput =>
+  Object.hasOwn(_keyDefinitions, value);
 
 export const launchBrowser = async (
   config: BrowserAuditWorkerConfig,
@@ -775,6 +838,10 @@ export const uploadArtifact = async (
     throw new Error('Artifact content type is not allowed by the upload policy');
   }
 
+  const uploadBody: Uint8Array<ArrayBuffer> = payload.buffer instanceof ArrayBuffer
+    ? payload as Uint8Array<ArrayBuffer>
+    : Uint8Array.from(payload);
+
   const response = await (options.fetchImpl ?? fetch)(
     `${input.artifactUpload.baseUrl}/internal/browser-audits/${encodeURIComponent(input.executionId)}/artifacts?kind=${encodeURIComponent(kind)}&filename=${encodeURIComponent(filename)}`,
     {
@@ -785,7 +852,7 @@ export const uploadArtifact = async (
         'content-length': String(payload.byteLength),
         'x-artifact-size': String(payload.byteLength)
       },
-      body: Buffer.from(payload),
+      body: uploadBody,
       signal: AbortSignal.timeout(
         Math.min(remainingAuditMs, authorizationExpiresAt - currentTime)
       )

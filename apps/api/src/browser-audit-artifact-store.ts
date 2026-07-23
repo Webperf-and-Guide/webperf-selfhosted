@@ -27,6 +27,7 @@ export type ArtifactReconciliationResult = {
 };
 export const artifactReconciliationGraceMs = 60 * 60 * 1_000;
 export type ArtifactReconciliationOptions = {
+  allowImmediateOrphanDeletion?: boolean;
   minimumOrphanAgeMs?: number;
   now?: Date;
 };
@@ -221,6 +222,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     await this.ensureRoot();
     const path = this.pathForStorageKey(storageKey);
     const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
+    const artifactId = storageKey.split('/')[1]!;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let auditDirectory: Awaited<ReturnType<typeof open>> | undefined;
 
@@ -230,7 +232,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         'Browser Audit artifact directory is unsafe'
       );
       handle = await open(
-        path,
+        process.platform === 'linux'
+          ? linuxDirectoryEntryPath(auditDirectory, artifactId)
+          : path,
         constants.O_RDONLY | constants.O_NOFOLLOW
       );
       const file = await handle.stat();
@@ -286,7 +290,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         auditDirectory,
         'Browser Audit artifact directory changed before delete'
       );
-      unlinkDirectoryEntry(
+      await unlinkDirectoryEntry(
         auditDirectory,
         path.slice(auditPath.length + 1)
       );
@@ -307,6 +311,14 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     const minimumOrphanAgeMs = options.minimumOrphanAgeMs ?? artifactReconciliationGraceMs;
     if (!Number.isSafeInteger(minimumOrphanAgeMs) || minimumOrphanAgeMs < 0) {
       throw new Error('Artifact reconciliation grace must be a non-negative integer');
+    }
+    if (
+      minimumOrphanAgeMs === 0
+      && options.allowImmediateOrphanDeletion !== true
+    ) {
+      throw new Error(
+        'Immediate artifact reconciliation requires explicit deletion opt-in'
+      );
     }
     const now = options.now ?? new Date();
     const nowMs = now.getTime();
@@ -532,12 +544,31 @@ const assertPinnedDirectory = async (
   }
 };
 
-const unlinkDirectoryEntry = (
+const linuxDirectoryEntryPath = (
   directoryHandle: Awaited<ReturnType<typeof open>>,
   entryName: string
 ) => {
   assertStorageSegment(entryName, 'artifact ID');
-  const binding = getNativeUnlinkBinding();
+  return `/proc/self/fd/${directoryHandle.fd}/${entryName}`;
+};
+
+const unlinkDirectoryEntry = async (
+  directoryHandle: Awaited<ReturnType<typeof open>>,
+  entryName: string
+) => {
+  assertStorageSegment(entryName, 'artifact ID');
+
+  if (process.platform === 'linux') {
+    await rm(linuxDirectoryEntryPath(directoryHandle, entryName), { force: true });
+    return;
+  }
+  if (process.platform !== 'darwin') {
+    throw new Error(
+      `Browser Audit artifact deletion is unsupported on ${process.platform}`
+    );
+  }
+
+  const binding = getDarwinUnlinkBinding();
   const name = Buffer.from(`${entryName}\0`);
   const result = binding.unlinkat(directoryHandle.fd, ptr(name), 0);
   if (result !== 0) {
@@ -551,19 +582,19 @@ const unlinkDirectoryEntry = (
   }
 };
 
-type NativeUnlinkBinding = {
+type DarwinUnlinkBinding = {
   unlinkat: (directoryFd: number, path: Pointer, flags: number) => number;
   errno: () => Pointer | null;
 };
 
-let nativeUnlinkBinding: NativeUnlinkBinding | undefined;
+let darwinUnlinkBinding: DarwinUnlinkBinding | undefined;
 
-const getNativeUnlinkBinding = () => {
-  nativeUnlinkBinding ??= loadNativeUnlinkBinding();
-  return nativeUnlinkBinding;
+const getDarwinUnlinkBinding = () => {
+  darwinUnlinkBinding ??= loadDarwinUnlinkBinding();
+  return darwinUnlinkBinding;
 };
 
-const loadNativeUnlinkBinding = (): NativeUnlinkBinding => {
+const loadDarwinUnlinkBinding = (): DarwinUnlinkBinding => {
   const unlinkat = {
     args: [FFIType.i32, FFIType.ptr, FFIType.i32],
     returns: FFIType.i32
@@ -573,29 +604,15 @@ const loadNativeUnlinkBinding = (): NativeUnlinkBinding => {
     returns: FFIType.ptr
   } as const;
 
-  if (process.platform === 'darwin') {
-    return createNativeUnlinkBinding(
-      '/usr/lib/libSystem.B.dylib',
-      '__error',
-      unlinkat,
-      errnoAccessor
-    );
-  }
-  if (process.platform === 'linux') {
-    return createNativeUnlinkBinding(
-      'libc.so.6',
-      '__errno_location',
-      unlinkat,
-      errnoAccessor
-    );
-  }
-
-  throw new Error(
-    `Browser Audit artifact deletion is unsupported on ${process.platform}`
+  return createDarwinUnlinkBinding(
+    '/usr/lib/libSystem.B.dylib',
+    '__error',
+    unlinkat,
+    errnoAccessor
   );
 };
 
-const createNativeUnlinkBinding = <ErrnoSymbol extends string>(
+const createDarwinUnlinkBinding = <ErrnoSymbol extends string>(
   libraryPath: string,
   errnoSymbol: ErrnoSymbol,
   unlinkatDefinition: {
@@ -606,7 +623,7 @@ const createNativeUnlinkBinding = <ErrnoSymbol extends string>(
     readonly args: readonly [];
     readonly returns: FFIType.ptr;
   }
-): NativeUnlinkBinding => {
+): DarwinUnlinkBinding => {
   const definitions = {
     unlinkat: unlinkatDefinition,
     [errnoSymbol]: errnoDefinition

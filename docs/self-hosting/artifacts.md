@@ -43,16 +43,20 @@ index. `bun run selfhost:maintenance` performs the same reconciliation; use
 The reconciliation root may not be a filesystem root. It does not follow
 symlinks. The API requires the root and managed audit directories to be owned
 by its effective user and makes them owner-only (`0700`). It pins a validated
-audit-directory descriptor across download and delete operations, deletes with
-POSIX `unlinkat` relative to that descriptor, and rejects a path whose directory
-identity changes during the operation. This local backend supports Linux and
-macOS, including the canonical Linux container images. Compose mounts the
+audit-directory descriptor across download and delete operations. Linux opens
+and deletes entries asynchronously through `/proc/self/fd/<directory-fd>`;
+macOS uses a cached POSIX `unlinkat` binding for deletion. Both stay relative to
+the pinned descriptor, and the store rejects a path whose directory identity
+changes during the operation. This local backend supports Linux and macOS,
+including glibc- and musl-based Linux images. Compose mounts the
 `webperf-data` volume only into the API service; executors and Browser Audit
 runtimes do not receive filesystem access to it. At the root, reconciliation
 owns only names that match the generated artifact-ID namespace, so filesystem
 or deployment entries such as `lost+found` and `.gitkeep` are preserved. It
 removes unindexed entries inside managed audit directories after the
-reconciliation grace period.
+reconciliation grace period. A zero-length grace is rejected unless the caller
+also supplies an explicit immediate-deletion opt-in; normal startup and
+maintenance flows always retain the one-hour safety window.
 
 ## Backup boundary
 

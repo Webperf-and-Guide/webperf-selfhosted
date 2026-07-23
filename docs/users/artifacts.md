@@ -42,10 +42,12 @@ artifact index rows and reconciles the filesystem against the remaining index.
 The cleanup root cannot be a filesystem root, does not follow symlinks, and
 requires process-owned, owner-only directories. Download and delete operations
 keep the validated audit-directory descriptor pinned and reject directory
-identity changes. Artifact rollback deletion uses POSIX descriptor-relative
-`unlinkat` and is supported on Linux and macOS. In the Compose deployment, only
-the API service mounts the artifact volume. Cleanup removes only unindexed
-entries below the configured directory.
+identity changes. Linux uses asynchronous `/proc/self/fd` operations relative
+to that descriptor, while macOS uses POSIX `unlinkat` for rollback deletion.
+Both platforms are supported without depending on a Linux libc soname. In the
+Compose deployment, only the API service mounts the artifact volume. Cleanup
+removes only unindexed entries below the configured directory after a one-hour
+grace period; internal callers must opt in explicitly before using a zero grace.
 
 From a source checkout, maintenance can be run directly. In a release
 container, use the shipped script:

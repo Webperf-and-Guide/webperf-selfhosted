@@ -117,6 +117,7 @@ describe('local Browser Audit artifact storage', () => {
     mkdirSync(join(root, 'audit_orphan'));
     writeFileSync(join(root, 'audit_orphan', 'artifact_orphan'), 'orphan');
     const reconciled = await store.reconcile(new Set([stored.storageKey]), {
+      allowImmediateOrphanDeletion: true,
       minimumOrphanAgeMs: 0
     });
     expect(reconciled.removedFiles).toBe(1);
@@ -179,6 +180,18 @@ describe('local Browser Audit artifact storage', () => {
       removedDirectories: 1
     });
     expect(await Bun.file(join(auditPath, 'artifact_fresh')).exists()).toBe(false);
+  });
+
+  test('requires explicit opt-in before deleting orphans without a grace period', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    mkdirSync(join(root, 'audit_immediate'), { recursive: true });
+    writeFileSync(join(root, 'audit_immediate', 'artifact_immediate'), 'fresh');
+    const store = new LocalBrowserAuditArtifactStore(root);
+
+    await expect(store.reconcile(new Set(), { minimumOrphanAgeMs: 0 }))
+      .rejects.toThrow('explicit deletion opt-in');
+    expect(await Bun.file(join(root, 'audit_immediate', 'artifact_immediate')).exists())
+      .toBe(true);
   });
 
   test('rejects traversal, symlinks, declared-size mismatches, and byte-limit overflow', async () => {
@@ -330,7 +343,10 @@ describe('local Browser Audit artifact storage', () => {
     writeFileSync(join(root, 'managed_conflict'), 'remove');
     const store = new LocalBrowserAuditArtifactStore(root);
 
-    expect(await store.reconcile(new Set(), { minimumOrphanAgeMs: 0 })).toEqual({
+    expect(await store.reconcile(new Set(), {
+      allowImmediateOrphanDeletion: true,
+      minimumOrphanAgeMs: 0
+    })).toEqual({
       removedFiles: 1,
       removedDirectories: 0
     });
@@ -442,7 +458,10 @@ describe('Browser Audit artifact indexes', () => {
       .map((row) => row.storage_key);
     database.close();
 
-    expect(await store.reconcile(new Set(validStorageKeys), { minimumOrphanAgeMs: 0 }))
+    expect(await store.reconcile(new Set(validStorageKeys), {
+      allowImmediateOrphanDeletion: true,
+      minimumOrphanAgeMs: 0
+    }))
       .toMatchObject({ removedFiles: 1, removedDirectories: 1 });
     await expect(store.openDownload(stored.storageKey, stored.byteSize))
       .rejects.toThrow();

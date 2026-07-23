@@ -37,6 +37,9 @@ describe('browser audit redaction', () => {
     expect(
       redactBrowserAuditUrl('https://user:pass@example.com/path?token=secret#fragment', input)
     ).toBe('https://example.com/path?redacted');
+    expect(
+      redactBrowserAuditUrl('https://user:p@ss@exa[mple.test/path', input)
+    ).toBe('https://[REDACTED]@exa[mple.test/path');
 
     const bytes = new TextEncoder().encode(
       '{"url":"HTTPS://user:pass@example.com/path?token=secret#private-fragment","header":"Bearer private-token"}'

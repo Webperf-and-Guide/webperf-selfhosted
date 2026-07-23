@@ -20,6 +20,7 @@ import type {
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
+  browserAuditArtifactLimit,
   browserAuditIdentifierMaxLength,
   browserAuditResourceSchema,
   checkProfileSchema,
@@ -58,7 +59,7 @@ import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.
-const maximumBrowserAuditArtifactsPerAudit = 50;
+const maximumBrowserAuditArtifactsPerAudit = browserAuditArtifactLimit;
 
 type JobRow = {
   id: string;

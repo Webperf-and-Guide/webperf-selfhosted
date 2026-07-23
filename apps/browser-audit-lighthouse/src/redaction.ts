@@ -130,7 +130,7 @@ const getShortSensitivePairs = (input: BrowserAuditWorkerRequest): SensitivePair
 
 const redactMalformedUrl = (value: string) => {
   const withoutCredentials = value.replace(
-    /^(https?:\/\/)[^/@\s]+@/i,
+    /^(https?:\/\/)[^/\s]+@/i,
     `$1${redactedValue}@`
   );
   const queryIndex = withoutCredentials.indexOf('?');

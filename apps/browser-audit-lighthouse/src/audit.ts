@@ -54,6 +54,10 @@ type LighthouseUserFlowConstructor = new (
   page: Page,
   options?: { name?: string }
 ) => LighthouseUserFlow;
+type WaitForUrlMatch = Extract<
+  BrowserAuditFlowStep,
+  { type: 'waitForUrl' }
+>['match'];
 export const lighthouseArtifactContentTypes = {
   html: `${requireRegisteredArtifactContentType('lighthouse-html', 'text/html')}; charset=utf-8`,
   json: requireRegisteredArtifactContentType('lighthouse-json', 'application/json'),
@@ -461,7 +465,7 @@ export const waitForDetachedSelector = async (
 const waitForUrl = async (
   page: Page,
   expectedUrl: string,
-  match: BrowserAuditFlowStep extends { type: 'waitForUrl'; match: infer T } ? T : string,
+  match: WaitForUrlMatch,
   timeout: number,
   input: BrowserAuditWorkerRequest
 ) => {
@@ -485,7 +489,7 @@ const waitForUrl = async (
 
 export const createWaitForUrlMatcher = (
   expectedUrl: string,
-  match: BrowserAuditFlowStep extends { type: 'waitForUrl'; match: infer T } ? T : string
+  match: WaitForUrlMatch
 ): ((currentUrl: string) => boolean) => {
   if (match === 'equals') {
     return (currentUrl) => currentUrl === expectedUrl;

@@ -39,6 +39,11 @@ export const createStorageCrypto = ({
   currentSecret: string;
   nextSecret?: string;
 }): StorageCrypto => {
+  assertStorageSecret(currentSecret, 'current');
+  if (nextSecret !== undefined) {
+    assertStorageSecret(nextSecret, 'next');
+  }
+
   const currentKey = deriveKey(currentSecret);
   const decryptionKeys = [currentKey, ...(nextSecret ? [deriveKey(nextSecret)] : [])];
   const legacyDecryptionKeys = [deriveLegacyKey(currentSecret), ...(nextSecret ? [deriveLegacyKey(nextSecret)] : [])];
@@ -92,6 +97,12 @@ export const createStorageCrypto = ({
       throw new AggregateError(errors, 'Unable to decrypt persisted payload');
     }
   };
+};
+
+const assertStorageSecret = (secret: string, label: 'current' | 'next') => {
+  if (Buffer.byteLength(secret, 'utf8') < 16 || secret.trim().length === 0) {
+    throw new Error(`SQLite ${label} encryption secret must contain at least 16 UTF-8 bytes`);
+  }
 };
 
 const deriveKey = (secret: string) =>

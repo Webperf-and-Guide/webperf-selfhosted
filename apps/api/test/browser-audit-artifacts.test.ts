@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync
@@ -181,6 +182,30 @@ describe('local Browser Audit artifact storage', () => {
       expectedBytes: 4,
       maxBytes: 3
     })).rejects.toMatchObject({ status: 413 });
+  });
+
+  test('streams from the validated descriptor even if the path is replaced', async () => {
+    const directory = createTempDirectory();
+    const root = join(directory, 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const body = new TextEncoder().encode('validated artifact');
+    const stored = await store.write({
+      auditId: 'audit_descriptor',
+      artifactId: 'artifact_descriptor',
+      body: new Response(body).body,
+      expectedBytes: body.byteLength,
+      maxBytes: 1_024
+    });
+    const download = await store.openDownload(stored.storageKey, body.byteLength);
+    const artifactPath = join(root, 'audit_descriptor', 'artifact_descriptor');
+    const outsidePath = join(directory, 'outside-secret');
+    writeFileSync(outsidePath, 'must not be served');
+    rmSync(artifactPath);
+    symlinkSync(outsidePath, artifactPath);
+
+    expect(await new Response(download.body).text()).toBe('validated artifact');
+    expect(readFileSync(artifactPath, 'utf8')).toBe('must not be served');
+    await expect(store.openDownload(stored.storageKey, body.byteLength)).rejects.toThrow();
   });
 });
 

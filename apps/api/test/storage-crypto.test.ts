@@ -3,6 +3,17 @@ import { createCipheriv, hkdfSync } from 'node:crypto';
 import { createStorageCrypto } from '../src/storage-crypto';
 
 describe('SQLite payload encryption', () => {
+  test('rejects weak encryption secrets at the crypto boundary', () => {
+    expect(() => createStorageCrypto({ currentSecret: 'too-short' }))
+      .toThrow('at least 16 UTF-8 bytes');
+    expect(() => createStorageCrypto({ currentSecret: '                ' }))
+      .toThrow('at least 16 UTF-8 bytes');
+    expect(() => createStorageCrypto({
+      currentSecret: 'current-encryption-secret',
+      nextSecret: 'short'
+    })).toThrow('next encryption secret');
+  });
+
   test('reports authenticated plaintext corruption without trying unrelated keys', () => {
     const currentSecret = 'storage-crypto-current-secret';
     const key = Buffer.from(

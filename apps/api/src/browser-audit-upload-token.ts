@@ -3,6 +3,13 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 const tokenDomain = 'webperf-browser-audit-artifact-upload-v1';
 const maximumTokenLength = 4_096;
 const maximumTokenTtlMs = 3_600_000;
+const maximumAuditIdLength = 160;
+const maximumExecutionJobIdLength = 160;
+const maximumLeaseOwnerLength = 200;
+const maximumAttemptCount = 20;
+const maximumArtifactBytes = 250_000_000;
+const allowedClockSkewMs = 30_000;
+const noncePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type BrowserAuditUploadTokenClaims = {
   version: 'v1';
@@ -48,6 +55,8 @@ export const issueBrowserAuditUploadToken = ({
     issuedAt: now.getTime(),
     expiresAt: expiresAt.getTime(),
     maxArtifactBytes,
+    // This signed nonce correlates grants in diagnostics; it is not a one-time
+    // replay token. Active lease/attempt validation and artifact limits bound replays.
     nonce: randomUUID()
   };
   assertClaims(claims, now.getTime(), false);
@@ -129,41 +138,64 @@ function assertClaims(
   }
 
   const claims = value as Partial<BrowserAuditUploadTokenClaims>;
-  if (
-    claims.version !== 'v1'
-    || typeof claims.auditId !== 'string'
-    || claims.auditId.length < 1
-    || claims.auditId.length > 160
-    || typeof claims.executionJobId !== 'string'
-    || claims.executionJobId.length < 1
-    || claims.executionJobId.length > 160
-    || typeof claims.leaseOwner !== 'string'
-    || claims.leaseOwner.length < 1
-    || claims.leaseOwner.length > 200
-    || typeof claims.attemptCount !== 'number'
-    || !Number.isSafeInteger(claims.attemptCount)
-    || claims.attemptCount < 1
-    || claims.attemptCount > 20
-    || !Number.isSafeInteger(claims.issuedAt)
-    || !Number.isSafeInteger(claims.expiresAt)
-    || typeof claims.maxArtifactBytes !== 'number'
-    || !Number.isSafeInteger(claims.maxArtifactBytes)
-    || claims.maxArtifactBytes < 1
-    || claims.maxArtifactBytes > 250_000_000
-    || typeof claims.nonce !== 'string'
-    || !/^[a-f0-9-]{36}$/.test(claims.nonce)
-  ) {
-    throw new Error('Invalid upload token claims');
+  if (claims.version !== 'v1') {
+    throw new Error('Invalid upload token version');
   }
 
-  const issuedAt = claims.issuedAt as number;
-  const expiresAt = claims.expiresAt as number;
+  assertBoundedStringClaim(claims.auditId, maximumAuditIdLength, 'audit ID');
+  assertBoundedStringClaim(
+    claims.executionJobId,
+    maximumExecutionJobIdLength,
+    'execution job ID'
+  );
+  assertBoundedStringClaim(claims.leaseOwner, maximumLeaseOwnerLength, 'lease owner');
+  assertBoundedIntegerClaim(claims.attemptCount, maximumAttemptCount, 'attempt count');
+  assertSafeIntegerClaim(claims.issuedAt, 'issued-at time');
+  assertSafeIntegerClaim(claims.expiresAt, 'expiry time');
+  assertBoundedIntegerClaim(
+    claims.maxArtifactBytes,
+    maximumArtifactBytes,
+    'artifact byte limit'
+  );
+  if (typeof claims.nonce !== 'string' || !noncePattern.test(claims.nonce)) {
+    throw new Error('Invalid upload token nonce');
+  }
+
+  const issuedAt = claims.issuedAt;
+  const expiresAt = claims.expiresAt;
   if (
     expiresAt <= issuedAt
     || expiresAt - issuedAt > maximumTokenTtlMs
-    || issuedAt > now + 30_000
+    || issuedAt > now + allowedClockSkewMs
     || (requireLive && expiresAt <= now)
   ) {
     throw new Error('Invalid upload token lifetime');
+  }
+}
+
+function assertBoundedStringClaim(
+  value: unknown,
+  maximumLength: number,
+  label: string
+): asserts value is string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > maximumLength) {
+    throw new Error(`Invalid upload token ${label}`);
+  }
+}
+
+function assertSafeIntegerClaim(value: unknown, label: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new Error(`Invalid upload token ${label}`);
+  }
+}
+
+function assertBoundedIntegerClaim(
+  value: unknown,
+  maximumValue: number,
+  label: string
+): asserts value is number {
+  assertSafeIntegerClaim(value, label);
+  if (value < 1 || value > maximumValue) {
+    throw new Error(`Invalid upload token ${label}`);
   }
 }

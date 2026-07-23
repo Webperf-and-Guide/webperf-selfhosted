@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import {
-  chmod,
   link,
   lstat,
   mkdir,
@@ -127,17 +127,12 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
 
     await this.ensureRoot();
     const auditPath = this.pathForAudit(auditId);
-    await mkdir(auditPath, { recursive: false, mode: 0o700 }).catch(async (error) => {
+    await mkdir(auditPath, { recursive: false, mode: 0o700 }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw error;
       }
-
-      const existing = await lstat(auditPath);
-      if (!existing.isDirectory() || existing.isSymbolicLink()) {
-        throw new Error('Browser Audit artifact directory is unsafe');
-      }
     });
-    await chmod(auditPath, 0o700);
+    await enforcePrivateDirectory(auditPath, 'Browser Audit artifact directory is unsafe');
 
     const storageKey = `${auditId}/${artifactId}`;
     const destinationPath = this.pathForStorageKey(storageKey);
@@ -188,12 +183,12 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
       }
 
       await handle.sync();
+      await handle.chmod(0o600);
       await handle.close();
       closed = true;
       await link(temporaryPath, destinationPath);
       published = true;
       await rm(temporaryPath, { force: true });
-      await chmod(destinationPath, 0o600);
 
       return {
         storageKey,
@@ -213,16 +208,26 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
   async openDownload(storageKey: string, expectedBytes: number) {
     await this.ensureRoot();
     const path = this.pathForStorageKey(storageKey);
-    const file = await lstat(path);
+    const handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW
+    );
 
-    if (!file.isFile() || file.isSymbolicLink() || file.size !== expectedBytes) {
-      throw new Error('Browser Audit artifact file is missing or inconsistent');
+    try {
+      const file = await handle.stat();
+
+      if (!file.isFile() || file.size !== expectedBytes) {
+        throw new Error('Browser Audit artifact file is missing or inconsistent');
+      }
+
+      return {
+        body: readableFileHandle(handle, file.size),
+        byteSize: file.size
+      };
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
     }
-
-    return {
-      body: Bun.file(path),
-      byteSize: file.size
-    };
   }
 
   async delete(storageKey: string) {
@@ -343,13 +348,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
 
   private async ensureRoot() {
     await mkdir(this.rootPath, { recursive: true, mode: 0o700 });
-    const root = await lstat(this.rootPath);
-
-    if (!root.isDirectory() || root.isSymbolicLink()) {
-      throw new Error('Browser Audit artifact root is unsafe');
-    }
-
-    await chmod(this.rootPath, 0o700);
+    // Revalidate on every operation: this directory is writable external state and
+    // can be replaced after process startup by a compromised local executor.
+    await enforcePrivateDirectory(this.rootPath, 'Browser Audit artifact root is unsafe');
   }
 
   private pathForAudit(auditId: string) {
@@ -384,4 +385,74 @@ const assertDescendant = (rootPath: string, candidatePath: string) => {
   if (!candidatePath.startsWith(`${rootPath}${sep}`)) {
     throw new ArtifactStoreValidationError('Artifact path escapes the configured root');
   }
+};
+
+const enforcePrivateDirectory = async (path: string, unsafeMessage: string) => {
+  let handle;
+
+  try {
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+    );
+    const directory = await handle.stat();
+
+    if (!directory.isDirectory()) {
+      throw new Error(unsafeMessage);
+    }
+
+    await handle.chmod(0o700);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'ENOTDIR') {
+      throw new Error(unsafeMessage, { cause: error });
+    }
+    throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+};
+
+const readableFileHandle = (
+  handle: Awaited<ReturnType<typeof open>>,
+  byteSize: number
+): ReadableStream<Uint8Array> => {
+  let closed = false;
+  let remainingBytes = byteSize;
+
+  const close = async () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    await handle.close().catch(() => undefined);
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (remainingBytes === 0) {
+          await close();
+          controller.close();
+          return;
+        }
+
+        const buffer = Buffer.allocUnsafe(Math.min(64 * 1_024, remainingBytes));
+        const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null);
+
+        if (bytesRead === 0) {
+          throw new Error('Browser Audit artifact file changed while streaming');
+        }
+
+        remainingBytes -= bytesRead;
+        controller.enqueue(buffer.subarray(0, bytesRead));
+      } catch (error) {
+        await close();
+        controller.error(error);
+      }
+    },
+    async cancel() {
+      await close();
+    }
+  });
 };

@@ -11,6 +11,7 @@ bash "$root_dir/tooling/scripts/ensure-port-free.sh" \
   "Stop the existing process or set SELFHOST_CONSOLE_PORT to another port."
 
 cd "$root_dir"
+source "$root_dir/tooling/scripts/dev-secrets.sh"
 export CONTROL_BASE_URL="$control_base_url"
 
 vite_args=(--port "$console_port" "$@")

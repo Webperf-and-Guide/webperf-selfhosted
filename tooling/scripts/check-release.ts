@@ -2,6 +2,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { releaseImages } from './release-bundle';
 import { retiredReleasePaths } from './retired-release-paths';
+import {
+  containsMutableContainerTag,
+  extractWorkflowActionReferences,
+  isImmutableActionReference
+} from './release-policy';
 
 const root = process.cwd();
 const workflowsDirectory = join(root, '.github/workflows');
@@ -38,14 +43,8 @@ for (const file of workflowFiles) {
   if (content === undefined) {
     continue;
   }
-  for (const match of content.matchAll(/^\s*uses:\s+([^\s#]+)(?:\s+#.*)?$/gm)) {
-    const action = match[1];
-    if (action.startsWith('./')) {
-      continue;
-    }
-    const separator = action.lastIndexOf('@');
-    const ref = separator === -1 ? '' : action.slice(separator + 1);
-    if (!/^[a-f0-9]{40}$/.test(ref)) {
+  for (const action of extractWorkflowActionReferences(content)) {
+    if (!isImmutableActionReference(action)) {
       violations.push(`${file}: external action is not pinned to a full commit SHA: ${action}`);
     }
   }
@@ -79,7 +78,7 @@ for (const requiredFragment of [
   }
 }
 
-if (releaseWorkflow !== undefined && /ghcr\.io\/[^\s"']+:(?:main|latest)\b/.test(releaseWorkflow)) {
+if (releaseWorkflow !== undefined && containsMutableContainerTag(releaseWorkflow)) {
   violations.push('release.yml: formal releases must not use main or latest image tags');
 }
 if (

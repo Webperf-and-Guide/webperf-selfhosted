@@ -9,6 +9,8 @@ const ignoredPrefixes = [
   'apps/probe-rs/target/'
 ];
 const markdownLinkPattern = /!?\[[^\]]*\]\((<[^>]+>|[^\s)]+)(?:\s+["'][^)]*["'])?\)/g;
+const referenceDefinitionPattern = /^\s{0,3}\[([^\]^][^\]]*)\]:\s*(<[^>\n]+>|[^\s\n]+)(?:\s+.*)?$/gm;
+const referenceLinkPattern = /!?\[([^\]\n]+)\]\[([^\]\n]*)\]/g;
 const errors: string[] = [];
 let checkedFiles = 0;
 const requiredUserGuides = [
@@ -54,14 +56,41 @@ for (const relativePath of (await files).sort()) {
   }
 
   for (const [index, line] of source.split('\n').entries()) {
-    if (/\/(?:Users|home)\/[A-Za-z0-9._-]+\//.test(line) || line.includes('file://')) {
+    if (
+      /\/(?:Users|home)\/[A-Za-z0-9._-]+\//.test(line)
+      || /\b[A-Za-z]:\\(?:Users|home|Windows|Program Files)\\/i.test(line)
+      || line.includes('file://')
+    ) {
       errors.push(`${relativePath}:${index + 1}: local absolute path is not public-safe`);
     }
   }
 
+  const referenceDefinitions = new Set<string>();
+  for (const match of source.matchAll(referenceDefinitionPattern)) {
+    const label = normalizeReferenceLabel(match[1]);
+    const rawTarget = match[2];
+    referenceDefinitions.add(label);
+    validateLocalLinkTarget(rawTarget, relativePath, absolutePath);
+  }
+
+  for (const match of source.matchAll(referenceLinkPattern)) {
+    const label = normalizeReferenceLabel(match[2] || match[1]);
+    if (!referenceDefinitions.has(label)) {
+      errors.push(`${relativePath}: unresolved reference-style link [${match[2] || match[1]}]`);
+    }
+  }
+
   for (const match of source.matchAll(markdownLinkPattern)) {
-    const rawTarget = match[1].replace(/^<|>$/g, '');
-    const target = rawTarget.split('#', 1)[0].split('?', 1)[0];
+    validateLocalLinkTarget(match[1], relativePath, absolutePath);
+  }
+
+  function validateLocalLinkTarget(
+    rawValue: string,
+    sourcePath: string,
+    sourceAbsolutePath: string
+  ) {
+    const rawTarget = rawValue.replace(/^<|>$/g, '');
+    const target = rawTarget.split('#', 1)[0]!.split('?', 1)[0]!;
 
     if (
       !target
@@ -69,28 +98,28 @@ for (const relativePath of (await files).sort()) {
       || target.startsWith('//')
       || /^[a-z][a-z0-9+.-]*:/i.test(target)
     ) {
-      continue;
+      return;
     }
 
     let decodedTarget: string;
     try {
       decodedTarget = decodeURIComponent(target);
     } catch {
-      errors.push(`${relativePath}: invalid percent-encoding in link ${rawTarget}`);
-      continue;
+      errors.push(`${sourcePath}: invalid percent-encoding in link ${rawTarget}`);
+      return;
     }
 
     const resolvedTarget = decodedTarget.startsWith('/')
       ? resolve(repositoryRoot, decodedTarget.slice(1))
-      : resolve(dirname(absolutePath), decodedTarget);
+      : resolve(dirname(sourceAbsolutePath), decodedTarget);
 
     if (!existsSync(resolvedTarget)) {
-      errors.push(`${relativePath}: broken relative link ${rawTarget}`);
-      continue;
+      errors.push(`${sourcePath}: broken relative link ${rawTarget}`);
+      return;
     }
 
     if (decodedTarget.endsWith('/') && !statSync(resolvedTarget).isDirectory()) {
-      errors.push(`${relativePath}: link expects a directory ${rawTarget}`);
+      errors.push(`${sourcePath}: link expects a directory ${rawTarget}`);
     }
   }
 }
@@ -145,3 +174,7 @@ if (errors.length > 0) {
 }
 
 console.log(JSON.stringify({ ok: true, markdownFiles: checkedFiles }));
+
+function normalizeReferenceLabel(value: string) {
+  return value.trim().replaceAll(/\s+/g, ' ').toLowerCase();
+}

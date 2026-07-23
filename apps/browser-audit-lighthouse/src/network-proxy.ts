@@ -127,9 +127,8 @@ const proxyHttpRequest = async (
   resolveTarget: (value: string) => ReturnType<typeof resolveBrowserRequestTarget>,
   trackSocket: (socket: Socket) => Socket
 ) => {
-  let upstream: ReturnType<typeof createHttpRequest> | null = null;
-  request.once('error', () => upstream?.destroy());
-  response.once('error', () => upstream?.destroy());
+  request.once('error', () => response.destroy());
+  response.once('error', () => request.destroy());
 
   try {
     if (!request.url) {
@@ -139,10 +138,13 @@ const proxyHttpRequest = async (
     if (target.url.protocol !== 'http:') {
       throw new Error('HTTPS proxy requests must use CONNECT');
     }
+    if (request.destroyed || response.destroyed) {
+      return;
+    }
 
     const headers = sanitizeHeaders(request.headers);
     headers.host = target.url.host;
-    upstream = createHttpRequest({
+    const upstream = createHttpRequest({
       host: target.address,
       family: target.family,
       port: Number(target.url.port || '80'),
@@ -150,13 +152,12 @@ const proxyHttpRequest = async (
       path: `${target.url.pathname}${target.url.search}`,
       headers
     });
-    const targetRequest = upstream;
-    targetRequest.on('socket', trackSocket);
-    targetRequest.setTimeout(
+    upstream.on('socket', trackSocket);
+    upstream.setTimeout(
       httpIdleTimeoutMs,
-      () => targetRequest.destroy(new Error('Browser proxy HTTP request timed out'))
+      () => upstream.destroy(new Error('Browser proxy HTTP request timed out'))
     );
-    targetRequest.once('response', (upstreamResponse) => {
+    upstream.once('response', (upstreamResponse) => {
       response.writeHead(
         upstreamResponse.statusCode ?? 502,
         sanitizeHeaders(upstreamResponse.headers)
@@ -164,10 +165,10 @@ const proxyHttpRequest = async (
       upstreamResponse.once('error', () => response.destroy());
       upstreamResponse.pipe(response);
     });
-    targetRequest.once('error', () => sendProxyError(response));
-    request.once('aborted', () => targetRequest.destroy());
-    response.once('close', () => targetRequest.destroy());
-    request.pipe(targetRequest);
+    upstream.once('error', () => sendProxyError(response));
+    request.once('aborted', () => upstream.destroy());
+    response.once('close', () => upstream.destroy());
+    request.pipe(upstream);
   } catch {
     sendProxyError(response);
   }
@@ -230,12 +231,16 @@ const sanitizeHeaders = (headers: IncomingHttpHeaders): IncomingHttpHeaders =>
   );
 
 const sendProxyError = (response: ServerResponse) => {
-  if (!response.headersSent) {
-    response.writeHead(502, {
-      connection: 'close',
-      'content-type': 'text/plain; charset=utf-8'
-    });
+  if (response.headersSent) {
+    if (!response.writableEnded) {
+      response.destroy();
+    }
+    return;
   }
+  response.writeHead(502, {
+    connection: 'close',
+    'content-type': 'text/plain; charset=utf-8'
+  });
   response.end('Browser request blocked by network policy');
 };
 

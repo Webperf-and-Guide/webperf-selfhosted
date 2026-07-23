@@ -6,6 +6,7 @@ export type LookupAddress = { address: string; family: number };
 export type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
 
 const blockedAddresses = new BlockList();
+const maxBlockedErrors = 8;
 
 for (const [network, prefix] of [
   ['0.0.0.0', 8],
@@ -153,7 +154,7 @@ export const installBrowserNetworkGuard = async (
   const recordBlockedError = (error: unknown, fallback: string) => {
     const normalized = error instanceof Error ? error : new Error(fallback);
     if (
-      blockedErrors.length < 8
+      blockedErrors.length < maxBlockedErrors
       && !blockedErrors.some((existing) => existing.message === normalized.message)
     ) {
       blockedErrors.push(normalized);
@@ -246,11 +247,11 @@ export const installBrowserNetworkGuard = async (
       if (causes.length === 0) {
         throw primaryError;
       }
-      throw new Error(primaryError.message, {
-        cause: causes.length === 1
-          ? causes[0]
-          : new AggregateError(causes, 'Additional browser network failures')
-      });
+      throw new AggregateError(
+        [primaryError, ...causes],
+        primaryError.message,
+        { cause: primaryError }
+      );
     }
   };
 };

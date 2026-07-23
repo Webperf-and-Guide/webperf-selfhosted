@@ -162,4 +162,40 @@ describe('self-host process heartbeat', () => {
     expect(fallbackLogs.join('\n')).not.toContain('must-not-appear');
     expect(fallbackLogs.join('\n')).not.toContain('failure-reporter-secret');
   });
+
+  test('observes asynchronous failure reporter rejections', async () => {
+    const originalConsoleError = console.error;
+    const fallbackLogs: string[] = [];
+    let writeCount = 0;
+    let stop: (() => void) | undefined;
+    console.error = (...values: unknown[]) => {
+      fallbackLogs.push(values.map(String).join(' '));
+    };
+
+    try {
+      stop = await startProcessHeartbeat({
+        heartbeatPath: '/unused/test-heartbeat',
+        intervalMs: 2,
+        failureReportIntervalMs: 1,
+        writeHeartbeat: async () => {
+          writeCount += 1;
+          if (writeCount > 1) {
+            throw new Error('must-not-appear');
+          }
+        },
+        onWriteFailure: async () => {
+          await Promise.resolve();
+          throw new Error('async-failure-reporter-secret');
+        }
+      });
+      await Bun.sleep(15);
+    } finally {
+      stop?.();
+      console.error = originalConsoleError;
+    }
+
+    expect(fallbackLogs.length).toBeGreaterThanOrEqual(1);
+    expect(fallbackLogs.join('\n')).toContain('process_heartbeat_failure_report_failed');
+    expect(fallbackLogs.join('\n')).not.toContain('async-failure-reporter-secret');
+  });
 });

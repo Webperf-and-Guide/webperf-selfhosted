@@ -14,7 +14,8 @@ export type ProcessHeartbeatWriter = (
 ) => Promise<void>;
 
 /**
- * Starts a self-host worker heartbeat containing a Unix timestamp and newline.
+ * Starts a self-host worker heartbeat containing a Unix epoch timestamp in
+ * milliseconds and a newline.
  * The initial write is awaited and rejects on failure. Later writes run serially
  * without blocking the event loop; persistent failures invoke `onWriteFailure`
  * at most once per reporting interval. The returned function stops future writes.
@@ -32,7 +33,7 @@ export const startProcessHeartbeat = async ({
   failureReportIntervalMs?: number;
   writeTimeoutMs?: number;
   writeHeartbeat?: ProcessHeartbeatWriter;
-  onWriteFailure?: () => void;
+  onWriteFailure?: () => void | PromiseLike<void>;
 }) => {
   const normalizedPath = heartbeatPath.trim();
   if (!normalizedPath) {
@@ -72,7 +73,9 @@ export const startProcessHeartbeat = async ({
     lastFailureReportedAt = now;
 
     try {
-      onWriteFailure();
+      void Promise.resolve(onWriteFailure()).catch(() => {
+        reportHeartbeatDiagnosticFailure();
+      });
     } catch {
       // A diagnostic callback must not turn a stale heartbeat into a process crash.
       reportHeartbeatDiagnosticFailure();

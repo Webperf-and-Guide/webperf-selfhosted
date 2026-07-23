@@ -83,11 +83,16 @@ describe('API secret redaction', () => {
     const response = new Response('not-json', {
       headers: {
         'content-type': 'application/json',
-        'content-length': '100'
+        'content-length': '100',
+        'access-control-allow-origin': 'https://console.example.test',
+        'x-webperf-metadata': 'preserved'
       }
     });
     const redacted = await redactJsonResponse(response);
     expect(redacted.headers.get('content-length')).toBeNull();
+    expect(redacted.headers.get('access-control-allow-origin'))
+      .toBe('https://console.example.test');
+    expect(redacted.headers.get('x-webperf-metadata')).toBe('preserved');
     expect(redacted.status).toBe(500);
     expect(await redacted.json()).toEqual({ error: 'Response was not valid JSON' });
 

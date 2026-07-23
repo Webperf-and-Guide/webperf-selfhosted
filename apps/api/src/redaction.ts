@@ -10,13 +10,36 @@ const exactSensitiveHeaderNames = new Set([
   'x-api-key',
   'api-key'
 ]);
+const compactSensitiveHeaderNames = new Set([
+  'apikey',
+  'apitoken',
+  'accesskey',
+  'accesstoken',
+  'refreshkey',
+  'refreshtoken',
+  'authkey',
+  'authtoken',
+  'csrfkey',
+  'csrftoken',
+  'sessionkey',
+  'sessiontoken',
+  'bearerkey',
+  'bearertoken',
+  'clientsecret',
+  'clientkey',
+  'clienttoken',
+  'privatekey',
+  'signingkey',
+  'encryptionkey'
+]);
 
 export const isSensitiveHeaderName = (name: string) => {
   const normalized = name.trim().toLowerCase();
   const compact = normalized.replaceAll(/[-_]/g, '');
   return exactSensitiveHeaderNames.has(normalized)
     || /(?:^|[-_])(token|secret|key|password|passwd|credential|bearer)(?:$|[-_])/.test(normalized)
-    || /^(?:x)?(?:api(?:key|token)|access(?:key|token)|refresh(?:key|token)|auth(?:key|token)|csrf(?:key|token)|session(?:key|token)|bearer(?:key|token)|client(?:secret|key|token)|privatekey|signingkey|encryptionkey)$/.test(compact);
+    || compactSensitiveHeaderNames.has(compact)
+    || (compact.startsWith('x') && compactSensitiveHeaderNames.has(compact.slice(1)));
 };
 
 const isSensitivePropertyName = (name: string) =>
@@ -131,7 +154,10 @@ export const redactJsonResponse = async (response: Response) => {
   const body = await readBoundedResponseText(response, maxRedactedJsonResponseBytes);
 
   if (body === null) {
-    return safeRedactionFailureResponse('Response exceeded the safe redaction byte limit');
+    return safeRedactionFailureResponse(
+      'Response exceeded the safe redaction byte limit',
+      response
+    );
   }
 
   if (body.length === 0) {
@@ -141,12 +167,15 @@ export const redactJsonResponse = async (response: Response) => {
   try {
     return rebuildResponse(JSON.stringify(redactSensitiveData(JSON.parse(body))), response);
   } catch {
-    return safeRedactionFailureResponse('Response was not valid JSON');
+    return safeRedactionFailureResponse('Response was not valid JSON', response);
   }
 };
 
 const readBoundedResponseText = async (response: Response, maxBytes: number) => {
-  const declaredBytes = Number(response.headers.get('content-length'));
+  const contentLengthHeader = response.headers.get('content-length');
+  const declaredBytes = contentLengthHeader === null
+    ? Number.NaN
+    : Number.parseInt(contentLengthHeader, 10);
 
   if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
     await response.body?.cancel().catch(() => {});
@@ -189,14 +218,20 @@ const readBoundedResponseText = async (response: Response, maxBytes: number) => 
   return new TextDecoder().decode(bytes);
 };
 
-const safeRedactionFailureResponse = (message: string) =>
-  new Response(JSON.stringify({ error: message }), {
+const safeRedactionFailureResponse = (message: string, response: Response) => {
+  const headers = new Headers(response.headers);
+  for (const entityHeader of ['content-encoding', 'content-length', 'content-range', 'etag']) {
+    headers.delete(entityHeader);
+  }
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('cache-control', 'no-store');
+
+  return new Response(JSON.stringify({ error: message }), {
     status: 500,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store'
-    }
+    statusText: 'Internal Server Error',
+    headers
   });
+};
 
 const rebuildResponse = (body: BodyInit | null, response: Response) => {
   const headers = new Headers(response.headers);

@@ -55,6 +55,8 @@ Sensitive header matching includes `authorization`, `cookie`, `set-cookie`,
 `proxy-authorization`, `x-api-key`, `api-key`, and custom names containing a
 standalone `token`, `secret`, or `key` segment. A masked value submitted during
 a Check update preserves the already-encrypted value instead of replacing it.
+The same marker is rejected when a new sensitive header or webhook target has
+no previous secret to preserve.
 
 ## Network policy
 

@@ -102,7 +102,11 @@ export const alertTriggerSchema = z.object({
 });
 export type AlertTrigger = z.infer<typeof alertTriggerSchema>;
 
-const configuredWebhookSecretSchema = z.string().min(16).max(200);
+export const redactedValue = '[REDACTED]' as const;
+const configuredWebhookSecretSchema = z.union([
+  z.string().min(16).max(200),
+  z.literal(redactedValue)
+]);
 const persistedWebhookSecretSchema = z.preprocess(
   (value) => value === '' ? null : value,
   z.string().min(1).max(200).nullable()

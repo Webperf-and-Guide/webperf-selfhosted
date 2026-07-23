@@ -195,6 +195,10 @@ describe('execution job contracts', () => {
     }).success).toBe(true);
     expect(createWebhookAlertTargetSchema.safeParse({
       ...createTarget,
+      secret: '[REDACTED]'
+    }).success).toBe(true);
+    expect(createWebhookAlertTargetSchema.safeParse({
+      ...createTarget,
       secret: 'short'
     }).success).toBe(false);
     expect(createWebhookAlertTargetSchema.safeParse({

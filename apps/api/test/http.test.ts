@@ -324,6 +324,33 @@ describe('api service monitoring expansion', () => {
       );
       expect(JSON.stringify(failedTransportBody)).not.toContain('raw-sensitive-repository-error');
 
+      const originalCreateExecutionResource = harness.repository.createExecutionResource;
+      harness.repository.createExecutionResource = () => {
+        throw new Error('raw-sensitive-job-queue-error');
+      };
+      let failedJobResponse: Response;
+
+      try {
+        failedJobResponse = await fetch(`${harness.baseUrl}/v1/jobs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            url: 'https://example.com/',
+            regions: ['tokyo']
+          })
+        });
+      } finally {
+        harness.repository.createExecutionResource = originalCreateExecutionResource;
+      }
+
+      expect(failedJobResponse.status).toBe(500);
+      const failedJobBody = await failedJobResponse.json();
+      expect(failedJobBody).toMatchObject({ error: 'Failed to queue job' });
+      expect(failedJobBody.incidentId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
+      expect(JSON.stringify(failedJobBody)).not.toContain('raw-sensitive-job-queue-error');
+
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);
       const openApi = await openApiResponse.json();
@@ -340,6 +367,21 @@ describe('api service monitoring expansion', () => {
       const property = await createProperty(harness.baseUrl);
       const routeSet = await createRouteSet(harness.baseUrl, property.id);
       const regionPack = await createRegionPack(harness.baseUrl);
+      const maskedWebhookSecretResponse = await postCheckProfile(harness.baseUrl, {
+        propertyId: property.id,
+        routeSetId: routeSet.id,
+        regionPackId: regionPack.id,
+        monitorType: 'latency',
+        latencyThresholdMs: 600,
+        webhookUrl: webhook.url,
+        webhookSecret: '[REDACTED]',
+        name: 'Reject masked webhook secret'
+      });
+      expect(maskedWebhookSecretResponse.status).toBe(400);
+      expect(await maskedWebhookSecretResponse.json()).toEqual({
+        error: 'A new webhook secret cannot use [REDACTED] as its value'
+      });
+
       const thresholdProfile = await createCheckProfile(harness.baseUrl, {
         propertyId: property.id,
         routeSetId: routeSet.id,
@@ -1518,21 +1560,21 @@ const createRegionPack = async (baseUrl: string) => {
   return payload.regionPack as { id: string };
 };
 
-const createCheckProfile = async (
-  baseUrl: string,
-  input: {
-    propertyId: string;
-    routeSetId: string;
-    regionPackId: string;
-    monitorType: 'latency' | 'uptime';
-    latencyThresholdMs: number | null;
-    webhookUrl: string;
-    scheduleIntervalMinutes?: number;
-    name?: string;
-    note?: string;
-  }
-) => {
-  const response = await fetch(`${baseUrl}/v1/check-profiles`, {
+type CheckProfileTestInput = {
+  propertyId: string;
+  routeSetId: string;
+  regionPackId: string;
+  monitorType: 'latency' | 'uptime';
+  latencyThresholdMs: number | null;
+  webhookUrl: string;
+  webhookSecret?: string;
+  scheduleIntervalMinutes?: number;
+  name?: string;
+  note?: string;
+};
+
+const postCheckProfile = async (baseUrl: string, input: CheckProfileTestInput) =>
+  fetch(`${baseUrl}/v1/check-profiles`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json'
@@ -1559,7 +1601,11 @@ const createCheckProfile = async (
       },
       alerts: {
         enabled: true,
-        webhookTargets: [{ name: 'Primary', url: input.webhookUrl }],
+        webhookTargets: [{
+          name: 'Primary',
+          url: input.webhookUrl,
+          secret: input.webhookSecret
+        }],
         triggers: {
           onFailure: true,
           onLatencyThresholdBreach: true,
@@ -1569,6 +1615,9 @@ const createCheckProfile = async (
       scheduleIntervalMinutes: input.scheduleIntervalMinutes
     })
   });
+
+const createCheckProfile = async (baseUrl: string, input: CheckProfileTestInput) => {
+  const response = await postCheckProfile(baseUrl, input);
   const payload = await response.json();
   expect(response.ok).toBe(true);
   return payload.profile as { id: string };

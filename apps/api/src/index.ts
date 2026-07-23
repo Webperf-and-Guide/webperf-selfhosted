@@ -1509,13 +1509,25 @@ async function handleCreateJob(request: Request) {
       monitorPolicy: normalizeMonitorPolicy(parsed.data.monitorPolicy),
       requesterIp: request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? null
     });
-    createNetworkExecutionResource([job], null, null);
   } catch (error) {
     return json(
       {
         error: error instanceof Error ? error.message : 'Failed to create job'
       },
       { status: 400 }
+    );
+  }
+
+  try {
+    createNetworkExecutionResource([job], null, null);
+  } catch (error) {
+    const incidentId = logExecutionCreationFailure('manual_job_create', error, job.id);
+    return json(
+      {
+        error: 'Failed to queue job',
+        incidentId
+      },
+      { status: 500 }
     );
   }
 
@@ -3245,8 +3257,6 @@ function createJobRecord({
     summary: summarizeTargets(targets)
   };
 
-  repository.pruneJobsOlderThan(runtime.retentionDays);
-
   return job;
 }
 
@@ -3278,6 +3288,8 @@ function createNetworkExecutionResource(
     runId: run?.id ?? null
   });
 
+  repository.pruneJobsOlderThan(runtime.retentionDays);
+
   return repository.createExecutionResource({
     executionJob: {
       id: `exec_${resourceId}`,
@@ -3295,7 +3307,7 @@ function createNetworkExecutionResource(
 }
 
 function logExecutionCreationFailure(
-  operation: 'manual_check_run' | 'scheduled_check_run' | 'browser_audit',
+  operation: 'manual_job_create' | 'manual_check_run' | 'scheduled_check_run' | 'browser_audit',
   error: unknown,
   resourceId: string
 ) {
@@ -3485,10 +3497,7 @@ function normalizeAlertConfig(
       name: requireTrimmedText(target.name, 'Webhook target name'),
       url: target.url.trim(),
       enabled: target.enabled ?? true,
-      secret:
-        target.secret === redactedValue && previousTarget?.secret
-          ? previousTarget.secret
-          : normalizeOptionalText(target.secret)
+      secret: resolveMaskedWebhookSecret(target.secret, previousTarget?.secret ?? null)
     };
   }) ?? existing?.webhookTargets ?? [];
 
@@ -3502,6 +3511,21 @@ function normalizeAlertConfig(
       onRegression: alerts?.triggers?.onRegression ?? existing?.triggers?.onRegression ?? false
     }
   } satisfies NonNullable<CheckProfile['alerts']>;
+}
+
+function resolveMaskedWebhookSecret(
+  value: string | null | undefined,
+  previousValue: string | null
+) {
+  if (value !== redactedValue) {
+    return normalizeOptionalText(value);
+  }
+
+  if (!previousValue) {
+    throw new Error(`A new webhook secret cannot use ${redactedValue} as its value`);
+  }
+
+  return previousValue;
 }
 
 function safeLatestComparison(profile: CheckProfile, currentRun: CheckProfileRun) {

@@ -1,4 +1,6 @@
-export const redactedValue = '[REDACTED]';
+import { redactedValue } from '@webperf/contracts';
+
+export { redactedValue };
 export const maxRedactedJsonResponseBytes = 5 * 1024 * 1024;
 const maxRedactionDepth = 32;
 const staleEntityHeaderNames = new Set([

@@ -7,6 +7,7 @@ import {
   browserAuditPolicySchema,
   browserAuditResultSchema,
   browserAuditScoresSchema,
+  browserAuditToolchainSchema,
   browserAuditTerminalExecutionStatusValues,
   isBrowserAuditTerminalExecutionStatus,
   standardBrowserAuditArtifactKinds
@@ -213,6 +214,12 @@ describe('engine-neutral Browser Audit Protocol', () => {
     });
   });
 
+  test('does not infer a Lighthouse toolchain from only a flow DSL version', () => {
+    expect(browserAuditToolchainSchema.safeParse({
+      flowDslVersion: 'v1'
+    }).success).toBe(false);
+  });
+
   test('aligns artifact locator identifiers with storage segments', () => {
     expect(browserAuditArtifactLocatorSchema.safeParse({
       auditId: 'audit_safe-1',
@@ -221,6 +228,10 @@ describe('engine-neutral Browser Audit Protocol', () => {
     expect(browserAuditArtifactLocatorSchema.safeParse({
       auditId: '../audit',
       artifactId: 'artifact/escape'
+    }).success).toBe(false);
+    expect(browserAuditArtifactLocatorSchema.safeParse({
+      auditId: `a${'b'.repeat(159)}`,
+      artifactId: `a${'b'.repeat(160)}`
     }).success).toBe(false);
   });
 });

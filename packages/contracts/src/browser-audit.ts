@@ -28,6 +28,7 @@ const browserAuditScoreKeyIdentifierPattern = /^[a-z][a-zA-Z0-9]*$/;
 const browserAuditLegacyUrlSchema = z.string().url();
 const browserAuditArtifactStorageSegmentSchema = z
   .string()
+  .max(160)
   .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/);
 
 export const browserAuditPresetSchema = z.enum(['mobile', 'desktop']);
@@ -630,7 +631,6 @@ function normalizeLegacyBrowserAuditToolchain(value: unknown) {
   }
 
   const legacyFields = [
-    'flowDslVersion',
     'bunVersion',
     'chromeVersion',
     'puppeteerVersion',

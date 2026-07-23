@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { relative, resolve, sep } from 'node:path';
 
 const repositoryRoot = resolve(import.meta.dir, '../..');
 const examplePath = resolve(repositoryRoot, 'infra/docker-compose/.env.example');
@@ -21,13 +21,14 @@ export const renderSelfhostEnvironment = (
   const content = template
     .split('\n')
     .map((line) => {
-      const separator = line.indexOf('=');
+      const normalizedLine = line.replace(/\r$/, '');
+      const separator = normalizedLine.indexOf('=');
 
       if (separator < 0) {
-        return line;
+        return normalizedLine;
       }
 
-      const key = line.slice(0, separator);
+      const key = normalizedLine.slice(0, separator);
       const secretKey = key as (typeof secretKeys)[number];
 
       if (generated.has(secretKey)) {
@@ -40,7 +41,7 @@ export const renderSelfhostEnvironment = (
         return `${key}=`;
       }
 
-      return line;
+      return normalizedLine;
     })
     .join('\n');
   const requiredKeys = [...secretKeys, ...nextSecretKeys];
@@ -67,12 +68,28 @@ const main = () => {
     repositoryRoot,
     outputValue ?? 'infra/docker-compose/.env'
   );
+  const relativeOutputPath = relative(repositoryRoot, outputPath);
 
-  if (!existsSync(examplePath)) {
-    throw new Error(`Required self-host environment template not found: ${examplePath}`);
+  if (
+    relativeOutputPath === ''
+    || relativeOutputPath === '..'
+    || relativeOutputPath.startsWith(`..${sep}`)
+    || resolve(repositoryRoot, relativeOutputPath) !== outputPath
+  ) {
+    throw new Error('--output must resolve to a file inside the repository');
   }
 
-  const content = renderSelfhostEnvironment(readFileSync(examplePath, 'utf8'));
+  let template: string;
+  try {
+    template = readFileSync(examplePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Required self-host environment template not found: ${examplePath}`);
+    }
+    throw error;
+  }
+
+  const content = renderSelfhostEnvironment(template);
 
   try {
     writeFileSync(outputPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });

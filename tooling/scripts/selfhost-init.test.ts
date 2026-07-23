@@ -28,4 +28,16 @@ describe('self-host environment initialization', () => {
       completeTemplate.replace('PROBE_SHARED_SECRET_NEXT=replace\n', '')
     )).toThrow('PROBE_SHARED_SECRET_NEXT');
   });
+
+  test('normalizes CRLF templates without corrupting environment keys', () => {
+    let sequence = 0;
+    const rendered = renderSelfhostEnvironment(
+      completeTemplate.replaceAll('\n', '\r\n'),
+      () => `generated-${++sequence}`
+    );
+
+    expect(rendered).toContain('SELFHOST_ADMIN_TOKEN=generated-1');
+    expect(rendered).toContain('BROWSER_AUDIT_SHARED_SECRET_NEXT=');
+    expect(rendered).not.toContain('\r');
+  });
 });

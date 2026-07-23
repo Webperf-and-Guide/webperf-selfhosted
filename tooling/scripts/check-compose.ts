@@ -45,6 +45,7 @@ const expectedImages: Record<string, string> = {
   scheduler: 'webperf-scheduler',
   'browser-audit-lighthouse': 'webperf-browser-audit-lighthouse'
 };
+const nonRootNumericUserPattern = /^[1-9]\d*(?::\d+)?$/;
 
 const production = renderCompose([productionFile]);
 const productionWithProfiles = renderCompose(
@@ -75,10 +76,9 @@ for (const [name, expectedImage] of Object.entries(expectedImages)) {
 }
 
 for (const [name, service] of Object.entries(productionWithProfiles.services)) {
-  const runtimeUser = service.user?.split(':', 1)[0];
   assert(
-    runtimeUser !== undefined && runtimeUser !== '0' && runtimeUser !== 'root',
-    `${name} must run as non-root`
+    nonRootNumericUserPattern.test(service.user ?? ''),
+    `${name} must run as an explicit non-root numeric user`
   );
   assert(service.read_only === true, `${name} must use a read-only root filesystem`);
   assert(service.restart === 'unless-stopped', `${name} must restart unless stopped`);
@@ -201,7 +201,8 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
   const result = Bun.spawnSync(command, {
     cwd: repositoryRoot,
     stdout: 'pipe',
-    stderr: 'pipe'
+    stderr: 'pipe',
+    timeout: 30_000
   });
 
   if (result.exitCode !== 0) {
@@ -226,7 +227,11 @@ function assertLoopbackPort(service: ComposeService | undefined, target: number,
 function assertBrowserSeccompProfile() {
   const profile = JSON.parse(readFileSync(browserSeccompFile, 'utf8')) as {
     defaultAction?: string;
-    syscalls?: Array<{ names?: string[]; action?: string }>;
+    syscalls?: Array<{
+      names?: string[];
+      action?: string;
+      includes?: { caps?: string[]; minKernel?: string } | null;
+    }>;
   };
   assert(profile.defaultAction === 'SCMP_ACT_ERRNO', 'Browser seccomp must default-deny syscalls');
   const namespaceRule = profile.syscalls?.find(
@@ -235,6 +240,30 @@ function assertBrowserSeccompProfile() {
       && JSON.stringify(rule.names) === JSON.stringify(['clone', 'setns', 'unshare'])
   );
   assert(namespaceRule, 'Browser seccomp must allow only the required namespace syscalls explicitly');
+
+  const highRiskSyscalls = new Set([
+    'bpf',
+    'mount',
+    'process_vm_readv',
+    'process_vm_writev',
+    'ptrace',
+    'reboot'
+  ]);
+  for (const rule of profile.syscalls ?? []) {
+    if (
+      rule.action !== 'SCMP_ACT_ALLOW'
+      || (rule.includes?.caps?.length ?? 0) > 0
+      || Boolean(rule.includes?.minKernel)
+    ) {
+      continue;
+    }
+
+    const unsafe = rule.names?.filter((name) => highRiskSyscalls.has(name)) ?? [];
+    assert(
+      unsafe.length === 0,
+      `Browser seccomp must not unconditionally allow high-risk syscalls: ${unsafe.join(', ')}`
+    );
+  }
 }
 
 function parseSizeToBytes(value: string | number | undefined) {

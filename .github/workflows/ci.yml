@@ -40,6 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
       - run: bun run check:docs
 
   rust:
@@ -153,6 +154,7 @@ jobs:
           IMAGES_RESULT: ${{ needs.images.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
         run: |
+          set -euo pipefail
           for result in "$JS_RESULT" "$DOCS_RESULT" "$RUST_RESULT" "$IMAGES_RESULT" "$INTEGRATION_RESULT"; do
             test "$result" = "success"
           done
@@ -208,6 +210,8 @@ jobs:
           file: ${{ matrix.file }}
           platforms: linux/amd64
           push: true
+          # `main` is an explicitly mutable development channel. Production
+          # installs use immutable release versions or digest-pinned bundles.
           tags: |
             ghcr.io/webperf-and-guide/${{ matrix.image }}:main
             ghcr.io/webperf-and-guide/${{ matrix.image }}:sha-${{ github.sha }}

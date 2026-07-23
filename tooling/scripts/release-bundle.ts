@@ -175,7 +175,7 @@ export function renderReleaseBundle({
     if (!matches?.length) {
       throw new Error(`Compose does not contain a version placeholder for ${entry.image}`);
     }
-    compose = compose.replace(dynamicReference, entry.reference);
+    compose = compose.replace(dynamicReference, () => entry.reference);
   }
   compose = compose.replace(/\$\{WEBPERF_VERSION:[^}]+\}/g, version);
   validateReleaseComposeImages(compose);

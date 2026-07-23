@@ -33,7 +33,7 @@ const requiredContributorGuides = [
   'docs/contributors/development.md',
   'docs/contributors/releases.md'
 ];
-const files = Array.fromAsync(
+const files = await Array.fromAsync(
   new Bun.Glob('**/*.md').scan({
     cwd: repositoryRoot,
     dot: true,
@@ -41,7 +41,7 @@ const files = Array.fromAsync(
   })
 );
 
-for (const relativePath of (await files).sort()) {
+for (const relativePath of files.sort()) {
   if (ignoredPrefixes.some((prefix) => relativePath.startsWith(prefix))) {
     continue;
   }
@@ -134,42 +134,44 @@ for (const requiredPath of [...requiredUserGuides, ...requiredContributorGuides]
   }
 }
 
-let readme = '';
+let readme: string | null = null;
 try {
   readme = await Bun.file(resolve(repositoryRoot, 'README.md')).text();
 } catch {
   errors.push('README.md: unable to read entrypoint');
 }
-const readmeLines = readme.split(/\r?\n/);
-const readmeHeadings = [
-  '## Screenshots',
-  '## Docker quick start',
-  '## Core features',
-  '## Optional Browser Audit',
-  '## Security warning',
-  '## Self-hosted and WebPerf Cloud',
-  '## Upgrade and backup',
-  '## Contributor setup'
-];
-let previousHeadingLine = -1;
-for (const heading of readmeHeadings) {
-  const line = readmeLines.findIndex((candidate) => candidate.trimEnd() === heading);
-  if (line === -1) {
-    errors.push(`README.md: required section is missing: ${heading}`);
-    continue;
+if (readme !== null) {
+  const readmeLines = readme.split(/\r?\n/);
+  const readmeHeadings = [
+    '## Screenshots',
+    '## Docker quick start',
+    '## Core features',
+    '## Optional Browser Audit',
+    '## Security warning',
+    '## Self-hosted and WebPerf Cloud',
+    '## Upgrade and backup',
+    '## Contributor setup'
+  ];
+  let previousHeadingLine = -1;
+  for (const heading of readmeHeadings) {
+    const line = readmeLines.findIndex((candidate) => candidate.trimEnd() === heading);
+    if (line === -1) {
+      errors.push(`README.md: required section is missing: ${heading}`);
+      continue;
+    }
+    if (line <= previousHeadingLine) {
+      errors.push(`README.md: section is out of operator-first order: ${heading}`);
+    } else {
+      previousHeadingLine = line;
+    }
   }
-  if (line <= previousHeadingLine) {
-    errors.push(`README.md: section is out of operator-first order: ${heading}`);
-  } else {
-    previousHeadingLine = line;
+  const sourceDevLine = readmeLines.findIndex((line) => line.includes('bun run dev'));
+  const contributorLine = readmeLines.findIndex(
+    (line) => line.trimEnd() === '## Contributor setup'
+  );
+  if (sourceDevLine !== -1 && contributorLine !== -1 && sourceDevLine < contributorLine) {
+    errors.push('README.md: source development instructions must follow operator guidance');
   }
-}
-const sourceDevLine = readmeLines.findIndex((line) => line.includes('bun run dev'));
-const contributorLine = readmeLines.findIndex(
-  (line) => line.trimEnd() === '## Contributor setup'
-);
-if (sourceDevLine !== -1 && contributorLine !== -1 && sourceDevLine < contributorLine) {
-  errors.push('README.md: source development instructions must follow operator guidance');
 }
 
 if (errors.length > 0) {
@@ -213,13 +215,17 @@ function validateLocalLinkTarget(
     ? resolve(repositoryRoot, decodedTarget.slice(1))
     : resolve(dirname(sourceAbsolutePath), decodedTarget);
 
-  if (!existsSync(resolvedTarget)) {
-    errors.push(`${sourcePath}: broken relative link ${rawTarget}`);
-    return;
-  }
+  try {
+    if (!existsSync(resolvedTarget)) {
+      errors.push(`${sourcePath}: broken relative link ${rawTarget}`);
+      return;
+    }
 
-  if (decodedTarget.endsWith('/') && !statSync(resolvedTarget).isDirectory()) {
-    errors.push(`${sourcePath}: link expects a directory ${rawTarget}`);
+    if (decodedTarget.endsWith('/') && !statSync(resolvedTarget).isDirectory()) {
+      errors.push(`${sourcePath}: link expects a directory ${rawTarget}`);
+    }
+  } catch {
+    errors.push(`${sourcePath}: unable to inspect relative link ${rawTarget}`);
   }
 }
 

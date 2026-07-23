@@ -18,6 +18,18 @@ import { LocalBrowserAuditArtifactStore } from '../../apps/api/src/browser-audit
 
 type Command = 'migrate' | 'backup' | 'restore' | 'doctor' | 'maintenance';
 
+class MigrationWithBackupError extends Error {
+  override readonly name = 'MigrationWithBackupError';
+
+  constructor(
+    message: string,
+    readonly backupPath: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+  }
+}
+
 const command = process.argv[2] as Command | undefined;
 const args = process.argv.slice(3);
 
@@ -146,6 +158,15 @@ const migrate = () => {
       appliedNow: result.appliedNow,
       pending: result.pending
     };
+  } catch (error) {
+    if (backupPath) {
+      throw new MigrationWithBackupError(
+        `SQLite migration failed; recovery backup is available at ${backupPath}`,
+        backupPath,
+        { cause: error }
+      );
+    }
+    throw error;
   } finally {
     database.close();
   }
@@ -289,10 +310,15 @@ try {
     process.exitCode = 1;
   }
 } catch (error) {
+  const errorType = error instanceof Error
+    ? error.name
+    : Object.prototype.toString.call(error).slice(8, -1) || 'Unknown';
   console.error(JSON.stringify({
     ok: false,
     command: command ?? null,
-    error: error instanceof Error ? error.message : 'Unknown database operation failure'
+    error: error instanceof Error ? error.message : 'Unknown database operation failure',
+    errorType,
+    ...(error instanceof MigrationWithBackupError ? { backupPath: error.backupPath } : {})
   }));
   process.exitCode = 1;
 }

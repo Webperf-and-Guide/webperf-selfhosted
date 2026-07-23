@@ -13,6 +13,21 @@ const workflowsDirectory = join(root, '.github/workflows');
 const violations: string[] = [];
 const workflowCache = new Map<string, string | undefined>();
 
+type WorkflowImageEntry = {
+  name: string;
+  image: string;
+};
+
+type WorkflowDocument = {
+  jobs?: Record<string, {
+    strategy?: {
+      matrix?: {
+        include?: unknown;
+      };
+    };
+  }>;
+};
+
 function readWorkflow(file: string): string | undefined {
   if (workflowCache.has(file)) {
     return workflowCache.get(file);
@@ -30,6 +45,12 @@ function readWorkflow(file: string): string | undefined {
 
 const releaseWorkflow = readWorkflow('release.yml');
 const ciWorkflow = readWorkflow('ci.yml');
+const releaseImageMatrix = parseImageMatrix(releaseWorkflow, 'release.yml', 'images');
+const developmentImageMatrix = parseImageMatrix(
+  ciWorkflow,
+  'ci.yml',
+  'publish-dev-images'
+);
 
 let workflowFiles: string[] = [];
 try {
@@ -51,15 +72,14 @@ for (const file of workflowFiles) {
 }
 
 for (const definition of releaseImages) {
-  const image = definition.image.split('/').at(-1);
-  const mapping = new RegExp(
-    `^\\s*- name: ${escapeRegExp(definition.name)}\\s*\\n\\s+image: ${escapeRegExp(image ?? '')}\\s*$`,
-    'm'
+  const image = definition.image.split('/').at(-1) ?? '';
+  const hasMapping = (entries: WorkflowImageEntry[]) => entries.some(
+    (entry) => entry.name === definition.name && entry.image === image
   );
-  if (releaseWorkflow !== undefined && !mapping.test(releaseWorkflow)) {
+  if (releaseWorkflow !== undefined && !hasMapping(releaseImageMatrix)) {
     violations.push(`release.yml: missing or incorrect image matrix mapping for ${definition.name}`);
   }
-  if (ciWorkflow !== undefined && !mapping.test(ciWorkflow)) {
+  if (ciWorkflow !== undefined && !hasMapping(developmentImageMatrix)) {
     violations.push(`ci.yml: missing or incorrect main-channel image mapping for ${definition.name}`);
   }
 }
@@ -133,6 +153,34 @@ if (violations.length > 0) {
 
 console.log('Release policy check passed.');
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function parseImageMatrix(
+  content: string | undefined,
+  file: string,
+  jobId: string
+): WorkflowImageEntry[] {
+  if (content === undefined) {
+    return [];
+  }
+
+  let document: WorkflowDocument;
+  try {
+    document = Bun.YAML.parse(content) as WorkflowDocument;
+  } catch {
+    violations.push(`${file}: workflow YAML is invalid`);
+    return [];
+  }
+
+  const include = document.jobs?.[jobId]?.strategy?.matrix?.include;
+  if (!Array.isArray(include)) {
+    violations.push(`${file}: ${jobId} image matrix include list is missing`);
+    return [];
+  }
+
+  return include.filter(
+    (entry): entry is WorkflowImageEntry => (
+      Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+      && typeof (entry as Record<string, unknown>).name === 'string'
+      && typeof (entry as Record<string, unknown>).image === 'string'
+    )
+  );
 }

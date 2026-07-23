@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN bun install --frozen-lockfile --no-save
+RUN bun install --frozen-lockfile
 
 WORKDIR /app/apps/console
 RUN bun run build

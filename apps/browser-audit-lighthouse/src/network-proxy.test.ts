@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createServer, connect, type Server, type Socket } from 'node:net';
-import { startBrowserNetworkProxy, type BrowserNetworkProxy } from './network-proxy';
+import {
+  sanitizeProxyHeaders,
+  startBrowserNetworkProxy,
+  type BrowserNetworkProxy,
+  type BrowserNetworkProxyDiagnostic
+} from './network-proxy';
 
 const proxies: BrowserNetworkProxy[] = [];
 const servers: Server[] = [];
@@ -48,12 +53,14 @@ describe('browser audit pinned network proxy', () => {
 
   test('rejects a private DNS answer before opening a tunnel', async () => {
     let connected = false;
+    const diagnostics: BrowserNetworkProxyDiagnostic[] = [];
     const proxy = await startBrowserNetworkProxy({
       lookupHost: async () => [{ address: '169.254.169.254', family: 4 }],
       connectTarget: () => {
         connected = true;
         throw new Error('must not connect');
-      }
+      },
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
     });
     proxies.push(proxy);
 
@@ -61,6 +68,43 @@ describe('browser audit pinned network proxy', () => {
       'HTTP/1.1 502'
     );
     expect(connected).toBe(false);
+    expect(diagnostics).toEqual([{
+      event: 'connect_request_failed',
+      reason: 'network_policy',
+      errorType: 'Error',
+      errorCode: null
+    }]);
+  });
+
+  test('strips proxy identity headers before forwarding', () => {
+    expect(sanitizeProxyHeaders({
+      host: 'example.com',
+      connection: 'keep-alive',
+      forwarded: 'for=10.0.0.1',
+      'x-forwarded-for': '10.0.0.1',
+      'x-forwarded-host': 'internal.example',
+      'x-forwarded-proto': 'https',
+      'x-real-ip': '10.0.0.1',
+      accept: 'text/html'
+    })).toEqual({
+      host: 'example.com',
+      accept: 'text/html'
+    });
+  });
+
+  test('closes established CONNECT tunnels after the idle deadline', async () => {
+    const upstream = await listenTcpServer();
+    const proxy = await startBrowserNetworkProxy({
+      lookupHost: async () => [{ address: '93.184.216.34', family: 4 }],
+      connectTarget: () => connect({ host: '127.0.0.1', port: upstream.port }),
+      tunnelIdleTimeoutMs: 20
+    });
+    proxies.push(proxy);
+
+    const tunnel = await openConnect(proxy.port, 'idle.example:443');
+    expect(tunnel.response).toStartWith('HTTP/1.1 200');
+    await waitForSocketClose(tunnel.socket);
+    expect(tunnel.socket.destroyed).toBe(true);
   });
 });
 
@@ -78,8 +122,8 @@ const listenTcpServer = async () => {
   return { port: address.port };
 };
 
-const sendConnect = async (port: number, authority: string) =>
-  await new Promise<string>((resolve, reject) => {
+const openConnect = async (port: number, authority: string) =>
+  await new Promise<{ response: string; socket: Socket }>((resolve, reject) => {
     const socket = connect({ host: '127.0.0.1', port });
     sockets.push(socket);
     let response = '';
@@ -88,10 +132,30 @@ const sendConnect = async (port: number, authority: string) =>
     socket.on('data', (chunk) => {
       response += chunk;
       if (response.includes('\r\n\r\n')) {
-        resolve(response);
+        resolve({ response, socket });
       }
     });
     socket.once('connect', () => {
       socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n\r\n`);
     });
   });
+
+const sendConnect = async (port: number, authority: string) =>
+  (await openConnect(port, authority)).response;
+
+const waitForSocketClose = async (socket: Socket) => {
+  if (socket.destroyed) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error('Timed out waiting for CONNECT tunnel to close')),
+      500
+    );
+    socket.once('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+};

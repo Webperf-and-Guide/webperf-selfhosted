@@ -28,9 +28,9 @@ production profile uses the image's setuid Chrome sandbox, a non-root runtime,
 in-flight audit per worker. The image installs the browser-matched sandbox
 helper as root-owned mode `4755` under `/usr/local/sbin` and selects it through
 `CHROME_DEVEL_SANDBOX`; do not replace that variable with `--no-sandbox` in a
-production deployment. The amd64 image also derives its exact Chrome for
-Testing revision from the locked `puppeteer-core` package instead of following
-the mutable `stable` channel.
+production deployment. The amd64 image pins its exact Chrome for Testing
+revision in the Dockerfile, keeps it aligned with the locked `puppeteer-core`
+package, and never follows the mutable `stable` channel.
 
 ## Launch and inspect
 

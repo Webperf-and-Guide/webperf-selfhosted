@@ -1,6 +1,9 @@
 FROM oven/bun:1.3.13-slim
 
-ARG CHROME_VERSION
+# Keep this aligned with PUPPETEER_REVISIONS.chrome in the locked
+# puppeteer-core dependency. Pinning it here makes the downloaded browser an
+# explicit, reviewable image input instead of a CDN-time default.
+ARG CHROME_VERSION=146.0.7680.153
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,14 +46,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /workspace/webperf-selfhosted
 
+COPY package.json bun.lock ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/browser-audit-lighthouse/package.json apps/browser-audit-lighthouse/package.json
+COPY apps/console/package.json apps/console/package.json
+COPY apps/executor/package.json apps/executor/package.json
+COPY apps/scheduler/package.json apps/scheduler/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/domain-core/package.json packages/domain-core/package.json
+COPY packages/report-core/package.json packages/report-core/package.json
+COPY packages/ui/package.json packages/ui/package.json
+
+WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
+
+RUN bun install --frozen-lockfile --filter=webperf-browser-audit-lighthouse --omit=dev
+
+WORKDIR /workspace/webperf-selfhosted
 COPY . /workspace/webperf-selfhosted
 
 WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
-RUN bun install --frozen-lockfile --no-save --filter=webperf-browser-audit-lighthouse --omit=dev
-
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-    apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox && rm -rf /var/lib/apt/lists/*; \
+    apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/google \
+    && ln -s /usr/lib/chromium /opt/google/chrome; \
   else \
     resolved_chrome_version="${CHROME_VERSION:-$(bun -e 'import { PUPPETEER_REVISIONS } from "puppeteer-core"; process.stdout.write(PUPPETEER_REVISIONS.chrome)')}" \
     && test -n "$resolved_chrome_version" \
@@ -79,6 +100,8 @@ USER bun
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
+# Both architectures populate this path: amd64 copies the pinned Chrome build,
+# while arm64 links the distribution Chromium directory into it.
 ENV CHROME_INSTALL_DIR=/opt/google/chrome
 ENV CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
 

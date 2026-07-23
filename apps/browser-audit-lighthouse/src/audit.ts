@@ -10,6 +10,7 @@ import {
   type BrowserAuditToolchain,
   type BrowserAuditWorkerRequest
 } from '@webperf/contracts';
+import { createHash } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
 import type { BrowserAuditWorkerConfig } from './config';
@@ -37,7 +38,7 @@ const presetViewport = {
     hasTouch: false
   }
 } as const;
-const lighthouseArtifactContentTypes = {
+export const lighthouseArtifactContentTypes = {
   html: `${requireRegisteredArtifactContentType('lighthouse-html', 'text/html')}; charset=utf-8`,
   json: requireRegisteredArtifactContentType('lighthouse-json', 'application/json'),
   screenshot: requireRegisteredArtifactContentType('screenshot', 'image/png'),
@@ -83,7 +84,13 @@ export const runBrowserAudit = async ({
   }
 
   const networkProxy = await startBrowserNetworkProxy({
-    allowlist: config.hostAllowlist
+    allowlist: config.hostAllowlist,
+    onDiagnostic(diagnostic) {
+      console.warn(JSON.stringify({
+        service: 'webperf-browser-audit-lighthouse',
+        ...diagnostic
+      }));
+    }
   });
   let browser: Browser;
   try {
@@ -561,12 +568,18 @@ const asAuditRecord = (value: unknown): Record<string, unknown> | null =>
 const toNullableScore = (value: unknown) => (typeof value === 'number' ? value : null);
 const toNullableNumber = (value: unknown) => (typeof value === 'number' ? value : null);
 
-const uploadArtifact = async (
+type ArtifactFetch = (
+  input: string | URL | Request,
+  init?: RequestInit
+) => Promise<Response>;
+
+export const uploadArtifact = async (
   input: BrowserAuditWorkerRequest,
   kind: BrowserAuditArtifactKind,
   filename: string,
   contentType: string,
-  payload: Uint8Array
+  payload: Uint8Array,
+  fetchImpl: ArtifactFetch = fetch
 ) => {
   if (!input.artifactUpload) {
     return [];
@@ -586,7 +599,7 @@ const uploadArtifact = async (
     throw new Error('Artifact content type is not allowed by the upload policy');
   }
 
-  const response = await fetch(
+  const response = await fetchImpl(
     `${input.artifactUpload.baseUrl}/internal/browser-audits/${input.executionId}/artifacts?kind=${kind}&filename=${encodeURIComponent(filename)}`,
     {
       method: 'POST',
@@ -597,7 +610,7 @@ const uploadArtifact = async (
         'x-artifact-size': String(payload.byteLength)
       },
       body: Buffer.from(payload),
-      signal: AbortSignal.timeout(30_000)
+      signal: AbortSignal.timeout(input.policy.timeouts.totalTimeoutMs)
     }
   );
 
@@ -606,13 +619,14 @@ const uploadArtifact = async (
   }
 
   const uploaded = browserAuditArtifactRefSchema.parse(await response.json());
+  const expectedSha256 = createHash('sha256').update(payload).digest('hex');
 
   if (
     uploaded.kind !== kind
     || uploaded.filename !== filename
     || normalizeArtifactContentType(uploaded.contentType) !== registeredContentType
     || uploaded.byteSize !== payload.byteLength
-    || !uploaded.sha256
+    || uploaded.sha256 !== expectedSha256
   ) {
     throw new Error('Artifact upload response did not match the submitted artifact');
   }

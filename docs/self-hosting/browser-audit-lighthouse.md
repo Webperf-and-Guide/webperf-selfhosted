@@ -18,8 +18,8 @@ What it does not include:
 Current tested quartet:
 
 - Bun: `1.3.13`
-- amd64 browser: the Chrome for Testing revision declared by the locked
-  `puppeteer-core` package (`146.0.7680.153` for `24.40.0`)
+- amd64 browser: Chrome for Testing `146.0.7680.153`, pinned as the Docker
+  `CHROME_VERSION` default and kept aligned with `puppeteer-core` `24.40.0`
 - arm64 browser: the Debian Chromium package for the image base
 - Puppeteer: `24.40.0`
 - Lighthouse: `13.1.0`
@@ -101,7 +101,7 @@ profile is deliberately enabled.
 
 Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` when
 enabling the profile. The worker remains on its dedicated Compose network and
-does not publish a host port. On amd64, the image installs Puppeteer's locked
+does not publish a host port. On amd64, the image installs the explicitly pinned
 Chrome for Testing revision at `/opt/google/chrome/chrome`, matching Ubuntu's
 Chrome AppArmor profile path, and preserves a root-owned setuid helper as a
 fallback. Compose applies a default-deny seccomp profile derived from Moby

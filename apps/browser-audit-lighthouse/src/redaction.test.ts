@@ -115,4 +115,18 @@ describe('browser audit redaction', () => {
     expect(byteText).not.toContain('X-CODE: abc');
     expect(byteText).toContain('x-code: ABC');
   });
+
+  test('ignores malformed empty credential names in both redaction paths', () => {
+    const input = {
+      customHeaders: [{ name: '', value: 'ok' }],
+      cookies: [],
+      artifactUpload: null
+    } as unknown as BrowserAuditWorkerRequest;
+    const source = 'status:ok count=ok';
+
+    expect(redactBrowserAuditText(source, input)).toBe(source);
+    expect(new TextDecoder().decode(
+      redactBrowserAuditBytesInPlace(new TextEncoder().encode(source), input)
+    )).toBe(source);
+  });
 });

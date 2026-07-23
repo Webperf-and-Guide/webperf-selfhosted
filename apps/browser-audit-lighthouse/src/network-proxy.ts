@@ -15,6 +15,8 @@ import {
 const proxyHost = '127.0.0.1';
 const connectTimeoutMs = 10_000;
 const httpIdleTimeoutMs = 30_000;
+const defaultTunnelIdleTimeoutMs = 30_000;
+const maximumDiagnostics = 20;
 const hopByHopHeaders = new Set([
   'connection',
   'keep-alive',
@@ -26,6 +28,20 @@ const hopByHopHeaders = new Set([
   'transfer-encoding',
   'upgrade'
 ]);
+const proxySignalingHeaders = new Set([
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip'
+]);
+
+export type BrowserNetworkProxyDiagnostic = {
+  event: 'http_request_failed' | 'connect_request_failed';
+  reason: 'network_policy' | 'timeout' | 'transport';
+  errorType: string;
+  errorCode: string | null;
+};
 
 export type BrowserNetworkProxy = {
   url: string;
@@ -41,13 +57,40 @@ type ConnectTarget = (options: {
 export const startBrowserNetworkProxy = async ({
   allowlist = [],
   lookupHost,
-  connectTarget = (options) => connect(options)
+  connectTarget = (options) => connect(options),
+  tunnelIdleTimeoutMs = defaultTunnelIdleTimeoutMs,
+  onDiagnostic
 }: {
   allowlist?: string[];
   lookupHost?: LookupHost;
   connectTarget?: ConnectTarget;
+  tunnelIdleTimeoutMs?: number;
+  onDiagnostic?: (diagnostic: BrowserNetworkProxyDiagnostic) => void;
 } = {}): Promise<BrowserNetworkProxy> => {
+  if (
+    !Number.isSafeInteger(tunnelIdleTimeoutMs)
+    || tunnelIdleTimeoutMs < 1
+    || tunnelIdleTimeoutMs > 300_000
+  ) {
+    throw new Error('Browser proxy tunnel idle timeout must be between 1 and 300000ms');
+  }
+
   const sockets = new Set<Socket>();
+  let diagnosticCount = 0;
+  const reportDiagnostic = (
+    event: BrowserNetworkProxyDiagnostic['event'],
+    error: unknown
+  ) => {
+    if (!onDiagnostic || diagnosticCount >= maximumDiagnostics) {
+      return;
+    }
+    diagnosticCount += 1;
+    try {
+      onDiagnostic(describeProxyError(event, error));
+    } catch {
+      // Observability hooks must never weaken proxy enforcement.
+    }
+  };
   const trackSocket = (socket: Socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
@@ -60,7 +103,13 @@ export const startBrowserNetworkProxy = async ({
   });
 
   const server = createServer((request, response) => {
-    void proxyHttpRequest(request, response, resolveTarget, trackSocket);
+    void proxyHttpRequest(
+      request,
+      response,
+      resolveTarget,
+      trackSocket,
+      reportDiagnostic
+    );
   });
   server.on('connect', (request, clientSocket, head) => {
     void proxyConnectRequest(
@@ -69,7 +118,9 @@ export const startBrowserNetworkProxy = async ({
       head,
       resolveTarget,
       connectTarget,
-      trackSocket
+      trackSocket,
+      tunnelIdleTimeoutMs,
+      reportDiagnostic
     );
   });
   server.on('upgrade', (_request, socket) => {
@@ -125,9 +176,16 @@ const proxyHttpRequest = async (
   request: IncomingMessage,
   response: ServerResponse,
   resolveTarget: (value: string) => ReturnType<typeof resolveBrowserRequestTarget>,
-  trackSocket: (socket: Socket) => Socket
+  trackSocket: (socket: Socket) => Socket,
+  reportDiagnostic: (
+    event: BrowserNetworkProxyDiagnostic['event'],
+    error: unknown
+  ) => void
 ) => {
-  request.once('error', () => response.destroy());
+  request.once('error', (error) => {
+    reportDiagnostic('http_request_failed', error);
+    response.destroy();
+  });
   response.once('error', () => request.destroy());
 
   try {
@@ -142,7 +200,7 @@ const proxyHttpRequest = async (
       return;
     }
 
-    const headers = sanitizeHeaders(request.headers);
+    const headers = sanitizeProxyHeaders(request.headers);
     headers.host = target.url.host;
     const upstream = createHttpRequest({
       host: target.address,
@@ -160,16 +218,23 @@ const proxyHttpRequest = async (
     upstream.once('response', (upstreamResponse) => {
       response.writeHead(
         upstreamResponse.statusCode ?? 502,
-        sanitizeHeaders(upstreamResponse.headers)
+        sanitizeProxyHeaders(upstreamResponse.headers)
       );
-      upstreamResponse.once('error', () => response.destroy());
+      upstreamResponse.once('error', (error) => {
+        reportDiagnostic('http_request_failed', error);
+        response.destroy();
+      });
       upstreamResponse.pipe(response);
     });
-    upstream.once('error', () => sendProxyError(response));
+    upstream.once('error', (error) => {
+      reportDiagnostic('http_request_failed', error);
+      sendProxyError(response);
+    });
     request.once('aborted', () => upstream.destroy());
     response.once('close', () => upstream.destroy());
     request.pipe(upstream);
-  } catch {
+  } catch (error) {
+    reportDiagnostic('http_request_failed', error);
     sendProxyError(response);
   }
 };
@@ -180,7 +245,12 @@ const proxyConnectRequest = async (
   head: Buffer,
   resolveTarget: (value: string) => ReturnType<typeof resolveBrowserRequestTarget>,
   connectTarget: ConnectTarget,
-  trackSocket: (socket: Socket) => Socket
+  trackSocket: (socket: Socket) => Socket,
+  tunnelIdleTimeoutMs: number,
+  reportDiagnostic: (
+    event: BrowserNetworkProxyDiagnostic['event'],
+    error: unknown
+  ) => void
 ) => {
   let established = false;
   let upstream: Socket | null = null;
@@ -205,7 +275,10 @@ const proxyConnectRequest = async (
     );
     targetSocket.once('connect', () => {
       established = true;
-      targetSocket.setTimeout(0);
+      targetSocket.setTimeout(
+        tunnelIdleTimeoutMs,
+        () => targetSocket.destroy(new Error('Browser proxy tunnel timed out'))
+      );
       clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.byteLength > 0) {
         targetSocket.write(head);
@@ -213,21 +286,26 @@ const proxyConnectRequest = async (
       clientSocket.pipe(targetSocket);
       targetSocket.pipe(clientSocket);
     });
-    targetSocket.once('error', () => {
+    targetSocket.once('error', (error) => {
+      reportDiagnostic('connect_request_failed', error);
       if (established) {
         clientSocket.destroy();
       } else {
         sendConnectError(clientSocket);
       }
     });
-  } catch {
+  } catch (error) {
+    reportDiagnostic('connect_request_failed', error);
     sendConnectError(clientSocket);
   }
 };
 
-const sanitizeHeaders = (headers: IncomingHttpHeaders): IncomingHttpHeaders =>
+export const sanitizeProxyHeaders = (headers: IncomingHttpHeaders): IncomingHttpHeaders =>
   Object.fromEntries(
-    Object.entries(headers).filter(([name]) => !hopByHopHeaders.has(name.toLowerCase()))
+    Object.entries(headers).filter(([name]) => {
+      const normalized = name.toLowerCase();
+      return !hopByHopHeaders.has(normalized) && !proxySignalingHeaders.has(normalized);
+    })
   );
 
 const sendProxyError = (response: ServerResponse) => {
@@ -250,4 +328,28 @@ const sendConnectError = (socket: Duplex) => {
   } else {
     socket.destroy();
   }
+};
+
+const describeProxyError = (
+  event: BrowserNetworkProxyDiagnostic['event'],
+  error: unknown
+): BrowserNetworkProxyDiagnostic => {
+  const candidate = error as { name?: unknown; code?: unknown; message?: unknown } | null;
+  const errorType = typeof candidate?.name === 'string'
+    && /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(candidate.name)
+      ? candidate.name
+      : 'UnknownError';
+  const errorCode = typeof candidate?.code === 'string'
+    && /^[A-Z][A-Z0-9_]{0,79}$/.test(candidate.code)
+      ? candidate.code
+      : null;
+  const message = typeof candidate?.message === 'string' ? candidate.message : '';
+  let reason: BrowserNetworkProxyDiagnostic['reason'] = 'transport';
+  if (/timed out/i.test(message)) {
+    reason = 'timeout';
+  } else if (message.startsWith('Browser request')) {
+    reason = 'network_policy';
+  }
+
+  return { event, reason, errorType, errorCode };
 };

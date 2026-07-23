@@ -4,9 +4,27 @@ const redactedValue = '[REDACTED]';
 const broadRedactionMinimumLength = 8;
 const ascii = {
   at: '@'.charCodeAt(0),
+  backslash: '\\'.charCodeAt(0),
+  carriageReturn: '\r'.charCodeAt(0),
+  colon: ':'.charCodeAt(0),
+  digitMax: '9'.charCodeAt(0),
+  digitMin: '0'.charCodeAt(0),
+  doubleQuote: '"'.charCodeAt(0),
+  equals: '='.charCodeAt(0),
   fragment: '#'.charCodeAt(0),
+  hyphen: '-'.charCodeAt(0),
+  lineFeed: '\n'.charCodeAt(0),
+  lowercaseMax: 'z'.charCodeAt(0),
+  lowercaseMin: 'a'.charCodeAt(0),
   path: '/'.charCodeAt(0),
-  query: '?'.charCodeAt(0)
+  period: '.'.charCodeAt(0),
+  query: '?'.charCodeAt(0),
+  singleQuote: "'".charCodeAt(0),
+  space: ' '.charCodeAt(0),
+  tab: '\t'.charCodeAt(0),
+  underscore: '_'.charCodeAt(0),
+  uppercaseMax: 'Z'.charCodeAt(0),
+  uppercaseMin: 'A'.charCodeAt(0)
 } as const;
 const urlDelimiters = new Set(Buffer.from("\t\r\n \"'<>`", 'ascii'));
 const adjacentUrlDelimiters = new Set(Buffer.from(',;)]}|', 'ascii'));
@@ -106,7 +124,8 @@ const getShortSensitivePairs = (input: BrowserAuditWorkerRequest): SensitivePair
   ...input.customHeaders,
   ...input.cookies
 ].filter(
-  (candidate) => candidate.value.length > 0
+  (candidate) => candidate.name.length > 0
+    && candidate.value.length > 0
     && candidate.value.length < broadRedactionMinimumLength
 );
 
@@ -133,6 +152,7 @@ const redactUrlSequence = (value: string) => value
   .join('');
 
 const redactQuotedShortValues = (value: string, sensitiveValues: string[]) => {
+  // Keep matching semantics aligned with redactQuotedShortValuesInPlace below.
   if (sensitiveValues.length === 0) {
     return value;
   }
@@ -182,6 +202,7 @@ const findClosingQuote = (value: string, openingQuote: number, quote: string) =>
 };
 
 const redactShortContexts = (value: string, pairs: SensitivePair[]) => {
+  // Keep matching semantics aligned with redactShortContextsInPlace below.
   let redacted = value;
 
   for (const pair of pairs) {
@@ -214,7 +235,7 @@ const redactQuotedShortValuesInPlace = (
 
   for (let index = 0; index < bytes.length; index += 1) {
     const quote = bytes[index];
-    if (quote !== 34 && quote !== 39) {
+    if (quote !== ascii.doubleQuote && quote !== ascii.singleQuote) {
       continue;
     }
 
@@ -242,7 +263,7 @@ const findClosingQuoteInBytes = (bytes: Buffer, openingQuote: number, quote: num
       escaped = false;
       continue;
     }
-    if (bytes[index] === 92) {
+    if (bytes[index] === ascii.backslash) {
       escaped = true;
       continue;
     }
@@ -285,7 +306,7 @@ const redactShortContextsInPlace = (bytes: Buffer, pairs: SensitivePair[]) => {
       while (separator < bytes.length && isAsciiWhitespace(bytes[separator]!)) {
         separator += 1;
       }
-      if (bytes[separator] !== 58 && bytes[separator] !== 61) {
+      if (bytes[separator] !== ascii.colon && bytes[separator] !== ascii.equals) {
         continue;
       }
       let valueStart = separator + 1;
@@ -329,18 +350,23 @@ const startsWithBufferCaseInsensitive = (
 };
 
 const normalizeAsciiByte = (value: number) =>
-  value >= 65 && value <= 90 ? value + 32 : value;
+  value >= ascii.uppercaseMin && value <= ascii.uppercaseMax
+    ? value + (ascii.lowercaseMin - ascii.uppercaseMin)
+    : value;
 
 const isIdentifierByte = (value: number) =>
-  (value >= 48 && value <= 57)
-  || (value >= 65 && value <= 90)
-  || (value >= 97 && value <= 122)
-  || value === 45
-  || value === 46
-  || value === 95;
+  (value >= ascii.digitMin && value <= ascii.digitMax)
+  || (value >= ascii.uppercaseMin && value <= ascii.uppercaseMax)
+  || (value >= ascii.lowercaseMin && value <= ascii.lowercaseMax)
+  || value === ascii.hyphen
+  || value === ascii.period
+  || value === ascii.underscore;
 
 const isAsciiWhitespace = (value: number) =>
-  value === 9 || value === 10 || value === 13 || value === 32;
+  value === ascii.tab
+  || value === ascii.lineFeed
+  || value === ascii.carriageReturn
+  || value === ascii.space;
 
 const redactUrlSectionsInPlace = (bytes: Buffer) => {
   for (let index = 0; index < bytes.length; index += 1) {
@@ -413,7 +439,7 @@ const startsWithAscii = (bytes: Buffer, index: number, value: string) => {
 
   for (let offset = 0; offset < value.length; offset += 1) {
     const actual = bytes[index + offset]!;
-    const normalized = actual >= 65 && actual <= 90 ? actual + 32 : actual;
+    const normalized = normalizeAsciiByte(actual);
 
     if (normalized !== value.charCodeAt(offset)) {
       return false;

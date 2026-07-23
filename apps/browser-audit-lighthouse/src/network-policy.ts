@@ -7,6 +7,7 @@ export type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
 
 const blockedAddresses = new BlockList();
 const maxBlockedErrors = 8;
+const defaultDnsLookupTimeoutMs = 10_000;
 
 for (const [network, prefix] of [
   ['0.0.0.0', 8],
@@ -29,8 +30,11 @@ for (const [network, prefix] of [
 
 for (const [network, prefix] of [
   ['::', 96],
+  ['64:ff9b::', 96],
   ['100::', 64],
+  ['2001::', 32],
   ['2001:db8::', 32],
+  ['2002::', 16],
   ['fc00::', 7],
   ['fe80::', 10],
   ['ff00::', 8]
@@ -49,24 +53,29 @@ export const validateBrowserRequestUrl = async (
   value: string,
   {
     allowlist = [],
-    lookupHost = defaultLookupHost
+    lookupHost = defaultLookupHost,
+    lookupTimeoutMs = defaultDnsLookupTimeoutMs
   }: {
     allowlist?: string[];
     lookupHost?: LookupHost;
+    lookupTimeoutMs?: number;
   } = {}
 ): Promise<URL> => (await resolveBrowserRequestTarget(value, {
   allowlist,
-  lookupHost
+  lookupHost,
+  lookupTimeoutMs
 })).url;
 
 export const resolveBrowserRequestTarget = async (
   value: string,
   {
     allowlist = [],
-    lookupHost = defaultLookupHost
+    lookupHost = defaultLookupHost,
+    lookupTimeoutMs = defaultDnsLookupTimeoutMs
   }: {
     allowlist?: string[];
     lookupHost?: LookupHost;
+    lookupTimeoutMs?: number;
   } = {}
 ): Promise<ResolvedBrowserRequestTarget> => {
   let url: URL;
@@ -116,7 +125,7 @@ export const resolveBrowserRequestTarget = async (
   let addresses: LookupAddress[];
 
   try {
-    addresses = await lookupHost(hostname);
+    addresses = await lookupHostWithTimeout(hostname, lookupHost, lookupTimeoutMs);
   } catch {
     throw new Error(`Browser request host ${hostname} could not be resolved`);
   }
@@ -208,6 +217,8 @@ export const installBrowserNetworkGuard = async (
       return;
     }
 
+    // The pinned forward proxy is the authoritative guard for the popup's first
+    // request; target interception below is defense in depth once CDP exposes it.
     void (async () => {
       recordBlockedError(
         new Error('New browser windows are blocked'),
@@ -259,6 +270,34 @@ export const installBrowserNetworkGuard = async (
 const defaultLookupHost: LookupHost = async (hostname) =>
   lookup(hostname, { all: true, verbatim: true }) as Promise<LookupAddress[]>;
 
+const lookupHostWithTimeout = async (
+  hostname: string,
+  lookupHost: LookupHost,
+  timeoutMs: number
+) => {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
+    throw new Error('Browser DNS lookup timeout must be between 1 and 60000ms');
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      lookupHost(hostname),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Browser DNS lookup timed out')),
+          timeoutMs
+        );
+        timeout.unref?.();
+      })
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
 const normalizeHostname = (hostname: string) =>
   hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
 
@@ -284,20 +323,52 @@ const assertPublicAddress = (rawAddress: string) => {
 };
 
 const normalizeMappedIpv4 = (address: string) => {
-  const normalized = address.toLowerCase();
-  const dotted = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (dotted?.[1]) {
-    return dotted[1];
-  }
-
-  const hex = normalized.match(
-    /^(?:::ffff:|(?:0{1,4}:){5}ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/
-  );
-  if (!hex?.[1] || !hex[2]) {
+  const words = parseIpv6Words(address);
+  if (
+    !words
+    || words.slice(0, 5).some((word) => word !== 0)
+    || words[5] !== 0xffff
+  ) {
     return address;
   }
 
-  const high = Number.parseInt(hex[1], 16);
-  const low = Number.parseInt(hex[2], 16);
+  const high = words[6]!;
+  const low = words[7]!;
   return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
+};
+
+const parseIpv6Words = (value: string): number[] | null => {
+  let normalized = value.toLowerCase().replace(/^\[|\]$/g, '');
+  const dottedTail = normalized.match(/(?:^|:)(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+
+  if (dottedTail) {
+    if (isIP(dottedTail) !== 4) {
+      return null;
+    }
+    const octets = dottedTail.split('.').map(Number);
+    normalized = normalized.slice(0, -dottedTail.length)
+      + `${((octets[0]! << 8) | octets[1]!).toString(16)}:`
+      + ((octets[2]! << 8) | octets[3]!).toString(16);
+  }
+
+  const halves = normalized.split('::');
+  if (halves.length > 2) {
+    return null;
+  }
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves[1] ? halves[1].split(':') : [];
+  if (
+    [...left, ...right].some((word) => !/^[0-9a-f]{1,4}$/.test(word))
+    || (halves.length === 1 && left.length !== 8)
+    || (halves.length === 2 && left.length + right.length >= 8)
+  ) {
+    return null;
+  }
+
+  const zeroCount = halves.length === 2 ? 8 - left.length - right.length : 0;
+  return [
+    ...left.map((word) => Number.parseInt(word, 16)),
+    ...Array.from({ length: zeroCount }, () => 0),
+    ...right.map((word) => Number.parseInt(word, 16))
+  ];
 };

@@ -14,6 +14,7 @@ import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
+import { startBrowserNetworkProxy } from './network-proxy';
 import {
   redactBrowserAuditBytesInPlace,
   redactBrowserAuditText,
@@ -81,9 +82,33 @@ export const runBrowserAudit = async ({
     }
   }
 
-  const browser = await launchBrowser(config);
-  const page = await browser.newPage();
-  const networkGuard = await installBrowserNetworkGuard(page, config.hostAllowlist);
+  const networkProxy = await startBrowserNetworkProxy({
+    allowlist: config.hostAllowlist
+  });
+  let browser: Browser;
+  try {
+    browser = await launchBrowser(config, networkProxy.url);
+  } catch (error) {
+    await networkProxy.close().catch(() => undefined);
+    throw error;
+  }
+  let page: Page;
+  try {
+    page = await browser.newPage();
+  } catch (error) {
+    await browser.close().catch(() => undefined);
+    await networkProxy.close().catch(() => undefined);
+    throw error;
+  }
+  let networkGuard: Awaited<ReturnType<typeof installBrowserNetworkGuard>>;
+  try {
+    networkGuard = await installBrowserNetworkGuard(page, config.hostAllowlist);
+  } catch (error) {
+    await page.close().catch(() => undefined);
+    await browser.close().catch(() => undefined);
+    await networkProxy.close().catch(() => undefined);
+    throw error;
+  }
   const startedAt = new Date().toISOString();
   const issues: Array<{ code: string; severity: 'info' | 'warning' | 'error'; message: string }> = [];
   const artifacts: BrowserAuditArtifactRef[] = [];
@@ -262,7 +287,11 @@ export const runBrowserAudit = async ({
     try {
       await page.close();
     } catch {}
-    await browser.close();
+    try {
+      await browser.close();
+    } finally {
+      await networkProxy.close().catch(() => undefined);
+    }
   }
 };
 
@@ -379,7 +408,24 @@ const enforceDeadline = (deadline: number, totalTimeoutMs: number) => {
   }
 };
 
-export const launchBrowser = async (config: BrowserAuditWorkerConfig): Promise<Browser> => {
+export const launchBrowser = async (
+  config: BrowserAuditWorkerConfig,
+  networkProxyUrl?: string
+): Promise<Browser> => {
+  const args = buildChromeLaunchArgs(config, networkProxyUrl);
+
+  return puppeteer.launch({
+    browser: 'chrome',
+    executablePath: config.chromeExecutablePath!,
+    headless: true,
+    args
+  });
+};
+
+export const buildChromeLaunchArgs = (
+  config: Pick<BrowserAuditWorkerConfig, 'allowNoSandbox'>,
+  networkProxyUrl?: string
+) => {
   const args = [
     '--headless=new',
     '--disable-dev-shm-usage',
@@ -392,12 +438,16 @@ export const launchBrowser = async (config: BrowserAuditWorkerConfig): Promise<B
     args.push('--no-sandbox');
   }
 
-  return puppeteer.launch({
-    browser: 'chrome',
-    executablePath: config.chromeExecutablePath!,
-    headless: true,
-    args
-  });
+  if (networkProxyUrl) {
+    args.push(
+      `--proxy-server=${networkProxyUrl}`,
+      '--proxy-bypass-list=<-loopback>',
+      '--disable-quic',
+      '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'
+    );
+  }
+
+  return args;
 };
 
 const extractCheckpointResults = (

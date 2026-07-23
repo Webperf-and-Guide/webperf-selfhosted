@@ -63,9 +63,11 @@ the versioned wire contract.
 
 Targets, redirects, navigations, and subresources must resolve to public HTTP
 or HTTPS addresses. The runner blocks private/local/metadata networks,
-non-HTTP schemes, downloads, and new windows. Exact hosts can be placed in
-`BROWSER_AUDIT_HOST_ALLOWLIST`, but that is an explicit SSRF-policy exception
-and should be used only on an isolated runner network.
+non-HTTP schemes, downloads, and new windows. A loopback-only proxy pins each
+validated DNS answer for the actual browser connection. Exact hosts can be
+placed in `BROWSER_AUDIT_HOST_ALLOWLIST`; private answers for those hosts are
+an explicit SSRF-policy exception, remain DNS-pinned, and should be used only
+on an isolated runner network.
 
 Do not set `BROWSER_AUDIT_ALLOW_NO_SANDBOX=true` merely to make a host boot.
 First enable user namespaces or preserve the image's root-owned mode-4755

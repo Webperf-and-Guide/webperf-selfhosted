@@ -2,8 +2,8 @@ import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
 import type { HTTPRequest, Page } from 'puppeteer-core';
 
-type LookupAddress = { address: string; family: number };
-type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
+export type LookupAddress = { address: string; family: number };
+export type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
 
 const blockedAddresses = new BlockList();
 
@@ -27,8 +27,7 @@ for (const [network, prefix] of [
 }
 
 for (const [network, prefix] of [
-  ['::', 128],
-  ['::1', 128],
+  ['::', 96],
   ['100::', 64],
   ['2001:db8::', 32],
   ['fc00::', 7],
@@ -37,6 +36,13 @@ for (const [network, prefix] of [
 ] as const) {
   blockedAddresses.addSubnet(network, prefix, 'ipv6');
 }
+
+export type ResolvedBrowserRequestTarget = {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+  allowlisted: boolean;
+};
 
 export const validateBrowserRequestUrl = async (
   value: string,
@@ -47,7 +53,21 @@ export const validateBrowserRequestUrl = async (
     allowlist?: string[];
     lookupHost?: LookupHost;
   } = {}
-) => {
+): Promise<URL> => (await resolveBrowserRequestTarget(value, {
+  allowlist,
+  lookupHost
+})).url;
+
+export const resolveBrowserRequestTarget = async (
+  value: string,
+  {
+    allowlist = [],
+    lookupHost = defaultLookupHost
+  }: {
+    allowlist?: string[];
+    lookupHost?: LookupHost;
+  } = {}
+): Promise<ResolvedBrowserRequestTarget> => {
   let url: URL;
 
   try {
@@ -69,16 +89,16 @@ export const validateBrowserRequestUrl = async (
   }
 
   const hostname = normalizeHostname(url.hostname);
-
-  if (matchesAllowlist(hostname, allowlist)) {
-    return url;
-  }
+  const allowlisted = matchesAllowlist(hostname, allowlist);
 
   if (
+    !allowlisted
+    && (
     hostname === 'localhost'
     || hostname.endsWith('.localhost')
     || hostname.endsWith('.local')
     || hostname.endsWith('.internal')
+    )
   ) {
     throw new Error(`Browser request host ${hostname} is blocked`);
   }
@@ -86,8 +106,10 @@ export const validateBrowserRequestUrl = async (
   const ipVersion = isIP(hostname);
 
   if (ipVersion > 0) {
-    assertPublicAddress(hostname, ipVersion);
-    return url;
+    if (!allowlisted) {
+      assertPublicAddress(hostname);
+    }
+    return { url, address: hostname, family: ipVersion as 4 | 6, allowlisted };
   }
 
   let addresses: LookupAddress[];
@@ -102,11 +124,21 @@ export const validateBrowserRequestUrl = async (
     throw new Error(`Browser request host ${hostname} did not resolve`);
   }
 
-  for (const address of addresses) {
-    assertPublicAddress(address.address, address.family);
+  const normalizedAddresses = addresses.map((address) => {
+    const family = isIP(address.address);
+    if (family !== 4 && family !== 6) {
+      throw new Error(`Browser request host ${hostname} returned an invalid address`);
+    }
+    return { address: address.address, family: family as 4 | 6 };
+  });
+
+  if (!allowlisted) {
+    for (const address of normalizedAddresses) {
+      assertPublicAddress(address.address);
+    }
   }
 
-  return url;
+  return { url, ...normalizedAddresses[0]!, allowlisted };
 };
 
 export const installBrowserNetworkGuard = async (
@@ -131,7 +163,16 @@ export const installBrowserNetworkGuard = async (
   };
 
   page.on('request', (request) => {
-    void handleRequest(request);
+    void handleRequest(request).catch(async (error) => {
+      blockedError ??= error instanceof Error
+        ? error
+        : new Error('Browser request interceptor failed');
+      if (!request.isInterceptResolutionHandled()) {
+        try {
+          await request.abort('blockedbyclient');
+        } catch {}
+      }
+    });
   });
   page.on('popup', (popup) => {
     blockedError ??= new Error('New browser windows are blocked');
@@ -139,9 +180,33 @@ export const installBrowserNetworkGuard = async (
       void popup.close();
     }
   });
+  page.browser().on('targetcreated', (target) => {
+    if (target === page.target() || target.type() !== 'page') {
+      return;
+    }
+
+    void (async () => {
+      blockedError ??= new Error('New browser windows are blocked');
+      const popup = await target.page();
+      if (!popup) {
+        return;
+      }
+      await popup.setRequestInterception(true);
+      popup.on('request', (request) => {
+        if (!request.isInterceptResolutionHandled()) {
+          void request.abort('blockedbyclient').catch(() => undefined);
+        }
+      });
+      await popup.close();
+    })().catch((error) => {
+      blockedError ??= error instanceof Error
+        ? error
+        : new Error('Failed to close a new browser window');
+    });
+  });
 
   const session = await page.createCDPSession();
-  await session.send('Browser.setDownloadBehavior', { behavior: 'deny' });
+  await session.send('Page.setDownloadBehavior', { behavior: 'deny' });
 
   return {
     throwIfBlocked(cause?: unknown) {
@@ -171,9 +236,9 @@ const matchesAllowlist = (hostname: string, allowlist: string[]) =>
     return hostname === normalized;
   });
 
-const assertPublicAddress = (rawAddress: string, family: number) => {
+const assertPublicAddress = (rawAddress: string) => {
   const address = normalizeMappedIpv4(rawAddress);
-  const normalizedFamily = isIP(address) || family;
+  const normalizedFamily = isIP(address);
   const type = normalizedFamily === 4 ? 'ipv4' : 'ipv6';
 
   if ((normalizedFamily !== 4 && normalizedFamily !== 6) || blockedAddresses.check(address, type)) {
@@ -182,6 +247,20 @@ const assertPublicAddress = (rawAddress: string, family: number) => {
 };
 
 const normalizeMappedIpv4 = (address: string) => {
-  const match = address.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return match?.[1] ?? address;
+  const normalized = address.toLowerCase();
+  const dotted = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted?.[1]) {
+    return dotted[1];
+  }
+
+  const hex = normalized.match(
+    /^(?:::ffff:|(?:0{1,4}:){5}ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/
+  );
+  if (!hex?.[1] || !hex[2]) {
+    return address;
+  }
+
+  const high = Number.parseInt(hex[1], 16);
+  const low = Number.parseInt(hex[2], 16);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
 };

@@ -33,11 +33,14 @@ describe('browser audit network policy', () => {
     await expect(validateBrowserRequestUrl('http://127.0.0.1')).rejects.toThrow('private');
     await expect(validateBrowserRequestUrl('http://[::1]')).rejects.toThrow('private');
     await expect(validateBrowserRequestUrl('http://[::ffff:127.0.0.1]')).rejects.toThrow('private');
+    await expect(validateBrowserRequestUrl('http://[::ffff:7f00:1]')).rejects.toThrow('private');
+    await expect(validateBrowserRequestUrl('http://[::192.168.1.1]')).rejects.toThrow('private');
   });
 
   test('allows an operator to opt in an exact private host', async () => {
     const result = await validateBrowserRequestUrl('http://service.internal', {
-      allowlist: ['service.internal']
+      allowlist: ['service.internal'],
+      lookupHost: async () => [{ address: '10.0.0.4', family: 4 }]
     });
     expect(result.hostname).toBe('service.internal');
   });

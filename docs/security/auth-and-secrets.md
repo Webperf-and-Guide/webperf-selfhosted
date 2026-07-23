@@ -61,12 +61,16 @@ and IPv6 ranges, and pins the validated DNS addresses into reqwest so the
 connection does not perform a second untrusted lookup. The Browser Audit runner
 validates targets and every flow navigation, intercepts redirects and
 subresources, blocks non-HTTP schemes, downloads, and new windows, and rejects
-private/local/metadata DNS answers.
+private/local/metadata DNS answers. Each audit also launches a loopback-only
+HTTP/CONNECT proxy: the proxy resolves and validates each destination once,
+then connects directly to that pinned IP so Chrome cannot perform a second DNS
+lookup after validation. QUIC and non-proxied WebRTC UDP are disabled.
 
 `BROWSER_AUDIT_HOST_ALLOWLIST` is an explicit comma-separated operator escape
 hatch for exact hosts or `*.example.test` patterns. Allowlisting a private host
-removes the public-internet-only protection for that host and should be used
-only on an isolated runner network.
+removes the public-internet-only address restriction for that host, but the
+proxy still pins the actual DNS answer. Use this only on an isolated runner
+network.
 
 ## Exposure warning
 

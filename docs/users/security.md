@@ -50,8 +50,10 @@ logs, or monitoring URLs.
 
 The Rust probe validates every redirect and pins validated public DNS answers
 into the connection. The browser runner repeats public-network checks for
-targets, navigations, redirects, and subresources and blocks downloads and new
-windows. Webhook targets use the same public URL policy.
+targets, navigations, redirects, and subresources, then routes Chrome through a
+loopback proxy that connects to the validated IP instead of re-resolving the
+hostname. It also blocks downloads and new windows. Webhook targets use the
+same public URL policy.
 
 Private-host allowlists and insecure HTTP runtime toggles are explicit trust
 expansions. Use them only with isolated networks and documented ownership.

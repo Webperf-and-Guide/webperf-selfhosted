@@ -41,6 +41,11 @@ inactive codes are rejected.
 
 The executor appends the signed `/measure` path itself; configure only an
 origin, without credentials, path, query, or fragment.
+The insecure-HTTP opt-in permits RFC 1918/ULA resolution only for explicit
+container/LAN-shaped origins such as the single-label `probe` service or a
+private IP literal. Metadata, link-local, loopback rebinding, documentation,
+benchmarking, multicast, and reserved ranges remain blocked; public FQDNs must
+still resolve exclusively to public addresses.
 
 ## Measurement semantics
 

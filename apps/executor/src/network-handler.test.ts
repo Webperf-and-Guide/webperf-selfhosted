@@ -124,7 +124,7 @@ describe('network execution handler', () => {
       client,
       leaseOwner: 'executor-network',
       probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrls: { tokyo: 'http://probe.test:8080' },
+      probeBaseUrls: { tokyo: 'http://probe:8080' },
       allowInsecureProbeHttp: true,
       requestImpl: async (input, init) => {
         probeRequest = new Request(input, {
@@ -133,7 +133,7 @@ describe('network execution handler', () => {
           body: init.body,
           signal: init.signal
         });
-        expect(init.addressPolicy).toBe('any');
+        expect(init.addressPolicy).toBe('trusted-private');
         return Response.json({
           measurement: {
             region: 'tokyo',
@@ -183,9 +183,10 @@ describe('network execution handler', () => {
       probeSharedSecret: 'network-handler-probe-secret',
       probeBaseUrls: { tokyo: 'http://probe.test:8080' },
       allowInsecureProbeHttp: true,
-      requestImpl: async () => new Response('Bearer raw-sensitive-probe-error', {
-        status: 503
-      })
+      requestImpl: async (_input, init) => {
+        expect(init.addressPolicy).toBe('public');
+        return new Response('Bearer raw-sensitive-probe-error', { status: 503 });
+      }
     });
 
     let error: unknown;

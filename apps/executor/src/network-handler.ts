@@ -7,6 +7,7 @@ import type {
   ProbeMeasurementResponse,
   RegionCode
 } from '@webperf/contracts';
+import { isIP } from 'node:net';
 import {
   jsonValueSchema,
   probeMeasurementResponseSchema,
@@ -272,7 +273,10 @@ const processNetworkJob = async ({
         throw error;
       }
 
-      if (error instanceof OutboundHttpPolicyError && error.code === 'address_blocked') {
+      if (
+        error instanceof OutboundHttpPolicyError
+        && (error.code === 'address_blocked' || error.code === 'invalid_target')
+      ) {
         markTargetFailed(
           target,
           'probe_origin_blocked',
@@ -491,15 +495,30 @@ const probeAddressPolicy = (
   url: URL,
   allowInsecureHttp: boolean
 ): OutboundAddressPolicy => {
-  if (allowInsecureHttp) {
-    return 'any';
+  if (isLoopbackHostname(url.hostname)) {
+    return 'loopback';
   }
-  return isLoopbackHostname(url.hostname) ? 'loopback' : 'public';
+
+  if (allowInsecureHttp) {
+    const hostname = url.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.$/, '');
+    if (
+      isIP(hostname) > 0
+      || !hostname.includes('.')
+      || hostname.endsWith('.local')
+      || hostname.endsWith('.internal')
+    ) {
+      return 'trusted-private';
+    }
+  }
+  return 'public';
 };
 
 const defaultNetworkLogger = {
   error(event: Record<string, unknown>) {
-    console.error(JSON.stringify({ service: 'webperf-executor', ...event }));
+    console.error(JSON.stringify({ service: 'webperf-executor', level: 'error', ...event }));
   }
 };
 

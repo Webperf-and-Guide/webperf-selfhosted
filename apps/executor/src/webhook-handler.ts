@@ -87,7 +87,13 @@ export const createWebhookExecutionHandler = ({
     });
 
     if (response.ok) {
-      delivery = buildDelivery(target, 'sent', response.status, null);
+      delivery = buildDelivery(
+        target,
+        'sent',
+        response.status,
+        null,
+        now().toISOString()
+      );
     } else if (isRetryableHttpStatus(response.status) && executionJob.attemptCount < executionJob.maxAttempts) {
       throw new ExecutionFailure(
         'webhook_temporarily_unavailable',
@@ -100,7 +106,8 @@ export const createWebhookExecutionHandler = ({
         target,
         'failed',
         response.status,
-        buildWebhookHttpFailure(response.status)
+        buildWebhookHttpFailure(response.status),
+        now().toISOString()
       );
     }
   } catch (error) {
@@ -142,7 +149,8 @@ export const createWebhookExecutionHandler = ({
       target,
       'failed',
       null,
-      buildWebhookTransportFailure(diagnostic)
+      buildWebhookTransportFailure(diagnostic),
+      now().toISOString()
     );
   }
 
@@ -187,12 +195,13 @@ const buildDelivery = (
   },
   status: CheckProfileAlertDelivery['status'],
   responseStatus: number | null,
-  error: string | null
+  error: string | null,
+  deliveredAt: string
 ): CheckProfileAlertDelivery => ({
   targetId: target.id,
   targetName: target.name,
   url: target.url,
-  deliveredAt: new Date().toISOString(),
+  deliveredAt,
   status,
   responseStatus,
   error
@@ -200,6 +209,6 @@ const buildDelivery = (
 
 const defaultWebhookLogger = {
   error(event: Record<string, unknown>) {
-    console.error(JSON.stringify({ service: 'webperf-executor', ...event }));
+    console.error(JSON.stringify({ service: 'webperf-executor', level: 'error', ...event }));
   }
 };

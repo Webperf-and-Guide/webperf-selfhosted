@@ -128,7 +128,8 @@ describe('webhook execution handler', () => {
     expect(result.delivery).toMatchObject({
       targetId: 'target_webhook',
       status: 'sent',
-      responseStatus: 204
+      responseStatus: 204,
+      deliveredAt: '2026-07-22T00:00:00.000Z'
     });
   });
 

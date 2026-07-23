@@ -77,7 +77,7 @@ describe('executor pinned outbound HTTP', () => {
         headers: { 'content-type': 'application/json' },
         body: '{}',
         signal: new AbortController().signal,
-        addressPolicy: 'any'
+        addressPolicy: 'loopback'
       }
     );
 
@@ -108,5 +108,23 @@ describe('executor pinned outbound HTTP', () => {
       addressPolicy: 'loopback',
       maximumResponseBytes: 4
     })).rejects.toMatchObject({ code: 'ERR_RESPONSE_TOO_LARGE' });
+  });
+
+  test('limits trusted private origins to LAN space instead of all reserved addresses', async () => {
+    await expect(resolveOutboundHttpTarget('http://probe:8080/measure', {
+      addressPolicy: 'trusted-private',
+      lookupHost: async () => [{ address: '172.18.0.4', family: 4 }]
+    })).resolves.toMatchObject({ address: '172.18.0.4' });
+    await expect(resolveOutboundHttpTarget('http://probe:8080/measure', {
+      addressPolicy: 'trusted-private',
+      lookupHost: async () => [{ address: 'fd00::4', family: 6 }]
+    })).resolves.toMatchObject({ address: 'fd00::4' });
+
+    for (const address of ['127.0.0.1', '169.254.169.254', '198.18.0.1']) {
+      await expect(resolveOutboundHttpTarget('http://probe:8080/measure', {
+        addressPolicy: 'trusted-private',
+        lookupHost: async () => [{ address, family: 4 }]
+      })).rejects.toMatchObject({ code: 'address_blocked' });
+    }
   });
 });

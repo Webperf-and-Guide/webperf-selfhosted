@@ -8,7 +8,7 @@ import { request as createHttpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { checkServerIdentity } from 'node:tls';
 
-export type OutboundAddressPolicy = 'public' | 'loopback' | 'any';
+export type OutboundAddressPolicy = 'public' | 'loopback' | 'trusted-private';
 export type LookupAddress = { address: string; family: number };
 export type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
 
@@ -48,6 +48,7 @@ const defaultDnsTimeoutMs = 10_000;
 const defaultRequestTimeoutMs = 30_000;
 const defaultMaximumResponseBytes = 1_048_576;
 const blockedAddresses = new BlockList();
+const trustedPrivateBlockedAddresses = new BlockList();
 
 for (const [network, prefix] of [
   ['0.0.0.0', 8],
@@ -68,6 +69,25 @@ for (const [network, prefix] of [
   blockedAddresses.addSubnet(network, prefix, 'ipv4');
 }
 
+// Operator-trusted probe origins may use RFC 1918 container/LAN space, but
+// they still cannot resolve to metadata, link-local, loopback, documentation,
+// benchmarking, multicast, or otherwise reserved destinations.
+for (const [network, prefix] of [
+  ['0.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['192.0.0.0', 24],
+  ['192.0.2.0', 24],
+  ['198.18.0.0', 15],
+  ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4]
+] as const) {
+  trustedPrivateBlockedAddresses.addSubnet(network, prefix, 'ipv4');
+}
+
 for (const [network, prefix] of [
   ['::', 96],
   ['64:ff9b::', 96],
@@ -80,6 +100,20 @@ for (const [network, prefix] of [
   ['ff00::', 8]
 ] as const) {
   blockedAddresses.addSubnet(network, prefix, 'ipv6');
+}
+
+
+for (const [network, prefix] of [
+  ['::', 96],
+  ['64:ff9b::', 96],
+  ['100::', 64],
+  ['2001::', 32],
+  ['2001:db8::', 32],
+  ['2002::', 16],
+  ['fe80::', 10],
+  ['ff00::', 8]
+] as const) {
+  trustedPrivateBlockedAddresses.addSubnet(network, prefix, 'ipv6');
 }
 
 export const resolveOutboundHttpTarget = async (
@@ -121,7 +155,7 @@ export const resolveOutboundHttpTarget = async (
   }
 
   if (
-    addressPolicy !== 'any'
+    addressPolicy !== 'trusted-private'
     && (
       hostname === 'localhost'
       || hostname.endsWith('.localhost')
@@ -367,10 +401,6 @@ const assertAddressPolicy = (
   rawAddress: string,
   addressPolicy: OutboundAddressPolicy
 ) => {
-  if (addressPolicy === 'any') {
-    return;
-  }
-
   const address = normalizeMappedIpv4(rawAddress);
   const family = isIP(address);
   if (family !== 4 && family !== 6) {
@@ -385,7 +415,10 @@ const assertAddressPolicy = (
   }
 
   const type = family === 4 ? 'ipv4' : 'ipv6';
-  if (blockedAddresses.check(address, type)) {
+  const blockList = addressPolicy === 'trusted-private'
+    ? trustedPrivateBlockedAddresses
+    : blockedAddresses;
+  if (blockList.check(address, type)) {
     throw new OutboundHttpPolicyError(
       'address_blocked',
       'Outbound HTTP address is private, local, metadata, or reserved'

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { dlopen, FFIType, ptr, read } from 'bun:ffi';
+import { dlopen, FFIType, ptr, read, type Pointer } from 'bun:ffi';
 import {
   link,
   lstat,
@@ -13,6 +13,7 @@ import {
 import { parse, resolve, sep } from 'node:path';
 
 const safeStorageSegment = /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/;
+const posixErrnoNoEntry = 2;
 
 export type StoredArtifactFile = {
   storageKey: string;
@@ -536,14 +537,63 @@ const unlinkDirectoryEntry = (
   entryName: string
 ) => {
   assertStorageSegment(entryName, 'artifact ID');
+  const binding = getNativeUnlinkBinding();
+  const name = Buffer.from(`${entryName}\0`);
+  const result = binding.unlinkat(directoryHandle.fd, ptr(name), 0);
+  if (result !== 0) {
+    const errnoPointer = binding.errno();
+    if (errnoPointer === null) {
+      throw new Error(
+        `Browser Audit artifact deletion could not read errno for ${entryName}`
+      );
+    }
+    handleUnlinkError(read.i32(errnoPointer, 0), entryName);
+  }
+};
+
+type NativeUnlinkBinding = {
+  unlinkat: (directoryFd: number, path: Pointer, flags: number) => number;
+  errno: () => Pointer | null;
+};
+
+let nativeUnlinkBinding: NativeUnlinkBinding | undefined;
+
+const getNativeUnlinkBinding = () => {
+  nativeUnlinkBinding ??= loadNativeUnlinkBinding();
+  return nativeUnlinkBinding;
+};
+
+const loadNativeUnlinkBinding = (): NativeUnlinkBinding => {
+  const unlinkat = {
+    args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+    returns: FFIType.i32
+  } as const;
+  const errnoAccessor = {
+    args: [],
+    returns: FFIType.ptr
+  } as const;
 
   if (process.platform === 'darwin') {
-    unlinkDirectoryEntryDarwin(directoryHandle.fd, entryName);
-    return;
+    const library = dlopen('/usr/lib/libSystem.B.dylib', {
+      unlinkat,
+      __error: errnoAccessor
+    });
+    return {
+      unlinkat: (directoryFd, path, flags) =>
+        library.symbols.unlinkat(directoryFd, path, flags),
+      errno: () => library.symbols.__error()
+    };
   }
   if (process.platform === 'linux') {
-    unlinkDirectoryEntryLinux(directoryHandle.fd, entryName);
-    return;
+    const library = dlopen('libc.so.6', {
+      unlinkat,
+      __errno_location: errnoAccessor
+    });
+    return {
+      unlinkat: (directoryFd, path, flags) =>
+        library.symbols.unlinkat(directoryFd, path, flags),
+      errno: () => library.symbols.__errno_location()
+    };
   }
 
   throw new Error(
@@ -551,67 +601,13 @@ const unlinkDirectoryEntry = (
   );
 };
 
-const unlinkDirectoryEntryDarwin = (directoryFd: number, entryName: string) => {
-  const library = dlopen('/usr/lib/libSystem.B.dylib', {
-    unlinkat: {
-      args: [FFIType.i32, FFIType.ptr, FFIType.i32],
-      returns: FFIType.i32
-    },
-    __error: {
-      args: [],
-      returns: FFIType.ptr
-    }
-  });
-
-  try {
-    const name = Buffer.from(`${entryName}\0`);
-    const result = library.symbols.unlinkat(directoryFd, ptr(name), 0);
-    if (result !== 0) {
-      const errnoPointer = library.symbols.__error();
-      if (errnoPointer === null) {
-        throw new Error('Browser Audit artifact deletion could not read errno');
-      }
-      handleUnlinkError(read.i32(errnoPointer, 0));
-    }
-  } finally {
-    library.close();
-  }
-};
-
-const unlinkDirectoryEntryLinux = (directoryFd: number, entryName: string) => {
-  const library = dlopen('libc.so.6', {
-    unlinkat: {
-      args: [FFIType.i32, FFIType.ptr, FFIType.i32],
-      returns: FFIType.i32
-    },
-    __errno_location: {
-      args: [],
-      returns: FFIType.ptr
-    }
-  });
-
-  try {
-    const name = Buffer.from(`${entryName}\0`);
-    const result = library.symbols.unlinkat(directoryFd, ptr(name), 0);
-    if (result !== 0) {
-      const errnoPointer = library.symbols.__errno_location();
-      if (errnoPointer === null) {
-        throw new Error('Browser Audit artifact deletion could not read errno');
-      }
-      handleUnlinkError(read.i32(errnoPointer, 0));
-    }
-  } finally {
-    library.close();
-  }
-};
-
-const handleUnlinkError = (errno: number) => {
-  if (errno === 2) {
+const handleUnlinkError = (errno: number, entryName: string) => {
+  if (errno === posixErrnoNoEntry) {
     return;
   }
 
   const error = new Error(
-    `Browser Audit artifact deletion failed with errno ${errno}`
+    `Browser Audit artifact deletion failed for ${entryName} with errno ${errno}`
   ) as NodeJS.ErrnoException;
   error.errno = errno;
   throw error;

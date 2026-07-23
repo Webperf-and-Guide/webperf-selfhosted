@@ -194,6 +194,17 @@ if [[ "$profile" == "browser-audit" ]]; then
     exit 1
   fi
 
+  if [[ "$audit_status" == "failed" ]]; then
+    echo "Browser Audit ${audit_id} failed; bounded API detail follows" >&2
+    bun -e '
+      const payload = JSON.parse(process.argv[1]);
+      console.error(JSON.stringify(payload).slice(0, 4096));
+    ' "$audit_detail" >&2 || true
+    echo "Recent Browser Audit service logs follow" >&2
+    compose "${profile_args[@]}" logs --no-color --tail 120 \
+      browser-audit-lighthouse executor api >&2 || true
+  fi
+
   bun -e '
     const payload = JSON.parse(process.argv[1]);
     if (payload.status !== "succeeded") {

@@ -10,6 +10,9 @@ type ReportsAccessors = {
 };
 
 export class ReportsController {
+  private activeSubmissionController: AbortController | null = null;
+  private destroyed = false;
+
   state = $state({
     workspaceTab: 'browser' as 'browser' | 'browserAudits' | 'endpoints',
     browserAuditTargetUrl: '',
@@ -93,6 +96,9 @@ export class ReportsController {
 
   submitBrowserAudit = async (event: SubmitEvent) => {
     event.preventDefault();
+    if (this.destroyed) {
+      return;
+    }
     this.state.browserAuditSubmitError = null;
     this.state.browserAuditStatusMessage = null;
 
@@ -109,6 +115,9 @@ export class ReportsController {
     }
 
     this.state.browserAuditSubmitting = true;
+    this.activeSubmissionController?.abort(createAbortError());
+    const submissionController = new AbortController();
+    this.activeSubmissionController = submissionController;
 
     try {
       const response = await fetch('/api/control/browser-audits', {
@@ -125,7 +134,8 @@ export class ReportsController {
               steps: [{ type: 'navigate', url: this.state.browserAuditTargetUrl }]
             }
           }
-        })
+        }),
+        signal: submissionController.signal
       });
       const payload = (await response.json()) as BrowserAuditResource & { error?: string };
 
@@ -137,9 +147,21 @@ export class ReportsController {
       this.state.selectedBrowserAuditId = payload.id;
       this.state.browserAuditStatusMessage = 'Browser Audit queued. Waiting for the executor result.';
       await this.accessors.refreshControlData();
+      if (submissionController.signal.aborted) {
+        return;
+      }
 
       try {
-        const completed = await this.waitForBrowserAudit(payload.id);
+        const completed = await this.waitForBrowserAudit(
+          payload.id,
+          submissionController.signal
+        );
+        if (completed) {
+          await this.accessors.refreshControlData();
+        }
+        if (submissionController.signal.aborted) {
+          return;
+        }
         if (!completed) {
           this.state.browserAuditStatusMessage =
             'Browser Audit is still queued or running and will continue in the background.';
@@ -150,28 +172,53 @@ export class ReportsController {
           this.state.browserAuditStatusMessage =
             `Browser Audit finished with status ${completed.status}; inspect the saved details.`;
         }
-      } catch {
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
         this.state.browserAuditStatusMessage =
           'Browser Audit was queued; refresh Reports to follow its latest status.';
       }
     } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
       this.state.browserAuditSubmitError =
         error instanceof Error ? error.message : 'Failed to start a browser audit.';
     } finally {
-      this.state.browserAuditSubmitting = false;
+      if (this.activeSubmissionController === submissionController) {
+        this.activeSubmissionController = null;
+        if (!this.destroyed) {
+          this.state.browserAuditSubmitting = false;
+        }
+      }
     }
   };
 
   private waitForBrowserAudit = async (
     auditId: string,
+    signal: AbortSignal,
     timeoutMs = 180_000
   ): Promise<BrowserAuditResource | null> => {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      await this.accessors.refreshControlData();
-      const audit = this.browserAudits.find((candidate) => candidate.id === auditId);
+      await waitForPollingInterval(signal, 1_000);
+      const response = await fetch(
+        `/api/control/browser-audits/${encodeURIComponent(auditId)}`,
+        {
+          cache: 'no-store',
+          headers: { accept: 'application/json' },
+          signal
+        }
+      );
+      if (response.status === 404) {
+        continue;
+      }
+      if (!response.ok) {
+        throw new Error(`Browser Audit status request failed with HTTP ${response.status}`);
+      }
+      const audit = (await response.json()) as BrowserAuditResource;
 
       if (audit && ['succeeded', 'failed', 'cancelled'].includes(audit.status)) {
         return audit;
@@ -180,7 +227,40 @@ export class ReportsController {
 
     return null;
   };
+
+  destroy() {
+    this.destroyed = true;
+    this.activeSubmissionController?.abort(createAbortError());
+    this.activeSubmissionController = null;
+  }
 }
 
 export const createReportsController = (accessors: ReportsAccessors) =>
   new ReportsController(accessors);
+
+const createAbortError = () => {
+  const error = new Error('Browser Audit polling was cancelled');
+  error.name = 'AbortError';
+  return error;
+};
+
+const isAbortError = (error: unknown) =>
+  error instanceof Error && error.name === 'AbortError';
+
+const waitForPollingInterval = (signal: AbortSignal, timeoutMs: number) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(isAbortError(signal.reason) ? signal.reason : createAbortError());
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, timeoutMs);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(isAbortError(signal.reason) ? signal.reason : createAbortError());
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });

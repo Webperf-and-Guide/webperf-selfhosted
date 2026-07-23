@@ -129,6 +129,7 @@
 
   onDestroy(() => {
     overview.destroy();
+    reports.destroy();
   });
 </script>
 

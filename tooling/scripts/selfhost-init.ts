@@ -28,10 +28,11 @@ export const renderSelfhostEnvironment = (
       }
 
       const key = line.slice(0, separator);
+      const secretKey = key as (typeof secretKeys)[number];
 
-      if (generated.has(key as (typeof secretKeys)[number])) {
+      if (generated.has(secretKey)) {
         substituted.add(key);
-        return `${key}=${generated.get(key as (typeof secretKeys)[number])}`;
+        return `${key}=${generated.get(secretKey)}`;
       }
 
       if (nextSecretKeys.includes(key)) {
@@ -54,16 +55,17 @@ export const renderSelfhostEnvironment = (
 
 const main = () => {
   const outputArgumentIndex = process.argv.indexOf('--output');
+  const outputValue = outputArgumentIndex >= 0
+    ? process.argv[outputArgumentIndex + 1]
+    : undefined;
 
-  if (outputArgumentIndex >= 0 && !process.argv[outputArgumentIndex + 1]) {
+  if (outputArgumentIndex >= 0 && (!outputValue || outputValue.startsWith('--'))) {
     throw new Error('--output requires a path');
   }
 
   const outputPath = resolve(
     repositoryRoot,
-    outputArgumentIndex >= 0
-      ? process.argv[outputArgumentIndex + 1]!
-      : 'infra/docker-compose/.env'
+    outputValue ?? 'infra/docker-compose/.env'
   );
 
   if (!existsSync(examplePath)) {

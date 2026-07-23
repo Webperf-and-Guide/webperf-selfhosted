@@ -11,6 +11,7 @@ const ignoredPrefixes = [
 const markdownLinkPattern = /!?\[[^\]]*\]\((<[^>]+>|[^\s)]+)(?:\s+["'][^)]*["'])?\)/g;
 const referenceDefinitionPattern = /^\s{0,3}\[([^\]^][^\]]*)\]:\s*(<[^>\n]+>|[^\s\n]+)(?:\s+.*)?$/gm;
 const referenceLinkPattern = /!?\[([^\]\n]+)\]\[([^\]\n]*)\]/g;
+const shortcutReferencePattern = /!?\[([^\]\n]+)\](?![\[(])/g;
 const errors: string[] = [];
 let checkedFiles = 0;
 const requiredUserGuides = [
@@ -65,11 +66,11 @@ for (const relativePath of (await files).sort()) {
     }
   }
 
-  const referenceDefinitions = new Set<string>();
+  const referenceDefinitions = new Map<string, string>();
   for (const match of source.matchAll(referenceDefinitionPattern)) {
     const label = normalizeReferenceLabel(match[1]);
     const rawTarget = match[2];
-    referenceDefinitions.add(label);
+    referenceDefinitions.set(label, rawTarget);
     validateLocalLinkTarget(rawTarget, relativePath, absolutePath);
   }
 
@@ -80,47 +81,25 @@ for (const relativePath of (await files).sort()) {
     }
   }
 
-  for (const match of source.matchAll(markdownLinkPattern)) {
-    validateLocalLinkTarget(match[1], relativePath, absolutePath);
+  // A CommonMark shortcut reference is a link only when a matching definition
+  // exists; otherwise it is ordinary bracketed text. Resolve the defined forms
+  // here while leaving ordinary prose such as `[main]` untouched.
+  for (const match of source.matchAll(shortcutReferencePattern)) {
+    const matchIndex = match.index ?? 0;
+    const previousCharacter = source[matchIndex - 1];
+    const nextCharacter = source[matchIndex + match[0].length];
+    if (previousCharacter === ']' || nextCharacter === ':') {
+      continue;
+    }
+
+    const target = referenceDefinitions.get(normalizeReferenceLabel(match[1]));
+    if (target) {
+      validateLocalLinkTarget(target, relativePath, absolutePath);
+    }
   }
 
-  function validateLocalLinkTarget(
-    rawValue: string,
-    sourcePath: string,
-    sourceAbsolutePath: string
-  ) {
-    const rawTarget = rawValue.replace(/^<|>$/g, '');
-    const target = rawTarget.split('#', 1)[0]!.split('?', 1)[0]!;
-
-    if (
-      !target
-      || target.startsWith('#')
-      || target.startsWith('//')
-      || /^[a-z][a-z0-9+.-]*:/i.test(target)
-    ) {
-      return;
-    }
-
-    let decodedTarget: string;
-    try {
-      decodedTarget = decodeURIComponent(target);
-    } catch {
-      errors.push(`${sourcePath}: invalid percent-encoding in link ${rawTarget}`);
-      return;
-    }
-
-    const resolvedTarget = decodedTarget.startsWith('/')
-      ? resolve(repositoryRoot, decodedTarget.slice(1))
-      : resolve(dirname(sourceAbsolutePath), decodedTarget);
-
-    if (!existsSync(resolvedTarget)) {
-      errors.push(`${sourcePath}: broken relative link ${rawTarget}`);
-      return;
-    }
-
-    if (decodedTarget.endsWith('/') && !statSync(resolvedTarget).isDirectory()) {
-      errors.push(`${sourcePath}: link expects a directory ${rawTarget}`);
-    }
+  for (const match of source.matchAll(markdownLinkPattern)) {
+    validateLocalLinkTarget(match[1], relativePath, absolutePath);
   }
 }
 
@@ -177,4 +156,44 @@ console.log(JSON.stringify({ ok: true, markdownFiles: checkedFiles }));
 
 function normalizeReferenceLabel(value: string) {
   return value.trim().replaceAll(/\s+/g, ' ').toLowerCase();
+}
+
+function validateLocalLinkTarget(
+  rawValue: string,
+  sourcePath: string,
+  sourceAbsolutePath: string
+) {
+  const rawTarget = rawValue.replace(/^<|>$/g, '');
+  const withoutFragment = rawTarget.split('#', 1).at(0) ?? '';
+  const target = withoutFragment.split('?', 1).at(0) ?? '';
+
+  if (
+    !target
+    || target.startsWith('#')
+    || target.startsWith('//')
+    || /^[a-z][a-z0-9+.-]*:/i.test(target)
+  ) {
+    return;
+  }
+
+  let decodedTarget: string;
+  try {
+    decodedTarget = decodeURIComponent(target);
+  } catch {
+    errors.push(`${sourcePath}: invalid percent-encoding in link ${rawTarget}`);
+    return;
+  }
+
+  const resolvedTarget = decodedTarget.startsWith('/')
+    ? resolve(repositoryRoot, decodedTarget.slice(1))
+    : resolve(dirname(sourceAbsolutePath), decodedTarget);
+
+  if (!existsSync(resolvedTarget)) {
+    errors.push(`${sourcePath}: broken relative link ${rawTarget}`);
+    return;
+  }
+
+  if (decodedTarget.endsWith('/') && !statSync(resolvedTarget).isDirectory()) {
+    errors.push(`${sourcePath}: link expects a directory ${rawTarget}`);
+  }
 }

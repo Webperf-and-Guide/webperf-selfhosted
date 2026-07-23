@@ -166,6 +166,8 @@ assert(
 assert(parseSizeToBytes('1gb') === 1000 ** 3, 'decimal Compose sizes must use base 1000');
 assert(parseSizeToBytes('1gib') === 1024 ** 3, 'binary Compose sizes must use base 1024');
 assert(Number.isNaN(parseSizeToBytes('1i')), 'malformed Compose sizes must be rejected');
+assert(Number.isNaN(parseSizeToBytes('0x10')), 'hexadecimal Compose sizes must be rejected');
+assert(Number.isNaN(parseSizeToBytes('1e5')), 'exponential Compose sizes must be rejected');
 assert(
   browser.environment?.BROWSER_AUDIT_ALLOW_NO_SANDBOX === 'false',
   'Browser Audit sandbox must be enabled by default'
@@ -286,7 +288,9 @@ function assertSecureTmpfs(
     sizeOptions.length === 1,
     `${label} ${target} tmpfs must define exactly one size limit`
   );
-  const sizeBytes = parseSizeToBytes(sizeOptions[0]!.slice('size='.length));
+  const sizeOption = sizeOptions[0];
+  assert(sizeOption, `${label} ${target} tmpfs size option must not be empty`);
+  const sizeBytes = parseSizeToBytes(sizeOption.slice('size='.length));
   assert(
     Number.isFinite(sizeBytes) && sizeBytes > 0 && sizeBytes <= maximumTmpfsBytes,
     `${label} ${target} tmpfs size must be between 1 byte and 2 GiB`
@@ -373,12 +377,12 @@ function parseSizeToBytes(value: string | number | undefined) {
     return Number.NaN;
   }
 
-  const direct = Number(value);
-  if (Number.isFinite(direct)) {
-    return direct;
+  const normalized = value.trim();
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) {
+    return Number(normalized);
   }
 
-  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(b|[kmgt](?:i?b)?)$/i);
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s*(b|[kmgt](?:i?b)?)$/i);
   if (!match) {
     return Number.NaN;
   }

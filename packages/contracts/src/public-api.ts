@@ -140,7 +140,11 @@ export type CreateCheckProfileAlertConfigInput = z.infer<typeof createCheckProfi
 export const executionRunnerTypeSchema = z.enum(['network_probe', 'browser_audit']);
 export type ExecutionRunnerType = z.infer<typeof executionRunnerTypeSchema>;
 
-export const executionProviderSchema = z.string().min(1).max(120);
+export const executionProviderSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9][a-z0-9_-]*$/);
 export type ExecutionProvider = z.infer<typeof executionProviderSchema>;
 
 export const locationModeSchema = z.enum(['best_effort', 'fixed']);
@@ -217,6 +221,8 @@ export const createLatencyJobSchema = z.object({
   regions: z.array(regionCodeSchema).min(1).max(4).optional(),
   note: z.string().max(200).optional(),
   request: customRequestConfigSchema.optional(),
+  // Self-host job creation is admin-token protected at the HTTP boundary.
+  // Managed-cloud bot protection such as Turnstile is intentionally not an OSS contract field.
   monitorPolicy: monitorPolicySchema.optional()
 });
 export type CreateLatencyJobInput = z.infer<typeof createLatencyJobSchema>;

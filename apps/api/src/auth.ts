@@ -38,6 +38,8 @@ export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): 
   );
 };
 
+// Scheduler dispatch predates the /internal namespace and remains a compatibility
+// route. Any new service-to-service endpoint must use /internal instead.
 const isInternalPath = (pathname: string) =>
   pathname === '/v1/scheduler/dispatch' || pathname.startsWith('/internal/');
 

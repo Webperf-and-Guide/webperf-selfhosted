@@ -10,6 +10,7 @@ import {
   networkProbeExecutionContextSchema,
   networkProbeExecutionPayloadSchema
 } from '../src/execution-resources';
+import { executionProviderSchema } from '../src/public-api';
 
 const nestedPayload = (depth: number): JsonValue => {
   let value: JsonValue = 'leaf';
@@ -85,6 +86,13 @@ const baseNetworkContext = {
 };
 
 describe('execution job contracts', () => {
+  test('accepts extension providers only as safe identifiers', () => {
+    expect(executionProviderSchema.safeParse('selfhost').success).toBe(true);
+    expect(executionProviderSchema.safeParse('private_runner-2').success).toBe(true);
+    expect(executionProviderSchema.safeParse('../provider').success).toBe(false);
+    expect(executionProviderSchema.safeParse('provider name').success).toBe(false);
+  });
+
   test('bounds recursive payload depth', () => {
     expect(
       enqueueExecutionJobSchema.safeParse({

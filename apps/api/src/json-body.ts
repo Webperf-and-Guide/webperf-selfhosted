@@ -6,6 +6,14 @@ export class JsonBodyTooLargeError extends Error {
   }
 }
 
+export class JsonBodyEmptyError extends Error {
+  override readonly name = 'JsonBodyEmptyError';
+
+  constructor() {
+    super('JSON payload is required');
+  }
+}
+
 const cancelBody = async (body: ReadableStream<Uint8Array> | null) => {
   try {
     await body?.cancel();
@@ -32,7 +40,7 @@ export const readBoundedJson = async (
   }
 
   if (!request.body) {
-    return JSON.parse('');
+    throw new JsonBodyEmptyError();
   }
 
   const reader = request.body.getReader();
@@ -48,11 +56,7 @@ export const readBoundedJson = async (
 
       byteSize += value.byteLength;
       if (byteSize > maxBytes) {
-        try {
-          await reader.cancel();
-        } catch {
-          // The size violation is the response-facing error.
-        }
+        await cancelReader(reader);
         throw new JsonBodyTooLargeError(maxBytes);
       }
 
@@ -71,7 +75,19 @@ export const readBoundedJson = async (
     reader.releaseLock();
   }
 
+  if (byteSize === 0) {
+    throw new JsonBodyEmptyError();
+  }
+
   return JSON.parse(
     new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, byteSize))
   );
+};
+
+const cancelReader = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  try {
+    await reader.cancel();
+  } catch {
+    // The connection may already be closed; the size error remains authoritative.
+  }
 };

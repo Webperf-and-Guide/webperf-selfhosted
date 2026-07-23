@@ -111,7 +111,11 @@ import {
 } from '@webperf/contracts';
 import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi';
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
-import { JsonBodyTooLargeError, readBoundedJson } from './json-body';
+import {
+  JsonBodyEmptyError,
+  JsonBodyTooLargeError,
+  readBoundedJson
+} from './json-body';
 import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import { isDeepStrictEqual } from 'node:util';
@@ -3825,15 +3829,21 @@ async function parseJsonBody<T>(request: Request, maxBytes = 1_024 * 1_024) {
       data: (await readBoundedJson(request, maxBytes)) as T
     };
   } catch (error) {
+    let message = 'Invalid JSON payload';
+    let status = 400;
+
+    if (error instanceof JsonBodyTooLargeError) {
+      message = error.message;
+      status = 413;
+    } else if (error instanceof JsonBodyEmptyError) {
+      message = error.message;
+    }
+
     return {
       ok: false as const,
       response: json(
-        {
-          error: error instanceof JsonBodyTooLargeError
-            ? error.message
-            : 'Invalid JSON payload'
-        },
-        { status: error instanceof JsonBodyTooLargeError ? 413 : 400 }
+        { error: message },
+        { status }
       )
     };
   }

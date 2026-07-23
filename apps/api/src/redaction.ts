@@ -43,14 +43,14 @@ export const isSensitiveHeaderName = (name: string) => {
   const normalized = name.trim().toLowerCase();
   const compact = normalized.replaceAll(/[-_]/g, '');
   return exactSensitiveHeaderNames.has(normalized)
-    || /(?:^|[-_])(token|secret|key|password|passwd|credential|bearer)(?:$|[-_])/.test(normalized)
+    || /(?:^|[-_])(?:token|secret|key|password|passwd|credential|bearer)(?:$|[-_])/.test(normalized)
     || compactSensitiveHeaderNames.has(compact)
     || (compact.startsWith('x') && compactSensitiveHeaderNames.has(compact.slice(1)));
 };
 
 const isSensitivePropertyName = (name: string) =>
-  /^(?:(?:client|webhook|upload|artifact|auth|bearer|access|refresh)[-_]?)?(?:secret|token|password|passwd|credentials?)$/i
-    .test(name)
+  isSensitiveHeaderName(name)
+  || /(?:token|secret|password|passwd|credentials?|authorization)$/i.test(name)
   || /^(?:api|secret|private|signing|encryption)[-_]?key$/i.test(name);
 
 const isUrlPropertyName = (name: string) =>
@@ -157,7 +157,15 @@ export const redactJsonResponse = async (response: Response) => {
     return response;
   }
 
-  const body = await readBoundedResponseText(response, maxRedactedJsonResponseBytes);
+  let body: string | null;
+  try {
+    body = await readBoundedResponseText(response, maxRedactedJsonResponseBytes);
+  } catch {
+    return safeRedactionFailureResponse(
+      'Response body could not be read safely',
+      response
+    );
+  }
 
   if (body === null) {
     return safeRedactionFailureResponse(

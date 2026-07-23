@@ -50,6 +50,11 @@ describe('API secret redaction', () => {
         clientSecret: 'private-client-secret',
         uploadToken: 'private-upload-token',
         bearerToken: 'private-bearer-token',
+        authorization: 'Bearer private-authorization',
+        oauth_token: 'private-oauth-token',
+        github_token: 'private-github-token',
+        slack_token: 'private-slack-token',
+        api_token: 'private-api-token',
         privateKey: 'private-key',
         keyVersion: 'current'
       })
@@ -63,6 +68,11 @@ describe('API secret redaction', () => {
       clientSecret: redactedValue,
       uploadToken: redactedValue,
       bearerToken: redactedValue,
+      authorization: redactedValue,
+      oauth_token: redactedValue,
+      github_token: redactedValue,
+      slack_token: redactedValue,
+      api_token: redactedValue,
       privateKey: redactedValue,
       keyVersion: 'current'
     });
@@ -107,6 +117,17 @@ describe('API secret redaction', () => {
     expect(oversized.status).toBe(500);
     expect(await oversized.json()).toEqual({
       error: 'Response exceeded the safe redaction byte limit'
+    });
+
+    const lockedResponse = new Response('{"token":"private"}', {
+      headers: { 'content-type': 'application/json' }
+    });
+    const reader = lockedResponse.body!.getReader();
+    const locked = await redactJsonResponse(lockedResponse);
+    reader.releaseLock();
+    expect(locked.status).toBe(500);
+    expect(await locked.json()).toEqual({
+      error: 'Response body could not be read safely'
     });
   });
 });

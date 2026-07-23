@@ -48,6 +48,8 @@ import {
 } from './database/operations';
 import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 
+const maximumBrowserAuditArtifactsPerAudit = 50;
+
 type JobRow = {
   id: string;
   payload_json: string;
@@ -339,6 +341,11 @@ export const createSqliteJobRepository = ({
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (id) DO NOTHING
   `);
+  const countBrowserAuditArtifactsStatement = db.query<{ count: number }, [string]>(`
+    SELECT COUNT(*) AS count
+    FROM browser_audit_artifacts
+    WHERE audit_id = ?
+  `);
   const getBrowserAuditArtifactStatement = db.query<BrowserAuditArtifactRow, [string, string]>(`
     SELECT *
     FROM browser_audit_artifacts
@@ -499,13 +506,14 @@ export const createSqliteJobRepository = ({
   const parseJob = (row: JobRow) => {
     try {
       return latencyJobDetailSchema.parse(storageCrypto.parse(row.payload_json));
-    } catch {
+    } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'job_row_invalid',
           jobId: row.id,
-          error: 'Persisted job payload could not be decoded'
+          error: 'Persisted job payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
@@ -515,13 +523,14 @@ export const createSqliteJobRepository = ({
   const parseEntity = <T>(kind: EntityKind, row: SavedEntityRow, schema: JsonSchema<T>) => {
     try {
       return schema.parse(storageCrypto.parse(row.payload_json));
-    } catch {
+    } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'saved_entity_invalid',
           kind,
-          error: 'Persisted entity payload could not be decoded'
+          error: 'Persisted entity payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
@@ -531,12 +540,13 @@ export const createSqliteJobRepository = ({
   const parseCheckProfileRun = (row: CheckProfileRunRow) => {
     try {
       return checkProfileRunSchema.parse(storageCrypto.parse(row.payload_json));
-    } catch {
+    } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'check_profile_run_invalid',
-          error: 'Persisted check run payload could not be decoded'
+          error: 'Persisted check run payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
@@ -958,7 +968,17 @@ export const createSqliteJobRepository = ({
       persistBrowserAudit(browserAudit);
     },
     saveBrowserAuditArtifact(artifact) {
-      try {
+      const save = db.transaction(() => {
+        const existing = getBrowserAuditArtifactStatement.get(artifact.auditId, artifact.id);
+        if (existing) {
+          return false;
+        }
+
+        const count = countBrowserAuditArtifactsStatement.get(artifact.auditId)?.count ?? 0;
+        if (count >= maximumBrowserAuditArtifactsPerAudit) {
+          return false;
+        }
+
         const result = saveBrowserAuditArtifactStatement.run(
           artifact.id,
           artifact.auditId,
@@ -972,11 +992,14 @@ export const createSqliteJobRepository = ({
           artifact.createdAt
         ) as { changes?: number };
         return (result.changes ?? 0) === 1;
+      });
+
+      try {
+        return save();
       } catch (error) {
-        if (
-          error instanceof Error
-          && error.message.includes('browser_audit_artifact_limit')
-        ) {
+        // The trigger remains a cross-process backstop if another API connection
+        // wins the race after this transaction's explicit count check.
+        if ((error as { code?: unknown } | null)?.code === 'SQLITE_CONSTRAINT_TRIGGER') {
           return false;
         }
 
@@ -1010,6 +1033,9 @@ export const createSqliteJobRepository = ({
       return create();
     },
     saveExecutionResourceResult(input, now = new Date()) {
+      // Persistence intentionally precedes completion because network executions may
+      // still enqueue follow-ups. Every resource write is idempotent/upserted, so a
+      // crash in that window is handled by the queue's at-least-once retry contract.
       const save = db.transaction(() => {
         if (!ownsRunningExecutionLease(input.executionJobId, input.leaseOwner, now.toISOString())) {
           return false;

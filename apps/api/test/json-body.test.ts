@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { JsonBodyTooLargeError, readBoundedJson } from '../src/json-body';
+import {
+  JsonBodyEmptyError,
+  JsonBodyTooLargeError,
+  readBoundedJson
+} from '../src/json-body';
 
 describe('bounded JSON request bodies', () => {
   test('parses a body at the byte limit', async () => {
@@ -44,5 +48,23 @@ describe('bounded JSON request bodies', () => {
       new Request('http://localhost/', { method: 'POST', body: '{}' }),
       0
     )).rejects.toThrow('positive integer');
+  });
+
+  test('reports absent and zero-byte payloads explicitly', async () => {
+    await expect(readBoundedJson(
+      new Request('http://localhost/', { method: 'POST' }),
+      10
+    )).rejects.toBeInstanceOf(JsonBodyEmptyError);
+    await expect(readBoundedJson(
+      new Request('http://localhost/', {
+        method: 'POST',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          }
+        })
+      }),
+      10
+    )).rejects.toBeInstanceOf(JsonBodyEmptyError);
   });
 });

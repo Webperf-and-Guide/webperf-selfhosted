@@ -132,7 +132,7 @@ export const dispatchScheduledChecks = async ({
       });
     } catch (error) {
       if (signal?.aborted) {
-        throw signal.reason ?? error;
+        throw normalizeSchedulerAbortError(signal, error);
       }
 
       if (timeoutController.signal.aborted) {
@@ -153,7 +153,7 @@ export const dispatchScheduledChecks = async ({
       payload = await raceWithAbort(response.json(), requestSignal);
     } catch (error) {
       if (signal?.aborted) {
-        throw signal.reason ?? error;
+        throw normalizeSchedulerAbortError(signal, error);
       }
 
       if (timeoutController.signal.aborted) {
@@ -314,12 +314,12 @@ const waitForNextPoll = (durationMs: number, signal: AbortSignal) =>
 
 const raceWithAbort = async <Result>(operation: Promise<Result>, signal: AbortSignal) => {
   if (signal.aborted) {
-    throw signal.reason;
+    throw normalizeSchedulerAbortError(signal);
   }
 
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(signal.reason);
+    onAbort = () => reject(normalizeSchedulerAbortError(signal));
     signal.addEventListener('abort', onAbort, { once: true });
   });
 
@@ -330,4 +330,20 @@ const raceWithAbort = async <Result>(operation: Promise<Result>, signal: AbortSi
       signal.removeEventListener('abort', onAbort);
     }
   }
+};
+
+const normalizeSchedulerAbortError = (
+  signal: AbortSignal,
+  fallback?: unknown
+) => {
+  if (signal.reason instanceof Error) {
+    return signal.reason;
+  }
+  if (fallback instanceof Error) {
+    return fallback;
+  }
+
+  return Object.assign(new Error('Scheduler operation was aborted'), {
+    name: 'AbortError'
+  });
 };

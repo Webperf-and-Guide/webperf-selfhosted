@@ -122,6 +122,41 @@ describe('self-host scheduler boundary', () => {
     expect(caught).toMatchObject({ code: 'request_timeout', status: 200 });
   });
 
+  test('normalizes non-Error shutdown reasons without reflecting them', async () => {
+    const controller = new AbortController();
+    const rawReason = 'operator-secret-shutdown-reason';
+    let caught: unknown;
+
+    try {
+      await dispatchScheduledChecks({
+        apiBaseUrl: 'https://api.example.test',
+        internalSecret: 'scheduler-internal-secret',
+        signal: controller.signal,
+        fetchImpl: async (_input, init) => {
+          const requestSignal = init?.signal;
+          if (!requestSignal) {
+            throw new Error('Expected the scheduler request signal');
+          }
+
+          return await new Promise<Response>((_resolve, reject) => {
+            requestSignal.addEventListener(
+              'abort',
+              () => reject(requestSignal.reason),
+              { once: true }
+            );
+            controller.abort(rawReason);
+          });
+        }
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).toMatchObject({ name: 'AbortError' });
+    expect(String(caught)).not.toContain(rawReason);
+  });
+
   test('rejects a credential-bearing or pathful API base URL before fetch', async () => {
     let fetchCalled = false;
 

@@ -100,7 +100,10 @@ export const createStorageCrypto = ({
 };
 
 const assertStorageSecret = (secret: string, label: 'current' | 'next') => {
-  if (Buffer.byteLength(secret, 'utf8') < 16 || secret.trim().length === 0) {
+  if (secret.trim().length === 0) {
+    throw new Error(`SQLite ${label} encryption secret must not be empty or whitespace-only`);
+  }
+  if (Buffer.byteLength(secret, 'utf8') < 16) {
     throw new Error(`SQLite ${label} encryption secret must contain at least 16 UTF-8 bytes`);
   }
 };

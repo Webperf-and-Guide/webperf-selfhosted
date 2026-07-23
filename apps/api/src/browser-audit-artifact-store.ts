@@ -208,12 +208,13 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
   async openDownload(storageKey: string, expectedBytes: number) {
     await this.ensureRoot();
     const path = this.pathForStorageKey(storageKey);
-    const handle = await open(
-      path,
-      constants.O_RDONLY | constants.O_NOFOLLOW
-    );
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
 
     try {
+      handle = await open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
       const file = await handle.stat();
 
       if (!file.isFile() || file.size !== expectedBytes) {
@@ -225,7 +226,14 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         byteSize: file.size
       };
     } catch (error) {
-      await handle.close().catch(() => undefined);
+      await handle?.close().catch(() => undefined);
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ELOOP' || code === 'ENOENT' || code === 'ENOTDIR') {
+        throw new Error(
+          'Browser Audit artifact file is missing or inconsistent',
+          { cause: error }
+        );
+      }
       throw error;
     }
   }
@@ -388,7 +396,7 @@ const assertDescendant = (rootPath: string, candidatePath: string) => {
 };
 
 const enforcePrivateDirectory = async (path: string, unsafeMessage: string) => {
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
 
   try {
     handle = await open(

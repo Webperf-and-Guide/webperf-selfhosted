@@ -205,7 +205,8 @@ describe('local Browser Audit artifact storage', () => {
 
     expect(await new Response(download.body).text()).toBe('validated artifact');
     expect(readFileSync(artifactPath, 'utf8')).toBe('must not be served');
-    await expect(store.openDownload(stored.storageKey, body.byteLength)).rejects.toThrow();
+    await expect(store.openDownload(stored.storageKey, body.byteLength))
+      .rejects.toThrow('missing or inconsistent');
   });
 });
 

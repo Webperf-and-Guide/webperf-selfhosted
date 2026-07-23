@@ -7,7 +7,7 @@ describe('SQLite payload encryption', () => {
     expect(() => createStorageCrypto({ currentSecret: 'too-short' }))
       .toThrow('at least 16 UTF-8 bytes');
     expect(() => createStorageCrypto({ currentSecret: '                ' }))
-      .toThrow('at least 16 UTF-8 bytes');
+      .toThrow('whitespace-only');
     expect(() => createStorageCrypto({
       currentSecret: 'current-encryption-secret',
       nextSecret: 'short'

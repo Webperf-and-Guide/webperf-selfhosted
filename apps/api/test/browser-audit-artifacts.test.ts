@@ -20,7 +20,10 @@ import {
   issueBrowserAuditUploadToken,
   verifyBrowserAuditUploadToken
 } from '../src/browser-audit-upload-token';
-import { createSqliteJobRepository } from '../src/repository';
+import {
+  createSqliteJobRepository,
+  isBrowserAuditArtifactLimitConstraint
+} from '../src/repository';
 import { cleanupSqliteRetention } from '../src/database/operations';
 
 const tempDirectories: string[] = [];
@@ -358,6 +361,26 @@ describe('local Browser Audit artifact storage', () => {
 });
 
 describe('Browser Audit artifact indexes', () => {
+  test('classifies only the named SQLite artifact-limit constraint', () => {
+    expect(isBrowserAuditArtifactLimitConstraint({
+      code: 'SQLITE_CONSTRAINT_TRIGGER',
+      message: 'browser_audit_artifact_limit'
+    })).toBe(true);
+    expect(isBrowserAuditArtifactLimitConstraint({
+      code: 'SQLITE_CONSTRAINT',
+      message: 'constraint failed: browser_audit_artifact_limit'
+    })).toBe(true);
+    expect(isBrowserAuditArtifactLimitConstraint({
+      code: 'SQLITE_CONSTRAINT_TRIGGER',
+      message: 'unrelated_trigger_limit'
+    })).toBe(false);
+    expect(isBrowserAuditArtifactLimitConstraint({
+      code: 'EOTHER',
+      message: 'browser_audit_artifact_limit'
+    })).toBe(false);
+    expect(isBrowserAuditArtifactLimitConstraint(null)).toBe(false);
+  });
+
   test('persists metadata in SQLite without storing binary payloads', () => {
     const databasePath = join(createTempDirectory(), 'webperf.sqlite');
     const repository = createSqliteJobRepository({

@@ -60,6 +60,15 @@ import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.
 const maximumBrowserAuditArtifactsPerAudit = browserAuditArtifactLimit;
+const browserAuditArtifactLimitConstraintMarker = 'browser_audit_artifact_limit';
+
+export const isBrowserAuditArtifactLimitConstraint = (error: unknown) => {
+  const candidate = error as { code?: unknown; message?: unknown } | null;
+  return typeof candidate?.code === 'string'
+    && candidate.code.startsWith('SQLITE_CONSTRAINT')
+    && typeof candidate.message === 'string'
+    && candidate.message.includes(browserAuditArtifactLimitConstraintMarker);
+};
 
 type JobRow = {
   id: string;
@@ -675,6 +684,8 @@ export const createSqliteJobRepository = ({
   const persistJob = (job: LatencyJobDetail) => {
     saveStatement.run(
       job.id,
+      // This plaintext column is a query-free diagnostic index. The encrypted
+      // payload remains the canonical record and is the only source used on read.
       redactUrlQuery(job.url),
       job.status,
       job.requestedAt,
@@ -1016,14 +1027,7 @@ export const createSqliteJobRepository = ({
       } catch (error) {
         // The trigger remains a cross-process backstop if another API connection
         // wins the race after this transaction's explicit count check.
-        const errorMessage = (error as { message?: unknown } | null)?.message;
-        if (
-          (error as { code?: unknown } | null)?.code === 'SQLITE_CONSTRAINT_TRIGGER'
-          || (
-            typeof errorMessage === 'string'
-            && errorMessage.includes('browser_audit_artifact_limit')
-          )
-        ) {
+        if (isBrowserAuditArtifactLimitConstraint(error)) {
           return false;
         }
 
@@ -1259,6 +1263,8 @@ export const createSqliteJobRepository = ({
         const executionJob = existing ? parseExecutionJob(existing) : null;
 
         if (executionJob?.status === 'cancelled') {
+          // A previous cancellation can commit the queue transition before a
+          // resource-sync failure. Repeating the idempotent sync repairs that split.
           syncTerminalExecutionResource(executionJob, nowIso);
           return executionJob;
         }

@@ -22,28 +22,9 @@ afterEach(() => {
 describe('release bundle generation', () => {
   test('renders a complete digest-pinned bundle from six image records', () => {
     const root = makeTemporaryDirectory();
-    const input = join(root, 'input');
     const output = join(root, 'webperf-selfhosted-v0.2.0');
     const sourceCommit = 'a'.repeat(40);
-
-    for (const definition of releaseImages) {
-      const digest = `sha256:${createHash('sha256').update(definition.name).digest('hex')}`;
-      writeReleaseImageMetadata({
-        ...definition,
-        version: '0.2.0',
-        digest,
-        sourceCommit,
-        outputDirectory: input
-      });
-      writeFileSync(
-        join(input, `${definition.name}-0.2.0.spdx.json`),
-        JSON.stringify({
-          spdxVersion: 'SPDX-2.3',
-          SPDXID: 'SPDXRef-DOCUMENT',
-          name: definition.name
-        })
-      );
-    }
+    const input = writeValidReleaseInputs(root, '0.2.0', sourceCommit);
 
     const result = renderReleaseBundle({
       version: '0.2.0',
@@ -69,6 +50,24 @@ describe('release bundle generation', () => {
     );
     expect(readFileSync(join(output, 'SHA256SUMS'), 'utf8')).toContain(
       'runtime-metadata.json'
+    );
+  });
+
+  test('identifies every invalid release metadata field', () => {
+    const root = makeTemporaryDirectory();
+    const input = writeValidReleaseInputs(root, '0.2.0', 'a'.repeat(40));
+    const metadataPath = join(input, 'console.json');
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as Record<string, unknown>;
+    metadata.tag = '0.2.1';
+    metadata.sbom = 'wrong.spdx.json';
+    writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+
+    expect(() => renderReleaseBundle({
+      version: '0.2.0',
+      inputDirectory: input,
+      outputDirectory: join(root, 'output')
+    })).toThrow(
+      'tag must be 0.2.0; sbom must be console-0.2.0.spdx.json'
     );
   });
 
@@ -112,4 +111,27 @@ function makeTemporaryDirectory() {
   const directory = mkdtempSync(join(tmpdir(), 'webperf-release-'));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+function writeValidReleaseInputs(root: string, version: string, sourceCommit: string) {
+  const input = join(root, 'input');
+  for (const definition of releaseImages) {
+    const digest = `sha256:${createHash('sha256').update(definition.name).digest('hex')}`;
+    writeReleaseImageMetadata({
+      ...definition,
+      version,
+      digest,
+      sourceCommit,
+      outputDirectory: input
+    });
+    writeFileSync(
+      join(input, `${definition.name}-${version}.spdx.json`),
+      JSON.stringify({
+        spdxVersion: 'SPDX-2.3',
+        SPDXID: 'SPDXRef-DOCUMENT',
+        name: definition.name
+      })
+    );
+  }
+  return input;
 }

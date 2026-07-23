@@ -20,6 +20,7 @@ type ComposeService = {
   ports?: ComposePort[];
   profiles?: string[];
   cap_add?: string[];
+  cap_drop?: string[];
   security_opt?: string[];
   tmpfs?: string[];
   shm_size?: string | number;
@@ -36,6 +37,7 @@ const envFile = resolve(repositoryRoot, 'infra/docker-compose/.env.example');
 const productionFile = resolve(repositoryRoot, 'infra/docker-compose/compose.yml');
 const developmentFile = resolve(repositoryRoot, 'infra/docker-compose/compose.dev.yml');
 const browserSeccompFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json');
+const composeRenderTimeoutMs = 30_000;
 const defaultServiceNames = ['api', 'console', 'executor', 'probe', 'scheduler'];
 const expectedImages: Record<string, string> = {
   api: 'webperf-api',
@@ -79,6 +81,10 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
   assert(
     nonRootNumericUserPattern.test(service.user ?? ''),
     `${name} must run as an explicit non-root numeric user`
+  );
+  assert(
+    service.cap_drop?.includes('ALL'),
+    `${name} must drop all Linux capabilities`
   );
   assert(service.read_only === true, `${name} must use a read-only root filesystem`);
   assert(service.restart === 'unless-stopped', `${name} must restart unless stopped`);
@@ -202,11 +208,17 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
     cwd: repositoryRoot,
     stdout: 'pipe',
     stderr: 'pipe',
-    timeout: 30_000
+    timeout: composeRenderTimeoutMs
   });
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.toString() || 'docker compose config failed');
+    const stderr = result.stderr.toString().trim();
+    if (result.exitCode === null) {
+      throw new Error(
+        `docker compose config timed out after ${composeRenderTimeoutMs / 1_000} seconds${stderr ? `: ${stderr}` : ''}`
+      );
+    }
+    throw new Error(stderr || 'docker compose config failed');
   }
 
   const stdout = result.stdout.toString();
@@ -234,10 +246,12 @@ function assertBrowserSeccompProfile() {
     }>;
   };
   assert(profile.defaultAction === 'SCMP_ACT_ERRNO', 'Browser seccomp must default-deny syscalls');
+  const requiredNamespaceSyscalls = ['clone', 'setns', 'unshare'];
   const namespaceRule = profile.syscalls?.find(
     (rule) =>
       rule.action === 'SCMP_ACT_ALLOW'
-      && JSON.stringify(rule.names) === JSON.stringify(['clone', 'setns', 'unshare'])
+      && rule.names?.length === requiredNamespaceSyscalls.length
+      && requiredNamespaceSyscalls.every((name) => rule.names?.includes(name))
   );
   assert(namespaceRule, 'Browser seccomp must allow only the required namespace syscalls explicitly');
 

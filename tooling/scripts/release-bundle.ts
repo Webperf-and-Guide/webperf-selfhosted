@@ -244,21 +244,38 @@ function readReleaseImageMetadata(
     throw new Error(`Release metadata is not an object: ${basename(path)}`);
   }
   const metadata = parsed as Partial<ReleaseImageMetadata>;
-  if (
-    Object.keys(metadata).sort().join('\n') !== metadataKeys.join('\n')
-    || metadata.schemaVersion !== 1
-    || metadata.name !== definition.name
-    || metadata.image !== definition.image
-    || metadata.tag !== version
-    || typeof metadata.digest !== 'string'
-    || !digestPattern.test(metadata.digest)
-    || metadata.reference !== `${definition.image}@${metadata.digest}`
-    || metadata.platform !== 'linux/amd64'
-    || typeof metadata.sourceCommit !== 'string'
-    || !commitPattern.test(metadata.sourceCommit)
-    || metadata.sbom !== `${definition.name}-${version}.spdx.json`
-  ) {
-    throw new Error(`Release metadata failed validation: ${basename(path)}`);
+  const checks: Array<[valid: boolean, failure: string]> = [
+    [
+      Object.keys(metadata).sort().join('\n') === metadataKeys.join('\n'),
+      'metadata keys do not match the release schema'
+    ],
+    [metadata.schemaVersion === 1, 'schemaVersion must be 1'],
+    [metadata.name === definition.name, `name must be ${definition.name}`],
+    [metadata.image === definition.image, `image must be ${definition.image}`],
+    [metadata.tag === version, `tag must be ${version}`],
+    [
+      typeof metadata.digest === 'string' && digestPattern.test(metadata.digest),
+      'digest must be a lowercase sha256 OCI digest'
+    ],
+    [
+      metadata.reference === `${definition.image}@${metadata.digest}`,
+      'reference must match the approved image and digest'
+    ],
+    [metadata.platform === 'linux/amd64', 'platform must be linux/amd64'],
+    [
+      typeof metadata.sourceCommit === 'string' && commitPattern.test(metadata.sourceCommit),
+      'sourceCommit must be a full SHA-1 or SHA-256 commit ID'
+    ],
+    [
+      metadata.sbom === `${definition.name}-${version}.spdx.json`,
+      `sbom must be ${definition.name}-${version}.spdx.json`
+    ]
+  ];
+  const failures = checks.filter(([valid]) => !valid).map(([, failure]) => failure);
+  if (failures.length > 0) {
+    throw new Error(
+      `Release metadata failed validation for ${basename(path)}: ${failures.join('; ')}`
+    );
   }
   return metadata as ReleaseImageMetadata;
 }
@@ -350,13 +367,7 @@ function compareReleaseVersions(left: ParsedReleaseVersion, right: ParsedRelease
     const leftIdentifier = left.prerelease[index];
     const rightIdentifier = right.prerelease[index];
     if (leftIdentifier === undefined || rightIdentifier === undefined) {
-      if (leftIdentifier === rightIdentifier) {
-        return 0;
-      }
-      if (leftIdentifier === undefined) {
-        return -1;
-      }
-      return 1;
+      return leftIdentifier === undefined ? -1 : 1;
     }
     if (leftIdentifier === rightIdentifier) {
       continue;

@@ -220,9 +220,10 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     const path = this.pathForStorageKey(storageKey);
     const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
+    let auditDirectory: Awaited<ReturnType<typeof open>> | undefined;
 
     try {
-      await enforcePrivateDirectory(
+      auditDirectory = await openPrivateDirectory(
         auditPath,
         'Browser Audit artifact directory is unsafe'
       );
@@ -235,13 +236,21 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
       if (!file.isFile() || file.size !== expectedBytes) {
         throw new Error('Browser Audit artifact file is missing or inconsistent');
       }
+      await assertPinnedDirectory(
+        auditPath,
+        auditDirectory,
+        'Browser Audit artifact directory changed during download'
+      );
 
+      const body = readableFileHandle(handle, file.size, [auditDirectory]);
+      auditDirectory = undefined;
       return {
-        body: readableFileHandle(handle, file.size),
+        body,
         byteSize: file.size
       };
     } catch (error) {
       await handle?.close().catch(() => undefined);
+      await auditDirectory?.close().catch(() => undefined);
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ELOOP' || code === 'ENOENT' || code === 'ENOTDIR') {
         throw new Error(
@@ -257,18 +266,33 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     await this.ensureRoot();
     const path = this.pathForStorageKey(storageKey);
     const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
-    try {
-      await enforcePrivateDirectory(
-        auditPath,
-        'Browser Audit artifact directory is unsafe'
-      );
-    } catch (error) {
+    const auditDirectory = await openPrivateDirectory(
+      auditPath,
+      'Browser Audit artifact directory is unsafe'
+    ).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return;
+        return undefined;
       }
       throw error;
+    });
+    if (!auditDirectory) {
+      return;
     }
-    await rm(path, { force: true });
+    try {
+      await assertPinnedDirectory(
+        auditPath,
+        auditDirectory,
+        'Browser Audit artifact directory changed before delete'
+      );
+      await rm(path, { force: true });
+      await assertPinnedDirectory(
+        auditPath,
+        auditDirectory,
+        'Browser Audit artifact directory changed during delete'
+      );
+    } finally {
+      await auditDirectory.close().catch(() => undefined);
+    }
   }
 
   async reconcile(
@@ -429,35 +453,82 @@ const assertDescendant = (rootPath: string, candidatePath: string) => {
   }
 };
 
-const enforcePrivateDirectory = async (path: string, unsafeMessage: string) => {
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-
+const openDirectoryNoFollow = async (path: string, unsafeMessage: string) => {
   try {
-    handle = await open(
+    return await open(
       path,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
     );
-    const directory = await handle.stat();
-
-    if (!directory.isDirectory()) {
-      throw new Error(unsafeMessage);
-    }
-
-    await handle.chmod(0o700);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ELOOP' || code === 'ENOTDIR') {
       throw new Error(unsafeMessage, { cause: error });
     }
     throw error;
+  }
+};
+
+const openPrivateDirectory = async (path: string, unsafeMessage: string) => {
+  const handle = await openDirectoryNoFollow(path, unsafeMessage);
+
+  try {
+    const directory = await handle.stat();
+
+    if (!directory.isDirectory()) {
+      throw new Error(unsafeMessage);
+    }
+
+    const effectiveUid = typeof process.geteuid === 'function'
+      ? process.geteuid()
+      : undefined;
+    if (effectiveUid !== undefined && directory.uid !== effectiveUid) {
+      throw new Error(unsafeMessage);
+    }
+
+    await handle.chmod(0o700);
+    const securedDirectory = await handle.stat();
+    if ((securedDirectory.mode & 0o077) !== 0) {
+      throw new Error(unsafeMessage);
+    }
+
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+};
+
+const enforcePrivateDirectory = async (path: string, unsafeMessage: string) => {
+  const handle = await openPrivateDirectory(path, unsafeMessage);
+  await handle.close();
+};
+
+const assertPinnedDirectory = async (
+  path: string,
+  pinnedHandle: Awaited<ReturnType<typeof open>>,
+  unsafeMessage: string
+) => {
+  const pinnedDirectory = await pinnedHandle.stat();
+  let currentHandle: Awaited<ReturnType<typeof open>> | undefined;
+
+  try {
+    currentHandle = await openDirectoryNoFollow(path, unsafeMessage);
+    const currentDirectory = await currentHandle.stat();
+    if (
+      currentDirectory.dev !== pinnedDirectory.dev
+      || currentDirectory.ino !== pinnedDirectory.ino
+    ) {
+      throw new Error(unsafeMessage);
+    }
   } finally {
-    await handle?.close().catch(() => undefined);
+    await currentHandle?.close().catch(() => undefined);
   }
 };
 
 const readableFileHandle = (
   handle: Awaited<ReturnType<typeof open>>,
-  byteSize: number
+  byteSize: number,
+  pinnedDirectories: Array<Awaited<ReturnType<typeof open>>> = []
 ): ReadableStream<Uint8Array> => {
   let closed = false;
   let remainingBytes = byteSize;
@@ -468,6 +539,9 @@ const readableFileHandle = (
     }
     closed = true;
     await handle.close().catch(() => undefined);
+    await Promise.all(
+      pinnedDirectories.map((directory) => directory.close().catch(() => undefined))
+    );
   };
 
   return new ReadableStream<Uint8Array>({

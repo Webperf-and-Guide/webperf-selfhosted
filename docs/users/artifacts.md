@@ -40,7 +40,11 @@ into another evidence store.
 At API startup and during `selfhost:maintenance`, WebPerf removes expired
 artifact index rows and reconciles the filesystem against the remaining index.
 The cleanup root cannot be a filesystem root, does not follow symlinks, and
-removes only unindexed entries below the configured directory.
+requires process-owned, owner-only directories. Download and delete operations
+keep the validated audit-directory descriptor pinned and reject directory
+identity changes. In the Compose deployment, only the API service mounts the
+artifact volume. Cleanup removes only unindexed entries below the configured
+directory.
 
 From a source checkout, maintenance can be run directly. In a release
 container, use the shipped script:

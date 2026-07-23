@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync
@@ -241,6 +242,32 @@ describe('local Browser Audit artifact storage', () => {
     expect(readFileSync(artifactPath, 'utf8')).toBe('must not be served');
     await expect(store.openDownload(stored.storageKey, body.byteLength))
       .rejects.toThrow('missing or inconsistent');
+  });
+
+  test('keeps the validated audit directory pinned for the download stream', async () => {
+    const directory = createTempDirectory();
+    const root = join(directory, 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const body = new TextEncoder().encode('pinned audit directory');
+    const stored = await store.write({
+      auditId: 'audit_directory_descriptor',
+      artifactId: 'artifact_directory_descriptor',
+      body: new Response(body).body,
+      expectedBytes: body.byteLength,
+      maxBytes: 1_024
+    });
+    const download = await store.openDownload(stored.storageKey, body.byteLength);
+    const auditPath = join(root, 'audit_directory_descriptor');
+    const replacedPath = join(root, 'audit_directory_replaced');
+    const outsidePath = join(directory, 'outside');
+    mkdirSync(outsidePath);
+    writeFileSync(join(outsidePath, 'artifact_directory_descriptor'), 'outside secret');
+    renameSync(auditPath, replacedPath);
+    symlinkSync(outsidePath, auditPath);
+
+    expect(await new Response(download.body).text()).toBe('pinned audit directory');
+    expect(readFileSync(join(auditPath, 'artifact_directory_descriptor'), 'utf8'))
+      .toBe('outside secret');
   });
 
   test('rejects an intermediate audit-directory symlink during download and delete', async () => {

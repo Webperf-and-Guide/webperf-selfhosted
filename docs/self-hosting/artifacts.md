@@ -41,10 +41,16 @@ index. `bun run selfhost:maintenance` performs the same reconciliation; use
 `--artifacts <path>` when it differs from `SELFHOST_ARTIFACTS_PATH`.
 
 The reconciliation root may not be a filesystem root. It does not follow
-symlinks. At the root it owns only names that match the generated artifact-ID
-namespace, so filesystem or deployment entries such as `lost+found` and
-`.gitkeep` are preserved. It removes unindexed entries inside managed audit
-directories after the reconciliation grace period.
+symlinks. The API requires the root and managed audit directories to be owned
+by its effective user and makes them owner-only (`0700`). It pins a validated
+audit-directory descriptor across download and delete operations and rejects a
+path whose directory identity changes during the operation. Compose mounts the
+`webperf-data` volume only into the API service; executors and Browser Audit
+runtimes do not receive filesystem access to it. At the root, reconciliation
+owns only names that match the generated artifact-ID namespace, so filesystem
+or deployment entries such as `lost+found` and `.gitkeep` are preserved. It
+removes unindexed entries inside managed audit directories after the
+reconciliation grace period.
 
 ## Backup boundary
 

@@ -142,10 +142,10 @@ export const selfhostExecutorEnvSchema = z
       }
     }
 
-    if (config.SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS * 2 >= config.SELFHOST_EXECUTOR_LEASE_DURATION_MS) {
+    if (config.SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS * 3 > config.SELFHOST_EXECUTOR_LEASE_DURATION_MS) {
       context.addIssue({
         code: 'custom',
-        message: 'Executor heartbeat interval must be less than half the lease duration',
+        message: 'Executor heartbeat interval must be at most one third of the lease duration',
         path: ['SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS']
       });
     }

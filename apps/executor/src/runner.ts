@@ -9,6 +9,8 @@ export type ExecutorLogger = {
   error(event: Record<string, unknown>): void;
 };
 
+const defaultHeartbeatShutdownTimeoutMs = 5_000;
+
 export class ExecutionFailure extends Error {
   override readonly name: string = 'ExecutionFailure';
 
@@ -104,7 +106,8 @@ export const processExecutionJob = async ({
   heartbeatIntervalMs,
   maxExecutionMs,
   logger,
-  shutdownSignal
+  shutdownSignal,
+  heartbeatShutdownTimeoutMs = defaultHeartbeatShutdownTimeoutMs
 }: {
   client: ExecutorLeaseClient;
   handler: ExecutionHandler;
@@ -114,6 +117,7 @@ export const processExecutionJob = async ({
   maxExecutionMs: number;
   logger: ExecutorLogger;
   shutdownSignal?: AbortSignal;
+  heartbeatShutdownTimeoutMs?: number;
 }) => {
   let running: ExecutionJob;
 
@@ -126,6 +130,30 @@ export const processExecutionJob = async ({
       kind: executionJob.kind,
       ...describeSafeError(error)
     });
+    try {
+      const failed = await client.fail(executionJob.id, {
+        leaseOwner: lease.leaseOwner,
+        error: {
+          code: 'execution_start_failed',
+          message: 'Executor could not start leased work',
+          retryable: true
+        },
+        retryDelayMs: 1_000
+      });
+      logger.error({
+        event: 'execution_start_failure_recorded',
+        executionJobId: executionJob.id,
+        kind: executionJob.kind,
+        status: failed.status
+      });
+    } catch (persistError) {
+      logger.error({
+        event: 'execution_start_failure_persist_failed',
+        executionJobId: executionJob.id,
+        kind: executionJob.kind,
+        ...describeSafeError(persistError)
+      });
+    }
     return;
   }
 
@@ -222,7 +250,18 @@ export const processExecutionJob = async ({
   } finally {
     shutdownSignal?.removeEventListener('abort', onShutdown);
     heartbeatController.abort();
-    await heartbeat;
+    const heartbeatStopped = await waitForPromise(
+      heartbeat,
+      heartbeatShutdownTimeoutMs
+    );
+    if (!heartbeatStopped) {
+      logger.error({
+        event: 'heartbeat_shutdown_timeout',
+        executionJobId: running.id,
+        kind: running.kind,
+        timeoutMs: heartbeatShutdownTimeoutMs
+      });
+    }
   }
 };
 
@@ -334,6 +373,9 @@ const runHandlerWithTimeout = async ({
 
       throw error;
     });
+  // A handler that loses the timeout/abort race must still observe the signal
+  // promptly; this extra observer prevents a late rejection from becoming unhandled.
+  void handlerCompleted.catch(() => undefined);
   const timeout = setTimeout(() => {
     workController.abort(
       new ExecutionFailure(
@@ -416,6 +458,26 @@ const waitForNextPoll = (durationMs: number, signal: AbortSignal) =>
     signal.addEventListener('abort', onAbort, { once: true });
   });
 
+const waitForPromise = async (promise: Promise<unknown>, timeoutMs: number) => {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
+    throw new Error('Executor cleanup timeout must be between 1 and 60000ms');
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true, () => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
 const validateExecutorLoopOptions = ({
   leaseOwner,
   leaseDurationMs,
@@ -440,9 +502,9 @@ const validateExecutorLoopOptions = ({
   if (
     !Number.isSafeInteger(heartbeatIntervalMs)
     || heartbeatIntervalMs < 1
-    || heartbeatIntervalMs * 2 >= leaseDurationMs
+    || heartbeatIntervalMs * 3 > leaseDurationMs
   ) {
-    throw new Error('Executor heartbeat interval must be less than half the lease duration');
+    throw new Error('Executor heartbeat interval must be at most one third of the lease duration');
   }
 
   if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 1 || pollIntervalMs > 60_000) {

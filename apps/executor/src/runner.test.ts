@@ -227,6 +227,88 @@ describe('executor runner', () => {
     });
   });
 
+  test('records a retryable failure when a leased job cannot start', async () => {
+    const testLogger = logger();
+    let handlerCalled = false;
+    let recordedFailure: { code: string; retryable: boolean } | null = null;
+    const client: ExecutorLeaseClient = {
+      claim: async () => null,
+      start: async () => {
+        throw Object.assign(new Error('start transport failed'), { code: 'ECONNRESET' });
+      },
+      renew: async () => runningJob,
+      complete: async () => completedJob,
+      fail: async (_id, input) => {
+        recordedFailure = input.error;
+        return {
+          ...runningJob,
+          status: 'queued',
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          error: input.error
+        };
+      }
+    };
+
+    await processExecutionJob({
+      client,
+      handler: async () => {
+        handlerCalled = true;
+      },
+      executionJob: queuedJob,
+      lease: { leaseOwner: 'executor-test', leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 1_000,
+      maxExecutionMs: 60_000,
+      logger: testLogger
+    });
+
+    expect(handlerCalled).toBe(false);
+    expect(recordedFailure).toMatchObject({
+      code: 'execution_start_failed',
+      retryable: true
+    });
+    expect(testLogger.events).toContainEqual(expect.objectContaining({
+      event: 'execution_start_failure_recorded',
+      status: 'queued'
+    }));
+  });
+
+  test('bounds cleanup when an in-flight heartbeat ignores abort', async () => {
+    const testLogger = logger();
+    let notifyRenewStarted!: () => void;
+    const renewStarted = new Promise<void>((resolve) => {
+      notifyRenewStarted = resolve;
+    });
+    const client: ExecutorLeaseClient = {
+      claim: async () => null,
+      start: async () => runningJob,
+      renew: async () => {
+        notifyRenewStarted();
+        return await new Promise<ExecutionJob>(() => undefined);
+      },
+      complete: async () => completedJob,
+      fail: async () => runningJob
+    };
+
+    await processExecutionJob({
+      client,
+      handler: async () => {
+        await renewStarted;
+      },
+      executionJob: queuedJob,
+      lease: { leaseOwner: 'executor-test', leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 1,
+      heartbeatShutdownTimeoutMs: 10,
+      maxExecutionMs: 60_000,
+      logger: testLogger
+    });
+
+    expect(testLogger.events).toContainEqual(expect.objectContaining({
+      event: 'heartbeat_shutdown_timeout',
+      timeoutMs: 10
+    }));
+  });
+
   test('aborts and retries a handler that exceeds its execution limit', async () => {
     const testLogger = logger();
     let aborted = false;

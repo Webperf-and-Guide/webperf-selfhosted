@@ -107,6 +107,7 @@ Current repo state as of 2026-07-22:
 - the self-host console `Reports` surface now includes a direct-run browser-audit tab for launching audits and reviewing recent saved summaries, failures, and artifact pointers
 - local dev scripts now preflight the console, API, and probe ports before boot so standalone and parallel workflows fail fast with clear override guidance
 - executor-to-API HTTP now requires loopback or an explicit trusted-network opt-in, structured API failures preserve only bounded incident/code correlation, and a 10-second forced-shutdown deadline prevents ignored aborts from hanging container termination
+- executor start failures are now persisted as retryable queue outcomes, lease heartbeats require a one-third safety margin and have bounded shutdown cleanup, and handler promises that outlive abort races cannot surface late unhandled rejections
 - the repo now includes a checked-in `Apache-2.0` `LICENSE`, and the public launch docs no longer treat license selection as an unresolved blocker
 - provider-specific deployment walkthroughs now belong on `webperf.and.guide` so the OSS install and runtime docs can stay vendor-neutral even when the cloud site publishes Bunny-specific guides
 - thin app-local `src/lib/components/ui/*` re-export shims now exist for the shared console/marketing surfaces so future shadcn-style expansion can stay app-compatible without forking the shared package

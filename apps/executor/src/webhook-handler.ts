@@ -1,22 +1,33 @@
 import { createHmac } from 'node:crypto';
+import { STATUS_CODES } from 'node:http';
 import type { CheckProfileAlertDelivery, ExecutionJob } from '@webperf/contracts';
 import { UrlValidationError, validateMeasurementUrl } from '@webperf/domain-core';
 import type { ExecutorApiClient } from './client';
+import { describeSafeError, type SafeErrorDiagnostic } from './diagnostics';
 import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
+import {
+  OutboundHttpPolicyError,
+  requestPinnedHttp,
+  type PinnedHttpRequest
+} from './outbound-http';
 import { ExecutionFailure } from './runner';
 
 export type WebhookHandlerOptions = {
   client: ExecutorApiClient;
   leaseOwner: string;
-  fetchImpl?: typeof globalThis.fetch;
-  validateUrl?: (url: string) => void;
+  requestImpl?: PinnedHttpRequest;
+  validateUrl?: (url: string) => URL | void;
+  now?: () => Date;
+  logger?: { error(event: Record<string, unknown>): void };
 };
 
 export const createWebhookExecutionHandler = ({
   client,
   leaseOwner,
-  fetchImpl = globalThis.fetch,
-  validateUrl = validateMeasurementUrl
+  requestImpl = requestPinnedHttp,
+  validateUrl = validateMeasurementUrl,
+  now = () => new Date(),
+  logger = defaultWebhookLogger
 }: WebhookHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });
 
@@ -49,23 +60,31 @@ export const createWebhookExecutionHandler = ({
   }
 
   const serializedBody = JSON.stringify(body);
+  const signatureTimestamp = Math.floor(now().getTime() / 1_000);
   let delivery: CheckProfileAlertDelivery;
 
   try {
-    const response = await fetchImpl(target.url, {
+    const response = await requestImpl(new URL(target.url), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'idempotency-key': executionJob.id,
+        'x-webperf-timestamp': String(signatureTimestamp),
         ...(target.secret
-          ? { 'x-webperf-signature': createWebhookSignature(target.secret, serializedBody) }
+          ? {
+              'x-webperf-signature': createWebhookSignature(
+                target.secret,
+                signatureTimestamp,
+                serializedBody
+              )
+            }
           : {})
       },
       body: serializedBody,
       signal,
-      redirect: 'manual'
+      addressPolicy: 'public',
+      discardResponseBody: true
     });
-    await response.body?.cancel().catch(() => {});
 
     if (response.ok) {
       delivery = buildDelivery(target, 'sent', response.status, null);
@@ -81,7 +100,7 @@ export const createWebhookExecutionHandler = ({
         target,
         'failed',
         response.status,
-        'Webhook endpoint rejected the delivery'
+        buildWebhookHttpFailure(response.status)
       );
     }
   } catch (error) {
@@ -90,6 +109,25 @@ export const createWebhookExecutionHandler = ({
     if (error instanceof ExecutionFailure) {
       throw error;
     }
+
+    if (
+      error instanceof OutboundHttpPolicyError
+      && (error.code === 'address_blocked' || error.code === 'invalid_target')
+    ) {
+      throw new ExecutionFailure(
+        'webhook_target_private_ip',
+        'Webhook target resolved to a blocked address',
+        false
+      );
+    }
+
+    const diagnostic = describeSafeError(error);
+    logger.error({
+      event: 'webhook_delivery_failed',
+      executionJobId: executionJob.id,
+      targetId: target.id,
+      ...diagnostic
+    });
 
     if (executionJob.attemptCount < executionJob.maxAttempts) {
       throw new ExecutionFailure(
@@ -100,7 +138,12 @@ export const createWebhookExecutionHandler = ({
       );
     }
 
-    delivery = buildDelivery(target, 'failed', null, 'Webhook delivery failed');
+    delivery = buildDelivery(
+      target,
+      'failed',
+      null,
+      buildWebhookTransportFailure(diagnostic)
+    );
   }
 
   await client.saveResult(executionJob.id, {
@@ -113,8 +156,28 @@ export const createWebhookExecutionHandler = ({
   });
 };
 
-const createWebhookSignature = (secret: string, body: string) =>
-  `sha256=${createHmac('sha256', secret).update(body, 'utf8').digest('hex')}`;
+const createWebhookSignature = (
+  secret: string,
+  timestamp: number,
+  body: string
+) => `t=${timestamp},v1=${createHmac('sha256', secret)
+  .update(`${timestamp}.${body}`, 'utf8')
+  .digest('hex')}`;
+
+const buildWebhookHttpFailure = (status: number) => {
+  const statusText = STATUS_CODES[status];
+  return statusText
+    ? `Webhook endpoint rejected the delivery (HTTP ${status} ${statusText})`
+    : `Webhook endpoint rejected the delivery (HTTP ${status})`;
+};
+
+const buildWebhookTransportFailure = (diagnostic: SafeErrorDiagnostic) => {
+  const detail = [
+    diagnostic.errorType,
+    diagnostic.systemCode ? `code ${diagnostic.systemCode}` : null
+  ].filter(Boolean).join(', ');
+  return `Webhook delivery failed (${detail})`;
+};
 
 const buildDelivery = (
   target: {
@@ -134,3 +197,9 @@ const buildDelivery = (
   responseStatus,
   error
 });
+
+const defaultWebhookLogger = {
+  error(event: Record<string, unknown>) {
+    console.error(JSON.stringify({ service: 'webperf-executor', ...event }));
+  }
+};

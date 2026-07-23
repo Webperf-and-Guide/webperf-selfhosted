@@ -188,7 +188,7 @@ describe('Browser Audit execution handler', () => {
         executionId: 'audit_handler',
         status: 'failed',
         result: null,
-        error: 'secret-header-value at https://example.com/path?token=secret-cookie-value'
+        error: 'scoped-artifact-upload-token and secret-header-value at https://example.com/path?token=secret-cookie-value'
       }, { status: 500 })) as unknown as typeof fetch
     });
 
@@ -196,8 +196,35 @@ describe('Browser Audit execution handler', () => {
 
     const failed = savedAudit(savedResults, -1);
     expect(failed.status).toBe('failed');
-    expect(failed.error).toBe('[REDACTED] at https://example.com/path?redacted');
+    expect(failed.error).toBe('[REDACTED] and [REDACTED] at https://example.com/path?redacted');
+    expect(failed.error).not.toContain('scoped-artifact-upload-token');
     expect(failed.error).not.toContain('secret-cookie-value');
+  });
+
+  test('retries an invalid successful runner response', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const handler = createBrowserAuditExecutionHandler({
+      client: createClient(savedResults),
+      leaseOwner: 'executor-browser',
+      browserAuditSharedSecret: 'browser-handler-shared-secret',
+      browserAuditBaseUrl: 'https://runner.example.com',
+      fetchImpl: (async () => new Response('{"partial":', {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })) as unknown as typeof fetch
+    });
+
+    await expect(handler(
+      executionJob,
+      new AbortController().signal
+    )).rejects.toMatchObject({
+      code: 'browser_audit_runner_unavailable',
+      retryable: true
+    });
+    expect(savedAudit(savedResults, -1)).toMatchObject({
+      status: 'queued',
+      error: 'Browser Audit execution will be retried'
+    });
   });
 
   test('fails explicitly when the runner responds for a different execution', async () => {
@@ -229,6 +256,9 @@ describe('Browser Audit execution handler', () => {
     );
     expect(resolveBrowserAuditEndpoint('http://127.0.0.1:8081').href).toBe(
       'http://127.0.0.1:8081/audit'
+    );
+    expect(resolveBrowserAuditEndpoint('http://127.42.0.8:8081').href).toBe(
+      'http://127.42.0.8:8081/audit'
     );
     expect(() => resolveBrowserAuditEndpoint('http://browser-audit:8080')).toThrow(
       'allowed credential-free origin'

@@ -7,6 +7,7 @@ import type {
 } from '@webperf/contracts';
 import type { ExecutorApiClient } from './client';
 import { createNetworkExecutionHandler, parseProbeBaseUrls } from './network-handler';
+import { OutboundHttpPolicyError } from './outbound-http';
 import { ExecutionFailure } from './runner';
 
 const executionJob: ExecutionJob = {
@@ -125,8 +126,14 @@ describe('network execution handler', () => {
       probeSharedSecret: 'network-handler-probe-secret',
       probeBaseUrls: { tokyo: 'http://probe.test:8080' },
       allowInsecureProbeHttp: true,
-      fetchImpl: (async (input, init) => {
-        probeRequest = new Request(input, init);
+      requestImpl: async (input, init) => {
+        probeRequest = new Request(input, {
+          method: init.method,
+          headers: init.headers,
+          body: init.body,
+          signal: init.signal
+        });
+        expect(init.addressPolicy).toBe('any');
         return Response.json({
           measurement: {
             region: 'tokyo',
@@ -149,7 +156,7 @@ describe('network execution handler', () => {
             error: null
           }
         });
-      }) as typeof fetch
+      }
     });
 
     await handler(executionJob, new AbortController().signal);
@@ -176,9 +183,9 @@ describe('network execution handler', () => {
       probeSharedSecret: 'network-handler-probe-secret',
       probeBaseUrls: { tokyo: 'http://probe.test:8080' },
       allowInsecureProbeHttp: true,
-      fetchImpl: (async () => new Response('Bearer raw-sensitive-probe-error', {
+      requestImpl: async () => new Response('Bearer raw-sensitive-probe-error', {
         status: 503
-      })) as unknown as typeof fetch
+      })
     });
 
     let error: unknown;
@@ -223,5 +230,36 @@ describe('network execution handler', () => {
     expect(() => parseProbeBaseUrls('{"tokyo":"https://user:secret@probe.example.com"}')).toThrow(
       ExecutionFailure
     );
+  });
+
+  test('persists a terminal failure when DNS resolves outside the configured trust boundary', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const handler = createNetworkExecutionHandler({
+      client: createClient({ savedResults }),
+      leaseOwner: 'executor-network',
+      probeSharedSecret: 'network-handler-probe-secret',
+      probeBaseUrls: { tokyo: 'https://probe.example.test' },
+      requestImpl: async () => {
+        throw new OutboundHttpPolicyError(
+          'address_blocked',
+          'sensitive resolved address'
+        );
+      },
+      logger: { error: () => { throw new Error('Policy failures must not be logged as transport failures'); } }
+    });
+
+    await handler(executionJob, new AbortController().signal);
+
+    const result = savedResults.at(-1)?.result;
+    if (result?.kind !== 'network_probe') {
+      throw new Error('Expected a network result');
+    }
+    expect(result.jobs[0]?.targets[0]).toMatchObject({
+      status: 'failed',
+      errorClass: 'terminal',
+      errorCode: 'probe_origin_blocked',
+      errorMessage: 'Network probe origin resolved to a blocked address'
+    });
+    expect(JSON.stringify(savedResults)).not.toContain('sensitive resolved address');
   });
 });

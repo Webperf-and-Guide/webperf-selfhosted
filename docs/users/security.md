@@ -53,7 +53,9 @@ into the connection. The browser runner repeats public-network checks for
 targets, navigations, redirects, and subresources, then routes Chrome through a
 loopback proxy that connects to the validated IP instead of re-resolving the
 hostname. It also blocks downloads and new windows. Webhook targets use the
-same public URL policy.
+same public URL policy and connect to a single validated, pinned DNS answer so
+DNS rebinding cannot redirect a delivery into a private network. Redirects are
+reported as failures instead of being followed.
 
 Private-host allowlists and insecure HTTP runtime toggles are explicit trust
 expansions. Use them only with isolated networks and documented ownership.

@@ -51,7 +51,9 @@ A Check can send up to five generic webhook targets on failure, latency
 threshold breach, or regression. Targets must pass the same public-network
 URL policy as measurements. Each delivery includes an `Idempotency-Key`; when
 a target secret is configured, `X-WebPerf-Signature` contains
-`sha256=<HMAC-SHA256 of the exact JSON body>`.
+`t=<unix-seconds>,v1=<HMAC-SHA256>` over `<unix-seconds>.<exact JSON body>`.
+The same timestamp is sent as `X-WebPerf-Timestamp`; receivers should require a
+small freshness window before accepting the signature.
 
 Webhook work is durable and retry-safe. A delivered target is not sent twice
 for the same Run, and response bodies are never copied into operator errors.

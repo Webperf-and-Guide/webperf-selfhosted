@@ -3,6 +3,7 @@ import type {
   BrowserAuditWorkerResponse,
   ExecutionJob
 } from '@webperf/contracts';
+import { isLoopbackHostname } from '@webperf/config/selfhost-executor';
 import {
   browserAuditResourceSchema,
   browserAuditWorkerRequestSchema,
@@ -154,7 +155,11 @@ export const createBrowserAuditExecutionHandler = ({
     ) {
       audit = failAudit(
         audit,
-        sanitizeWorkerError(parsedResponse.data.error, audit)
+        sanitizeWorkerError(
+          parsedResponse.data.error,
+          audit,
+          artifactUpload.bearerToken
+        )
       );
       await persist();
       return;
@@ -177,7 +182,11 @@ export const createBrowserAuditExecutionHandler = ({
       return;
     }
 
-    if (response.status === 409 || isRetryableHttpStatus(response.status)) {
+    if (
+      response.ok
+      || response.status === 409
+      || isRetryableHttpStatus(response.status)
+    ) {
       await retryOrFail({
         executionJob,
         audit,
@@ -210,9 +219,7 @@ export const resolveBrowserAuditEndpoint = (
     throw new Error('Browser Audit runner URL is invalid');
   }
 
-  const loopbackHostname = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(
-    url.hostname.toLowerCase()
-  );
+  const loopbackHostname = isLoopbackHostname(url.hostname);
   const protocolAllowed = url.protocol === 'https:'
     || (url.protocol === 'http:' && (loopbackHostname || allowInsecureHttp));
 
@@ -274,10 +281,12 @@ const failAudit = (audit: BrowserAuditResource, error: string) =>
 
 const sanitizeWorkerError = (
   error: string | null,
-  audit: BrowserAuditResource
+  audit: BrowserAuditResource,
+  artifactUploadBearerToken: string
 ) => redactExecutionText(
   error ?? 'Browser Audit failed',
   [
+    artifactUploadBearerToken,
     ...audit.customHeaders.map((header) => header.value),
     ...audit.cookies.map((cookie) => cookie.value)
   ]

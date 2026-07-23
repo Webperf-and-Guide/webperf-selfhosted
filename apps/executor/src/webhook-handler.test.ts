@@ -7,6 +7,7 @@ import type {
 } from '@webperf/contracts';
 import { UrlValidationError } from '@webperf/domain-core';
 import type { ExecutorApiClient } from './client';
+import { OutboundHttpPolicyError } from './outbound-http';
 import { createWebhookExecutionHandler } from './webhook-handler';
 import { ExecutionFailure } from './runner';
 
@@ -92,20 +93,29 @@ describe('webhook execution handler', () => {
       client,
       leaseOwner: 'executor-webhook',
       validateUrl: () => {},
-      fetchImpl: (async (input, init) => {
-        deliveredRequest = new Request(input, init);
+      now: () => new Date('2026-07-22T00:00:00.000Z'),
+      requestImpl: async (input, init) => {
+        deliveredRequest = new Request(input, {
+          method: init.method,
+          headers: init.headers,
+          body: init.body,
+          signal: init.signal
+        });
+        expect(init.addressPolicy).toBe('public');
+        expect(init.discardResponseBody).toBe(true);
         return new Response(null, { status: 204 });
-      }) as typeof fetch
+      }
     });
 
     await handler(executionJob, new AbortController().signal);
 
     expect(deliveredRequest!.headers.get('idempotency-key')).toBe(executionJob.id);
-    expect(deliveredRequest!.redirect).toBe('manual');
     const body = await deliveredRequest!.text();
-    const expectedSignature = `sha256=${createHmac('sha256', 'webhook-signing-secret')
-      .update(body, 'utf8')
+    const timestamp = Math.floor(new Date('2026-07-22T00:00:00.000Z').getTime() / 1_000);
+    const expectedSignature = `t=${timestamp},v1=${createHmac('sha256', 'webhook-signing-secret')
+      .update(`${timestamp}.${body}`, 'utf8')
       .digest('hex')}`;
+    expect(deliveredRequest!.headers.get('x-webperf-timestamp')).toBe(String(timestamp));
     expect(deliveredRequest!.headers.get('x-webperf-signature')).toBe(expectedSignature);
     expect(deliveredRequest!.headers.get('x-webperf-signature')).not.toContain(
       'webhook-signing-secret'
@@ -141,14 +151,14 @@ describe('webhook execution handler', () => {
       client,
       leaseOwner: 'executor-webhook',
       validateUrl: () => {},
-      fetchImpl: (async (_input, init) => {
+      requestImpl: async (_input, init) => {
         requestCount += 1;
-        expect(init?.redirect).toBe('manual');
+        expect(init.addressPolicy).toBe('public');
         return new Response('redirect', {
           status: 302,
           headers: { location: 'http://169.254.169.254/latest/meta-data' }
         });
-      }) as typeof fetch
+      }
     });
 
     await handler(executionJob, new AbortController().signal);
@@ -184,10 +194,10 @@ describe('webhook execution handler', () => {
           'private_hostname'
         );
       },
-      fetchImpl: (async () => {
+      requestImpl: async () => {
         fetchCalled = true;
         return new Response(null, { status: 204 });
-      }) as unknown as typeof fetch
+      }
     });
 
     let error: unknown;
@@ -204,5 +214,37 @@ describe('webhook execution handler', () => {
     });
     expect(String(error)).not.toContain('sensitive detail');
     expect(fetchCalled).toBe(false);
+  });
+
+  test('does not retry a hostname that resolves into a private network', async () => {
+    const client: ExecutorApiClient = {
+      claim: async () => null,
+      start: async () => executionJob,
+      renew: async () => executionJob,
+      complete: async () => executionJob,
+      fail: async () => executionJob,
+      context: async () => context(),
+      saveResult: async () => {},
+      enqueueFollowups: async () => ({ jobs: [] })
+    };
+    const handler = createWebhookExecutionHandler({
+      client,
+      leaseOwner: 'executor-webhook',
+      requestImpl: async () => {
+        throw new OutboundHttpPolicyError(
+          'address_blocked',
+          'resolved to 169.254.169.254'
+        );
+      }
+    });
+
+    await expect(handler(
+      executionJob,
+      new AbortController().signal
+    )).rejects.toMatchObject({
+      code: 'webhook_target_private_ip',
+      message: 'Webhook target resolved to a blocked address',
+      retryable: false
+    });
   });
 });

@@ -13,6 +13,7 @@ import {
   regionCodeSchema,
   signedProbeMeasurementRequestSchema
 } from '@webperf/contracts';
+import { isLoopbackHostname } from '@webperf/config/selfhost-executor';
 import { createProbeSignature, type ProbeSignatureRequest } from '@webperf/domain-core';
 import {
   buildCheckProfileComparison,
@@ -21,7 +22,14 @@ import {
   summarizeTargets
 } from '@webperf/report-core';
 import { ExecutorApiError, type ExecutorApiClient } from './client';
+import { describeSafeError } from './diagnostics';
 import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
+import {
+  OutboundHttpPolicyError,
+  requestPinnedHttp,
+  type OutboundAddressPolicy,
+  type PinnedHttpRequest
+} from './outbound-http';
 import { ExecutionFailure } from './runner';
 
 export type NetworkHandlerOptions = {
@@ -30,7 +38,8 @@ export type NetworkHandlerOptions = {
   probeSharedSecret: string;
   probeBaseUrls: Partial<Record<RegionCode, string>>;
   allowInsecureProbeHttp?: boolean;
-  fetchImpl?: typeof globalThis.fetch;
+  requestImpl?: PinnedHttpRequest;
+  logger?: { error(event: Record<string, unknown>): void };
 };
 
 export const parseProbeBaseUrls = (
@@ -73,7 +82,8 @@ export const createNetworkExecutionHandler = ({
   probeSharedSecret,
   probeBaseUrls,
   allowInsecureProbeHttp = false,
-  fetchImpl = globalThis.fetch
+  requestImpl = requestPinnedHttp,
+  logger = defaultNetworkLogger
 }: NetworkHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });
 
@@ -106,7 +116,8 @@ export const createNetworkExecutionHandler = ({
       probeSharedSecret,
       probeBaseUrls,
       allowInsecureProbeHttp,
-      fetchImpl,
+      requestImpl,
+      logger,
       signal
     });
   }
@@ -155,7 +166,8 @@ const processNetworkJob = async ({
   probeSharedSecret,
   probeBaseUrls,
   allowInsecureProbeHttp,
-  fetchImpl,
+  requestImpl,
+  logger,
   signal
 }: {
   executionJob: ExecutionJob;
@@ -164,7 +176,8 @@ const processNetworkJob = async ({
   probeSharedSecret: string;
   probeBaseUrls: Partial<Record<RegionCode, string>>;
   allowInsecureProbeHttp: boolean;
-  fetchImpl: typeof globalThis.fetch;
+  requestImpl: PinnedHttpRequest;
+  logger: { error(event: Record<string, unknown>): void };
   signal: AbortSignal;
 }) => {
   if (job.completedAt && job.summary.inflight === 0) {
@@ -211,15 +224,14 @@ const processNetworkJob = async ({
         ...unsignedPayload,
         signature: await createProbeSignature(probeSharedSecret, unsignedPayload)
       });
-      const response = await fetchImpl(
-        resolveProbeMeasureUrl(probeBaseUrl, allowInsecureProbeHttp),
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal
-        }
-      );
+      const measureUrl = resolveProbeMeasureUrl(probeBaseUrl, allowInsecureProbeHttp);
+      const response = await requestImpl(measureUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+        addressPolicy: probeAddressPolicy(measureUrl, allowInsecureProbeHttp)
+      });
 
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
@@ -259,6 +271,24 @@ const processNetworkJob = async ({
       if (error instanceof ExecutorApiError || error instanceof ExecutionFailure) {
         throw error;
       }
+
+      if (error instanceof OutboundHttpPolicyError && error.code === 'address_blocked') {
+        markTargetFailed(
+          target,
+          'probe_origin_blocked',
+          'Network probe origin resolved to a blocked address'
+        );
+        recomputeJob(job);
+        await persist();
+        continue;
+      }
+
+      logger.error({
+        event: 'probe_request_failed',
+        jobId: job.id,
+        region: target.region,
+        ...describeSafeError(error)
+      });
 
       if (executionJob.attemptCount < executionJob.maxAttempts) {
         markTargetRetryable(target, 'probe_transport_failed');
@@ -317,12 +347,8 @@ const applyMeasurement = (
 };
 
 const markTargetRetryable = (target: LatencyJobTarget, errorCode: string) => {
+  resetTargetMeasurement(target);
   target.status = 'queued';
-  target.latencyMs = null;
-  target.statusCode = null;
-  target.success = null;
-  target.probeImpl = null;
-  target.measurement = null;
   target.errorCode = errorCode;
   target.errorClass = 'retryable';
   target.errorMessage = 'Network probe will be retried';
@@ -335,18 +361,27 @@ const markTargetFailed = (
   errorCode: string,
   errorMessage: string
 ) => {
+  resetTargetMeasurement(target);
   target.status = 'failed';
-  target.latencyMs = null;
-  target.statusCode = null;
   target.success = false;
-  target.probeImpl = null;
-  target.measurement = null;
   target.slotId = null;
   target.errorCode = errorCode;
   target.errorClass = 'terminal';
   target.errorMessage = errorMessage;
   target.finishedAt = new Date().toISOString();
   target.updatedAt = new Date().toISOString();
+};
+
+const resetTargetMeasurement = (target: LatencyJobTarget) => {
+  target.latencyMs = null;
+  target.statusCode = null;
+  target.success = null;
+  target.probeImpl = null;
+  target.measurement = null;
+  target.errorCode = null;
+  target.errorClass = null;
+  target.errorMessage = null;
+  target.finishedAt = null;
 };
 
 const recomputeJob = (job: LatencyJobDetail) => {
@@ -430,9 +465,7 @@ const resolveProbeMeasureUrl = (baseUrl: string, allowInsecureHttp: boolean) => 
     );
   }
 
-  const loopbackHostname = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(
-    url.hostname.toLowerCase()
-  );
+  const loopbackHostname = isLoopbackHostname(url.hostname);
   const protocolAllowed = url.protocol === 'https:'
     || (url.protocol === 'http:' && (loopbackHostname || allowInsecureHttp));
 
@@ -452,6 +485,22 @@ const resolveProbeMeasureUrl = (baseUrl: string, allowInsecureHttp: boolean) => 
   }
 
   return new URL('/measure', url);
+};
+
+const probeAddressPolicy = (
+  url: URL,
+  allowInsecureHttp: boolean
+): OutboundAddressPolicy => {
+  if (allowInsecureHttp) {
+    return 'any';
+  }
+  return isLoopbackHostname(url.hostname) ? 'loopback' : 'public';
+};
+
+const defaultNetworkLogger = {
+  error(event: Record<string, unknown>) {
+    console.error(JSON.stringify({ service: 'webperf-executor', ...event }));
+  }
 };
 
 const buildStatusFailureMessage = (statusCode: number | null | undefined) =>

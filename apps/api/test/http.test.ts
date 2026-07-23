@@ -1375,7 +1375,16 @@ const drainExecutions = async (
   const webhookHandler = createWebhookExecutionHandler({
     client,
     leaseOwner,
-    validateUrl: () => {}
+    validateUrl: () => {},
+    // The integration receiver is loopback-only; production uses the executor's
+    // DNS-pinned public-network transport instead of this local test adapter.
+    requestImpl: async (url, init) => fetch(url, {
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      signal: init.signal,
+      redirect: 'manual'
+    })
   });
   const browserAuditHandler = createBrowserAuditExecutionHandler({
     client,

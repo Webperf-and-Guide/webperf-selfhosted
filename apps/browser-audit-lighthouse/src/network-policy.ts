@@ -280,9 +280,13 @@ const lookupHostWithTimeout = async (
   }
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  const lookupPromise = lookupHost(hostname);
+  // Promise.race installs a rejection handler, but retain an explicit observer
+  // so a DNS implementation that settles after the timeout stays harmless.
+  void lookupPromise.catch(() => undefined);
   try {
     return await Promise.race([
-      lookupHost(hostname),
+      lookupPromise,
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(
           () => reject(new Error('Browser DNS lookup timed out')),

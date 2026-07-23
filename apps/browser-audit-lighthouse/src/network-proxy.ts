@@ -8,6 +8,7 @@ import {
 import { connect, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import {
+  BrowserNetworkPolicyError,
   resolveBrowserRequestTarget,
   type LookupHost
 } from './network-policy';
@@ -343,12 +344,14 @@ const describeProxyError = (
     && /^[A-Z][A-Z0-9_]{0,79}$/.test(candidate.code)
       ? candidate.code
       : null;
-  const message = typeof candidate?.message === 'string' ? candidate.message : '';
   let reason: BrowserNetworkProxyDiagnostic['reason'] = 'transport';
-  if (/timed out/i.test(message)) {
-    reason = 'timeout';
-  } else if (message.startsWith('Browser request')) {
+  if (error instanceof BrowserNetworkPolicyError) {
     reason = 'network_policy';
+  } else if (
+    typeof candidate?.message === 'string'
+    && /timed out/i.test(candidate.message)
+  ) {
+    reason = 'timeout';
   }
 
   return { event, reason, errorType, errorCode };

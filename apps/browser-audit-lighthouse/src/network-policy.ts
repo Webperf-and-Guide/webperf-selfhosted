@@ -5,6 +5,10 @@ import type { HTTPRequest, Page } from 'puppeteer-core';
 export type LookupAddress = { address: string; family: number };
 export type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
 
+export class BrowserNetworkPolicyError extends Error {
+  override name = 'BrowserNetworkPolicyError';
+}
+
 const blockedAddresses = new BlockList();
 const maxBlockedErrors = 8;
 const defaultDnsLookupTimeoutMs = 10_000;
@@ -83,19 +87,21 @@ export const resolveBrowserRequestTarget = async (
   try {
     url = new URL(value);
   } catch {
-    throw new Error('Browser request URL is invalid');
+    throw new BrowserNetworkPolicyError('Browser request URL is invalid');
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`Browser request scheme ${url.protocol.replace(':', '') || 'unknown'} is blocked`);
+    throw new BrowserNetworkPolicyError(
+      `Browser request scheme ${url.protocol.replace(':', '') || 'unknown'} is blocked`
+    );
   }
 
   if (url.username || url.password) {
-    throw new Error('Credentials embedded in browser request URLs are blocked');
+    throw new BrowserNetworkPolicyError('Credentials embedded in browser request URLs are blocked');
   }
 
   if (url.port && url.port !== '80' && url.port !== '443') {
-    throw new Error('Only browser request ports 80 and 443 are allowed');
+    throw new BrowserNetworkPolicyError('Only browser request ports 80 and 443 are allowed');
   }
 
   const hostname = normalizeHostname(url.hostname);
@@ -110,7 +116,7 @@ export const resolveBrowserRequestTarget = async (
     || hostname.endsWith('.internal')
     )
   ) {
-    throw new Error(`Browser request host ${hostname} is blocked`);
+    throw new BrowserNetworkPolicyError(`Browser request host ${hostname} is blocked`);
   }
 
   const ipVersion = isIP(hostname);
@@ -127,17 +133,19 @@ export const resolveBrowserRequestTarget = async (
   try {
     addresses = await lookupHostWithTimeout(hostname, lookupHost, lookupTimeoutMs);
   } catch {
-    throw new Error(`Browser request host ${hostname} could not be resolved`);
+    throw new BrowserNetworkPolicyError(`Browser request host ${hostname} could not be resolved`);
   }
 
   if (addresses.length === 0) {
-    throw new Error(`Browser request host ${hostname} did not resolve`);
+    throw new BrowserNetworkPolicyError(`Browser request host ${hostname} did not resolve`);
   }
 
   const normalizedAddresses = addresses.map((address) => {
     const family = isIP(address.address);
     if (family !== 4 && family !== 6) {
-      throw new Error(`Browser request host ${hostname} returned an invalid address`);
+      throw new BrowserNetworkPolicyError(
+        `Browser request host ${hostname} returned an invalid address`
+      );
     }
     return { address: address.address, family: family as 4 | 6 };
   });
@@ -150,7 +158,7 @@ export const resolveBrowserRequestTarget = async (
 
   const selectedAddress = normalizedAddresses[0];
   if (!selectedAddress) {
-    throw new Error(`Browser request host ${hostname} did not resolve`);
+    throw new BrowserNetworkPolicyError(`Browser request host ${hostname} did not resolve`);
   }
   return { url, ...selectedAddress, allowlisted };
 };
@@ -322,7 +330,9 @@ const assertPublicAddress = (rawAddress: string) => {
   const type = normalizedFamily === 4 ? 'ipv4' : 'ipv6';
 
   if ((normalizedFamily !== 4 && normalizedFamily !== 6) || blockedAddresses.check(address, type)) {
-    throw new Error('Browser request resolved to a private, local, metadata, or reserved address');
+    throw new BrowserNetworkPolicyError(
+      'Browser request resolved to a private, local, metadata, or reserved address'
+    );
   }
 };
 

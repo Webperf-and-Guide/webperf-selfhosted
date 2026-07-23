@@ -13,6 +13,7 @@ import {
 import { createHash } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
+import { RE2JS } from 're2js';
 import type { BrowserAuditWorkerConfig } from './config';
 import { installBrowserNetworkGuard, validateBrowserRequestUrl } from './network-policy';
 import { startBrowserNetworkProxy } from './network-proxy';
@@ -98,24 +99,24 @@ export const runBrowserAudit = async ({
   try {
     browser = await launchBrowser(config, networkProxy.url);
   } catch (error) {
-    await networkProxy.close().catch(() => undefined);
+    await closeWithDiagnostic('network_proxy_close_failed', () => networkProxy.close());
     throw error;
   }
   let page: Page;
   try {
     page = await browser.newPage();
   } catch (error) {
-    await browser.close().catch(() => undefined);
-    await networkProxy.close().catch(() => undefined);
+    await closeWithDiagnostic('browser_close_failed', () => browser.close());
+    await closeWithDiagnostic('network_proxy_close_failed', () => networkProxy.close());
     throw error;
   }
   let networkGuard: Awaited<ReturnType<typeof installBrowserNetworkGuard>>;
   try {
     networkGuard = await installBrowserNetworkGuard(page, config.hostAllowlist);
   } catch (error) {
-    await page.close().catch(() => undefined);
-    await browser.close().catch(() => undefined);
-    await networkProxy.close().catch(() => undefined);
+    await closeWithDiagnostic('page_close_failed', () => page.close());
+    await closeWithDiagnostic('browser_close_failed', () => browser.close());
+    await closeWithDiagnostic('network_proxy_close_failed', () => networkProxy.close());
     throw error;
   }
   const startedAt = new Date().toISOString();
@@ -195,7 +196,7 @@ export const runBrowserAudit = async ({
         throw new Error('Flow must navigate before interactive steps');
       }
 
-      await runStep(page, flow, step, input.policy.timeouts.stepTimeoutMs);
+      await runStep(page, flow, step, input.policy.timeouts.stepTimeoutMs, input);
       networkGuard.throwIfBlocked();
     }
 
@@ -296,13 +297,9 @@ export const runBrowserAudit = async ({
 
     return result;
   } finally {
-    try {
-      await page.close();
-    } catch {}
-    try {
-      await browser.close();
-    } catch {}
-    await networkProxy.close().catch(() => undefined);
+    await closeWithDiagnostic('page_close_failed', () => page.close());
+    await closeWithDiagnostic('browser_close_failed', () => browser.close());
+    await closeWithDiagnostic('network_proxy_close_failed', () => networkProxy.close());
   }
 };
 
@@ -318,7 +315,13 @@ const applySetupState = async (page: Page, input: BrowserAuditWorkerRequest) => 
   }
 };
 
-const runStep = async (page: Page, flow: any, step: BrowserAuditFlowStep, stepTimeoutMs: number) => {
+const runStep = async (
+  page: Page,
+  flow: any,
+  step: BrowserAuditFlowStep,
+  stepTimeoutMs: number,
+  input: BrowserAuditWorkerRequest
+) => {
   switch (step.type) {
     case 'waitForSelector':
       await page.waitForSelector(step.selector, {
@@ -327,7 +330,7 @@ const runStep = async (page: Page, flow: any, step: BrowserAuditFlowStep, stepTi
       } as any);
       return;
     case 'waitForUrl':
-      await waitForUrl(page, step.url, step.match, stepTimeoutMs);
+      await waitForUrl(page, step.url, step.match, stepTimeoutMs, input);
       return;
     case 'click':
       await page.click(step.selector, {
@@ -392,25 +395,71 @@ const waitForUrl = async (
   page: Page,
   expectedUrl: string,
   match: BrowserAuditFlowStep extends { type: 'waitForUrl'; match: infer T } ? T : string,
-  timeout: number
+  timeout: number,
+  input: BrowserAuditWorkerRequest
 ) => {
   const startedAt = Date.now();
+  const matches = createWaitForUrlMatcher(expectedUrl, match);
 
   while (Date.now() - startedAt < timeout) {
     const currentUrl = page.url();
 
-    if (
-      (match === 'equals' && currentUrl === expectedUrl) ||
-      (match === 'includes' && currentUrl.includes(expectedUrl)) ||
-      (match === 'regex' && new RegExp(expectedUrl).test(currentUrl))
-    ) {
+    if (matches(currentUrl)) {
       return;
     }
 
     await Bun.sleep(100);
   }
 
-  throw new Error(`Timed out waiting for URL ${expectedUrl}`);
+  throw new Error(
+    redactBrowserAuditText(`Timed out waiting for the configured URL ${match} condition`, input)
+  );
+};
+
+export const createWaitForUrlMatcher = (
+  expectedUrl: string,
+  match: BrowserAuditFlowStep extends { type: 'waitForUrl'; match: infer T } ? T : string
+): ((currentUrl: string) => boolean) => {
+  if (match === 'equals') {
+    return (currentUrl) => currentUrl === expectedUrl;
+  }
+  if (match === 'includes') {
+    return (currentUrl) => currentUrl.includes(expectedUrl);
+  }
+  if (match !== 'regex') {
+    throw new Error('waitForUrl match mode is unsupported');
+  }
+
+  let pattern: RE2JS;
+  try {
+    pattern = RE2JS.compile(expectedUrl);
+  } catch {
+    throw new Error('waitForUrl regex is invalid or unsupported');
+  }
+  return (currentUrl) => pattern.test(currentUrl);
+};
+
+const closeWithDiagnostic = async (
+  event: 'page_close_failed' | 'browser_close_failed' | 'network_proxy_close_failed',
+  close: () => Promise<void>
+) => {
+  try {
+    await close();
+  } catch (error) {
+    const candidate = error as { name?: unknown; code?: unknown } | null;
+    console.warn(JSON.stringify({
+      service: 'webperf-browser-audit-lighthouse',
+      event,
+      errorType: typeof candidate?.name === 'string'
+        && /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(candidate.name)
+          ? candidate.name
+          : 'UnknownError',
+      errorCode: typeof candidate?.code === 'string'
+        && /^[A-Z][A-Z0-9_]{0,79}$/.test(candidate.code)
+          ? candidate.code
+          : null
+    }));
+  }
 };
 
 const enforceDeadline = (deadline: number, totalTimeoutMs: number) => {

@@ -121,6 +121,22 @@ try {
     .match(/^ARG DEBIAN_CHROMIUM_VERSION=(\S+)$/m)?.[1];
   const debianSnapshot = browserAuditDockerfile
     .match(/^ARG DEBIAN_CHROMIUM_SNAPSHOT=(\d{8}T\d{6}Z)$/m)?.[1];
+  let puppeteerChromeVersion: string | undefined;
+  try {
+    const puppeteerModulePath = Bun.resolveSync(
+      'puppeteer-core',
+      join(root, 'apps/browser-audit-lighthouse/src')
+    );
+    const puppeteerModule = await import(puppeteerModulePath) as {
+      PUPPETEER_REVISIONS?: { chrome?: unknown };
+    };
+    const candidate = puppeteerModule.PUPPETEER_REVISIONS?.chrome;
+    puppeteerChromeVersion = typeof candidate === 'string' ? candidate : undefined;
+  } catch {
+    violations.push(
+      'browser-audit-lighthouse: locked puppeteer-core Chrome revision is unreadable'
+    );
+  }
 
   if (
     !chromeVersion
@@ -128,6 +144,11 @@ try {
   ) {
     violations.push(
       'browser-audit-lighthouse Dockerfile: arm64 Debian Chromium must match CHROME_VERSION exactly'
+    );
+  }
+  if (!puppeteerChromeVersion || chromeVersion !== puppeteerChromeVersion) {
+    violations.push(
+      'browser-audit-lighthouse Dockerfile: CHROME_VERSION must match locked puppeteer-core'
     );
   }
   if (

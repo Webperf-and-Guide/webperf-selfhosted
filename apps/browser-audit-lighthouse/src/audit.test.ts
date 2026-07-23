@@ -3,6 +3,7 @@ import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
 import { createHash } from 'node:crypto';
 import {
   buildChromeLaunchArgs,
+  createWaitForUrlMatcher,
   lighthouseArtifactContentTypes,
   uploadArtifact
 } from './audit';
@@ -33,6 +34,21 @@ describe('Lighthouse Chrome launch policy', () => {
       screenshot: 'image/png',
       trace: 'application/json'
     });
+  });
+
+  test('matches waitForUrl regexes with the linear-time engine and rejects unsupported syntax', () => {
+    const matcher = createWaitForUrlMatcher(
+      '^https://example\\.com/(?:reports|checks)/[0-9]+$',
+      'regex'
+    );
+    expect(matcher('https://example.com/reports/42')).toBe(true);
+    expect(matcher('https://example.com/settings/42')).toBe(false);
+
+    expect(() => createWaitForUrlMatcher('(a+)+$', 'regex')).not.toThrow();
+    expect(() => createWaitForUrlMatcher('^(secret)\\1$', 'regex'))
+      .toThrow('invalid or unsupported');
+    expect(() => createWaitForUrlMatcher('[', 'regex'))
+      .toThrow('invalid or unsupported');
   });
 
   test('verifies the uploaded artifact digest against the submitted bytes', async () => {

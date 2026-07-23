@@ -71,9 +71,26 @@ describe('browser audit pinned network proxy', () => {
     expect(diagnostics).toEqual([{
       event: 'connect_request_failed',
       reason: 'network_policy',
-      errorType: 'Error',
+      errorType: 'BrowserNetworkPolicyError',
       errorCode: null
     }]);
+  });
+
+  test('classifies credential and alternate-port violations as network policy failures', async () => {
+    const diagnostics: BrowserNetworkProxyDiagnostic[] = [];
+    const proxy = await startBrowserNetworkProxy({
+      lookupHost: async () => [{ address: '93.184.216.34', family: 4 }],
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    });
+    proxies.push(proxy);
+
+    expect(await sendConnect(proxy.port, 'user:pass@example.com:443'))
+      .toStartWith('HTTP/1.1 502');
+    expect(await sendConnect(proxy.port, 'example.com:8443')).toStartWith('HTTP/1.1 502');
+    expect(diagnostics.map(({ reason }) => reason)).toEqual([
+      'network_policy',
+      'network_policy'
+    ]);
   });
 
   test('strips proxy identity headers before forwarding', () => {

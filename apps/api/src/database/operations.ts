@@ -52,6 +52,20 @@ const assertFileDatabase = (databasePath: string) => {
 const countChanges = (result: unknown) =>
   (result as { changes?: number }).changes ?? 0;
 
+const retentionDeleteBatchSize = 500;
+
+const deleteRowsInBatches = (deleteBatch: () => unknown) => {
+  let deleted = 0;
+
+  while (true) {
+    const changes = countChanges(deleteBatch());
+    deleted += changes;
+    if (changes < retentionDeleteBatchSize) {
+      return deleted;
+    }
+  }
+};
+
 const tableExists = (database: Database, table: string) => Boolean(
   database
     .query<{ name: string }, [string]>(
@@ -231,60 +245,122 @@ export const cleanupSqliteRetention = (
   const cutoff = new Date(now);
   cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
   const cutoffIso = cutoff.toISOString();
-  const cleanup = database.transaction((): SqliteRetentionResult => {
-    const jobs = tableExists(database, 'jobs')
-      ? countChanges(database.query(`
-          DELETE FROM jobs
-          WHERE requested_at < ?
-            AND status IN ('succeeded', 'failed', 'partial')
-        `).run(cutoffIso))
-      : 0;
-    const checkRuns = tableExists(database, 'check_profile_runs')
-      ? countChanges(database.query('DELETE FROM check_profile_runs WHERE created_at < ?').run(cutoffIso))
-      : 0;
-    const executionJobs = tableExists(database, 'execution_jobs')
-      ? countChanges(database.query(`
-          DELETE FROM execution_jobs
-          WHERE status IN ('succeeded', 'failed', 'cancelled')
-            AND completed_at < ?
-        `).run(cutoffIso))
-      : 0;
-    const derivedResources = tableExists(database, 'saved_entities')
-      ? countChanges(database.query(`
-          DELETE FROM saved_entities AS entity
-          WHERE entity.kind IN ('comparison', 'export', 'analysis', 'browser_audit')
-            AND entity.updated_at < ?
-            AND (
-              entity.kind != 'browser_audit'
-              OR NOT EXISTS (
-                SELECT 1
-                FROM execution_jobs AS execution
-                WHERE execution.kind = 'browser_audit'
-                  AND execution.resource_id = entity.id
-                  -- Active work intentionally survives retention so a stopped
-                  -- executor can resume it even after a long operator outage.
-                  AND execution.status IN ('queued', 'leased', 'running')
-              )
+  let jobs = 0;
+  let checkRuns = 0;
+  let executionJobs = 0;
+  let derivedResources = 0;
+  let artifactIndexes = 0;
+
+  if (tableExists(database, 'jobs')) {
+    const statement = database.query<never, [string, number]>(`
+      DELETE FROM jobs
+      WHERE rowid IN (
+        SELECT rowid FROM jobs
+        WHERE requested_at < ?
+          AND status IN ('succeeded', 'failed', 'partial')
+        LIMIT ?
+      )
+    `);
+    try {
+      jobs = deleteRowsInBatches(() => statement.run(cutoffIso, retentionDeleteBatchSize));
+    } finally {
+      statement.finalize();
+    }
+  }
+
+  if (tableExists(database, 'check_profile_runs')) {
+    const statement = database.query<never, [string, number]>(`
+      DELETE FROM check_profile_runs
+      WHERE rowid IN (
+        SELECT rowid FROM check_profile_runs WHERE created_at < ? LIMIT ?
+      )
+    `);
+    try {
+      checkRuns = deleteRowsInBatches(() => statement.run(cutoffIso, retentionDeleteBatchSize));
+    } finally {
+      statement.finalize();
+    }
+  }
+
+  if (tableExists(database, 'execution_jobs')) {
+    const statement = database.query<never, [string, number]>(`
+      DELETE FROM execution_jobs
+      WHERE rowid IN (
+        SELECT rowid FROM execution_jobs
+        WHERE status IN ('succeeded', 'failed', 'cancelled')
+          AND completed_at < ?
+        LIMIT ?
+      )
+    `);
+    try {
+      executionJobs = deleteRowsInBatches(
+        () => statement.run(cutoffIso, retentionDeleteBatchSize)
+      );
+    } finally {
+      statement.finalize();
+    }
+  }
+
+  if (tableExists(database, 'saved_entities')) {
+    const statement = database.query<never, [string, number]>(`
+      DELETE FROM saved_entities
+      WHERE rowid IN (
+        SELECT entity.rowid
+        FROM saved_entities AS entity
+        WHERE entity.kind IN ('comparison', 'export', 'analysis', 'browser_audit')
+          AND entity.updated_at < ?
+          AND (
+            entity.kind != 'browser_audit'
+            OR NOT EXISTS (
+              SELECT 1
+              FROM execution_jobs AS execution
+              WHERE execution.kind = 'browser_audit'
+                AND execution.resource_id = entity.id
+                -- Active work intentionally survives retention so a stopped
+                -- executor can resume it even after a long operator outage.
+                AND execution.status IN ('queued', 'leased', 'running')
             )
-        `).run(cutoffIso))
-      : 0;
-    const artifactIndexes = tableExists(database, 'browser_audit_artifacts')
-      && tableExists(database, 'saved_entities')
-      ? countChanges(database.query(`
-          DELETE FROM browser_audit_artifacts AS artifact
-          WHERE NOT EXISTS (
-            SELECT 1
-            FROM saved_entities AS entity
-            WHERE entity.kind = 'browser_audit'
-              AND entity.id = artifact.audit_id
           )
-        `).run())
-      : 0;
+        LIMIT ?
+      )
+    `);
+    try {
+      derivedResources = deleteRowsInBatches(
+        () => statement.run(cutoffIso, retentionDeleteBatchSize)
+      );
+    } finally {
+      statement.finalize();
+    }
+  }
 
-    return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };
-  });
+  if (
+    tableExists(database, 'browser_audit_artifacts')
+    && tableExists(database, 'saved_entities')
+  ) {
+    const statement = database.query<never, [number]>(`
+      DELETE FROM browser_audit_artifacts
+      WHERE rowid IN (
+        SELECT artifact.rowid
+        FROM browser_audit_artifacts AS artifact
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM saved_entities AS entity
+          WHERE entity.kind = 'browser_audit'
+            AND entity.id = artifact.audit_id
+        )
+        LIMIT ?
+      )
+    `);
+    try {
+      artifactIndexes = deleteRowsInBatches(
+        () => statement.run(retentionDeleteBatchSize)
+      );
+    } finally {
+      statement.finalize();
+    }
+  }
 
-  return cleanup.immediate();
+  return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };
 };
 
 export const maintainSqliteDatabase = ({
@@ -298,6 +374,11 @@ export const maintainSqliteDatabase = ({
   vacuum?: boolean;
   now?: Date;
 }) => {
+  assertFileDatabase(databasePath);
+  if (!existsSync(databasePath)) {
+    throw new Error(`SQLite database does not exist: ${databasePath}`);
+  }
+
   const database = openSqliteDatabase(databasePath, { create: false });
 
   try {
@@ -411,7 +492,6 @@ export const restoreSqliteDatabase = ({
 
     renameSync(temporaryPath, databasePath);
     temporaryPath = null;
-    chmodSync(databasePath, 0o600);
     return {
       databasePath,
       sourcePath,
@@ -441,31 +521,31 @@ export const verifySqliteStorageCrypto = (
       continue;
     }
 
-    let lastRowId: string | null = null;
+    let lastRowId: number | null = null;
     const readFirstBatch = database.query<
-      { row_id: string; encrypted_value: string },
+      { row_id: number; encrypted_value: string },
       []
     >(`
-      SELECT CAST(rowid AS TEXT) AS row_id, ${column} AS encrypted_value
+      SELECT rowid AS row_id, ${column} AS encrypted_value
       FROM ${table}
       WHERE ${column} IS NOT NULL
       ORDER BY rowid
       LIMIT 100
     `);
     const readNextBatch = database.query<
-      { row_id: string; encrypted_value: string },
-      [string]
+      { row_id: number; encrypted_value: string },
+      [number]
     >(`
-      SELECT CAST(rowid AS TEXT) AS row_id, ${column} AS encrypted_value
+      SELECT rowid AS row_id, ${column} AS encrypted_value
       FROM ${table}
-      WHERE rowid > CAST(? AS INTEGER) AND ${column} IS NOT NULL
+      WHERE rowid > ? AND ${column} IS NOT NULL
       ORDER BY rowid
       LIMIT 100
     `);
 
     try {
       while (true) {
-        const rows: Array<{ row_id: string; encrypted_value: string }> = lastRowId === null
+        const rows: Array<{ row_id: number; encrypted_value: string }> = lastRowId === null
           ? readFirstBatch.all()
           : readNextBatch.all(lastRowId);
         if (rows.length === 0) {

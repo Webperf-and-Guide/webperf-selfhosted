@@ -63,6 +63,8 @@ describe('SQLite operations', () => {
       .toBe(5_000);
     expect(database.query<{ foreign_keys: number }, []>('PRAGMA foreign_keys').get()?.foreign_keys)
       .toBe(1);
+    expect(database.query<{ wal_autocheckpoint: number }, []>('PRAGMA wal_autocheckpoint').get()?.wal_autocheckpoint)
+      .toBe(1_000);
     database.close();
 
     const report = doctorSqliteDatabase(databasePath);
@@ -99,6 +101,32 @@ describe('SQLite operations', () => {
     expect(result.pending).toEqual([]);
     first.close();
     second.close();
+  });
+
+  test('encrypts legacy payloads across migration batches', () => {
+    const { databasePath } = createTempPaths();
+    const database = openSqliteDatabase(databasePath);
+    const crypto = storageCrypto();
+    sqliteMigrations[0]!.up(database, { storageCrypto: crypto });
+    const insert = database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, 'https://example.com/', 'succeeded', ?, ?, ?)
+    `);
+    const seed = database.transaction(() => {
+      for (let index = 0; index < 205; index += 1) {
+        const createdAt = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+        insert.run(`job_migration_${index}`, createdAt, createdAt, JSON.stringify({ index }));
+      }
+    });
+    seed.immediate();
+    insert.finalize();
+
+    applySqliteMigrations(database, { storageCrypto: crypto });
+
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM jobs WHERE payload_json LIKE 'webperf:enc:v2:%'
+    `).get()?.count).toBe(205);
+    database.close();
   });
 
   test('refuses to open a database migrated by an unknown newer version', () => {
@@ -312,6 +340,41 @@ describe('SQLite operations', () => {
     });
     expect(result.vacuumed).toBe(true);
     expect(result.checkpoint.busy).toBe(0);
+  });
+
+  test('deletes retained rows across bounded batches', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    const insert = database.query(`
+      INSERT INTO check_profile_runs (id, profile_id, created_at, payload_json)
+      VALUES (?, 'check_batch', '2026-01-01T00:00:00.000Z', 'payload')
+    `);
+    const seed = database.transaction(() => {
+      for (let index = 0; index < 501; index += 1) {
+        insert.run(`run_batch_${index}`);
+      }
+    });
+    seed.immediate();
+    insert.finalize();
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    ).checkRuns).toBe(501);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM check_profile_runs
+    `).get()?.count).toBe(0);
+    database.close();
+  });
+
+  test('reports a missing database before maintenance', () => {
+    const { databasePath } = createTempPaths();
+
+    expect(() => maintainSqliteDatabase({
+      databasePath,
+      retentionDays: 30
+    })).toThrow(`SQLite database does not exist: ${databasePath}`);
   });
 
   test('can create an automatic pre-migration backup for an existing legacy database', () => {

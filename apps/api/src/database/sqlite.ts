@@ -11,7 +11,7 @@ for (let index = 1; index < migrationIds.length; index += 1) {
   const previous = migrationIds[index - 1]!;
   const current = migrationIds[index]!;
 
-  if (previous.localeCompare(current) >= 0) {
+  if (previous >= current) {
     throw new Error(`SQLite migration manifest must be unique and ordered: ${previous}, ${current}`);
   }
 }
@@ -88,6 +88,9 @@ export const configureSqliteConnection = (
     }
 
     database.exec('PRAGMA synchronous = NORMAL;');
+    // Keep the SQLite default explicit so WAL growth policy remains visible and
+    // stable across runtime upgrades. Busy readers may still defer checkpoints.
+    database.exec('PRAGMA wal_autocheckpoint = 1000;');
   }
 
   const foreignKeys = database
@@ -104,6 +107,18 @@ export const configureSqliteConnection = (
 
   if (busyTimeout !== 5_000) {
     throw new SqlitePragmaError(`Unable to configure SQLite busy timeout; current timeout is ${busyTimeout ?? 'unknown'}`);
+  }
+
+  if (!readonly) {
+    const walAutocheckpoint = database
+      .query<{ wal_autocheckpoint: number }, []>('PRAGMA wal_autocheckpoint')
+      .get()?.wal_autocheckpoint;
+
+    if (walAutocheckpoint !== 1_000) {
+      throw new SqlitePragmaError(
+        `Unable to configure SQLite WAL autocheckpoint; current threshold is ${walAutocheckpoint ?? 'unknown'}`
+      );
+    }
   }
 };
 

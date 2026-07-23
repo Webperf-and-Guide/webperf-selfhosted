@@ -70,7 +70,6 @@ export const startProcessHeartbeat = async ({
   const writePeriodicHeartbeat = async () => {
     try {
       await writeHeartbeatFile();
-      lastFailureReportedAt = null;
     } catch {
       reportWriteFailure();
     } finally {

@@ -231,8 +231,8 @@ const sanitizeHeaders = (headers: IncomingHttpHeaders): IncomingHttpHeaders =>
   );
 
 const sendProxyError = (response: ServerResponse) => {
-  if (response.headersSent) {
-    if (!response.writableEnded) {
+  if (response.destroyed || response.headersSent) {
+    if (!response.destroyed && !response.writableEnded) {
       response.destroy();
     }
     return;

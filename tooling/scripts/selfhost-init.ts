@@ -10,7 +10,11 @@ const secretKeys = [
   'PROBE_SHARED_SECRET',
   'BROWSER_AUDIT_SHARED_SECRET'
 ] as const;
+type SecretKey = (typeof secretKeys)[number];
 const nextSecretKeys = secretKeys.map((key) => `${key}_NEXT`);
+const secretKeySet = new Set<string>(secretKeys);
+
+const isSecretKey = (value: string): value is SecretKey => secretKeySet.has(value);
 
 export const renderSelfhostEnvironment = (
   template: string,
@@ -29,11 +33,16 @@ export const renderSelfhostEnvironment = (
       }
 
       const key = normalizedLine.slice(0, separator);
-      const secretKey = key as (typeof secretKeys)[number];
 
-      if (generated.has(secretKey)) {
+      if (isSecretKey(key)) {
+        const generatedValue = generated.get(key);
+
+        if (generatedValue === undefined) {
+          throw new Error(`Failed to generate required self-host secret: ${key}`);
+        }
+
         substituted.add(key);
-        return `${key}=${generated.get(secretKey)}`;
+        return `${key}=${generatedValue}`;
       }
 
       if (nextSecretKeys.includes(key)) {

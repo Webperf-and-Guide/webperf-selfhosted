@@ -52,6 +52,10 @@ docker compose --env-file .env -f compose.yml exec api \
 ```
 
 Add `--retention-days <days>` to override the configured window for that run.
+If database retention succeeds but filesystem reconciliation cannot complete,
+the command exits non-zero with `partial: true`, preserves the committed
+database cleanup counts, and reports the artifact-stage error separately.
+Correct the artifact root or permissions and rerun maintenance.
 
 ## Backup boundary
 

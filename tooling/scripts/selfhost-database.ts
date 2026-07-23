@@ -135,7 +135,7 @@ const migrate = () => {
   try {
     const result = applySqliteMigrations(
       database,
-      { storageCrypto: requireStorageCrypto() },
+      () => ({ storageCrypto: requireStorageCrypto() }),
       {
         beforeMigrate() {
           const backupRequested = hasFlag('--backup')
@@ -216,6 +216,32 @@ const doctor = () => ({
   ...doctorSqliteDatabase(resolveDatabasePath())
 });
 
+const describeOperationError = (error: unknown) => ({
+  error: error instanceof Error ? error.message : 'Unknown database operation failure',
+  errorType: error instanceof Error
+    ? error.name
+    : Object.prototype.toString.call(error).slice(8, -1) || 'Unknown'
+});
+
+const reconcileArtifacts = async (databasePath: string, artifactsPath: string) => {
+  const currentDatabase = openSqliteDatabase(databasePath, { readonly: true, create: false });
+  let storageKeys: string[];
+
+  try {
+    storageKeys = currentDatabase
+      .query<{ storage_key: string }, []>(
+        'SELECT storage_key FROM browser_audit_artifacts ORDER BY storage_key'
+      )
+      .all()
+      .map((row) => row.storage_key);
+  } finally {
+    currentDatabase.close();
+  }
+
+  return new LocalBrowserAuditArtifactStore(artifactsPath)
+    .reconcile(new Set(storageKeys));
+};
+
 const maintenance = async () => {
   const databasePath = resolveDatabasePath();
   const database = openSqliteDatabase(databasePath, { readonly: true, create: false });
@@ -240,26 +266,23 @@ const maintenance = async () => {
     retentionDays,
     vacuum: hasFlag('--vacuum')
   });
-  const currentDatabase = openSqliteDatabase(databasePath, { readonly: true, create: false });
-  let storageKeys: string[];
-
+  const artifactsPath = resolveArtifactsPath();
+  let artifactCleanup;
   try {
-    storageKeys = currentDatabase
-      .query<{ storage_key: string }, []>(
-        'SELECT storage_key FROM browser_audit_artifacts ORDER BY storage_key'
-      )
-      .all()
-      .map((row) => row.storage_key);
-  } finally {
-    currentDatabase.close();
+    artifactCleanup = {
+      ok: true as const,
+      ...(await reconcileArtifacts(databasePath, artifactsPath))
+    };
+  } catch (error) {
+    artifactCleanup = {
+      ok: false as const,
+      ...describeOperationError(error)
+    };
   }
 
-  const artifactsPath = resolveArtifactsPath();
-  const artifactCleanup = await new LocalBrowserAuditArtifactStore(artifactsPath)
-    .reconcile(new Set(storageKeys));
-
   return {
-    ok: true,
+    ok: artifactCleanup.ok,
+    partial: !artifactCleanup.ok,
     command: 'maintenance',
     databasePath,
     artifactsPath,
@@ -317,14 +340,10 @@ try {
     process.exitCode = 1;
   }
 } catch (error) {
-  const errorType = error instanceof Error
-    ? error.name
-    : Object.prototype.toString.call(error).slice(8, -1) || 'Unknown';
   console.error(JSON.stringify({
     ok: false,
     command: command ?? null,
-    error: error instanceof Error ? error.message : 'Unknown database operation failure',
-    errorType,
+    ...describeOperationError(error),
     ...(error instanceof MigrationWithBackupError ? { backupPath: error.backupPath } : {})
   }));
   process.exitCode = 1;

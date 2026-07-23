@@ -31,6 +31,10 @@ export type SqliteMigrationResult = SqliteMigrationState & {
   appliedNow: string[];
 };
 
+export type SqliteMigrationContextProvider =
+  | SqliteMigrationContext
+  | (() => SqliteMigrationContext);
+
 export class IncompatibleSqliteSchemaError extends Error {
   override readonly name = 'IncompatibleSqliteSchemaError';
 
@@ -168,7 +172,7 @@ export const getSqliteMigrationState = (database: Database): SqliteMigrationStat
 
 export const applySqliteMigrations = (
   database: Database,
-  context: SqliteMigrationContext,
+  contextProvider: SqliteMigrationContextProvider,
   options: {
     now?: () => Date;
     beforeMigrate?: (pendingMigrationIds: string[]) => void;
@@ -200,6 +204,7 @@ export const applySqliteMigrations = (
     }
 
     const appliedNow: string[] = [];
+    let context: SqliteMigrationContext | undefined;
 
     for (const migration of sqliteMigrations) {
       if (!lockedState.pending.includes(migration.id)) {
@@ -207,6 +212,9 @@ export const applySqliteMigrations = (
       }
 
       try {
+        context ??= typeof contextProvider === 'function'
+          ? contextProvider()
+          : contextProvider;
         migration.up(database, context);
       } catch (cause) {
         throw new SqliteMigrationError(migration.id, { cause });

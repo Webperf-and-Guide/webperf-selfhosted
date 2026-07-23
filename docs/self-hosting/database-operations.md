@@ -9,8 +9,10 @@ older binary refuses to open a database containing unknown newer migrations.
 ## Local process commands
 
 Commands use `SELFHOST_DATABASE_PATH` or `./data/webperf.sqlite` by default.
-Migrations also require the same `SELFHOST_INTERNAL_SECRET` (and optional
-`SELFHOST_INTERNAL_SECRET_NEXT`) that can decrypt existing payloads.
+Applying pending migrations requires the same `SELFHOST_INTERNAL_SECRET` (and
+optional `SELFHOST_INTERNAL_SECRET_NEXT`) that can decrypt existing payloads.
+A defensive migration check against an already-current schema does not resolve
+or require those secrets.
 
 ```sh
 SELFHOST_INTERNAL_SECRET='replace-with-your-secret' bun run selfhost:migrate
@@ -38,6 +40,13 @@ files. It preserves non-terminal jobs
 and Browser Audits that still have queued or leased execution work. It always
 runs `PRAGMA optimize` and truncates the WAL; full `VACUUM` is explicit because
 it needs additional free disk space and takes an exclusive write lock.
+
+Database retention commits before filesystem artifact reconciliation. The
+command returns `ok: false` and `partial: true` with the completed database
+counts plus an `artifactCleanup` error when only reconciliation fails; retry
+maintenance after correcting the artifact path or permissions. A partial
+result exits non-zero so unattended operators do not overlook the remaining
+cleanup.
 
 ## Backup
 

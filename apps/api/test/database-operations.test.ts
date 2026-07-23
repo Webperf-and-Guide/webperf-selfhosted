@@ -85,6 +85,26 @@ describe('SQLite operations', () => {
     expect(statSync(privateDirectory).mode & 0o777).toBe(0o700);
   });
 
+  test('resolves migration context only when pending work runs', () => {
+    const { databasePath } = createTempPaths();
+    const database = openSqliteDatabase(databasePath);
+    let contextCalls = 0;
+    const contextProvider = () => {
+      contextCalls += 1;
+      return { storageCrypto: storageCrypto() };
+    };
+
+    expect(applySqliteMigrations(database, contextProvider).appliedNow)
+      .toEqual(sqliteMigrations.map((migration) => migration.id));
+    expect(contextCalls).toBe(1);
+
+    expect(applySqliteMigrations(database, () => {
+      throw new Error('No-op migration must not resolve its context');
+    })).toMatchObject({ appliedNow: [], pending: [] });
+    expect(contextCalls).toBe(1);
+    database.close();
+  });
+
   test('rechecks migration state under one write lock when another runner wins', () => {
     const { databasePath } = createTempPaths();
     const first = openSqliteDatabase(databasePath);

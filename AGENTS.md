@@ -195,6 +195,7 @@ Current repo state as of 2026-07-22:
 - the amd64 Lighthouse image places that pinned browser at Ubuntu's AppArmor-recognized `/opt/google/chrome/chrome` path, while production Compose applies a Moby `seccomp/v0.2.1`-based default-deny profile with only Chromium's `clone`, `setns`, and `unshare` namespace operations added; the worker remains non-root and receives neither `SYS_ADMIN` nor `--no-sandbox`
 - all Bun runtime Dockerfiles now install from the lockfile with Bun 1.3.13, and the docs gate rejects machine-local absolute paths plus broken repository-relative links
 - public-beta tags are accepted only from `main` after Sampo changesets are applied, the tag matches the highest public package version, and the protected `release` environment approves publication; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
+- defensive migration checks now resolve storage crypto only when locked pending work actually runs, self-host init narrows template keys through an explicit allowlist guard, and maintenance reports committed database work separately from retryable artifact reconciliation failures
 - the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
 
 Current local dev entrypoints:

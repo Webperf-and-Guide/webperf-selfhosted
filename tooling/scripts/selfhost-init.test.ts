@@ -40,4 +40,15 @@ describe('self-host environment initialization', () => {
     expect(rendered).toContain('BROWSER_AUDIT_SHARED_SECRET_NEXT=');
     expect(rendered).not.toContain('\r');
   });
+
+  test('preserves similarly named keys outside the required secret allowlist', () => {
+    const rendered = renderSelfhostEnvironment(
+      `${completeTemplate}\nSELFHOST_INTERNAL_SECRET_BACKUP=operator-value`,
+      () => 'generated-value'
+    );
+
+    expect(rendered).toContain('SELFHOST_INTERNAL_SECRET=generated-value');
+    expect(rendered).toContain('SELFHOST_INTERNAL_SECRET_BACKUP=operator-value');
+    expect(rendered).not.toContain('SELFHOST_INTERNAL_SECRET_BACKUP=undefined');
+  });
 });

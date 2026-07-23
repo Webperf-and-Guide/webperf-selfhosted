@@ -50,7 +50,7 @@ export const openSqliteDatabase = (
   const readonly = options.readonly ?? false;
 
   if (!readonly && databasePath !== ':memory:') {
-    mkdirSync(dirname(databasePath), { recursive: true });
+    mkdirSync(dirname(databasePath), { recursive: true, mode: 0o700 });
   }
 
   const database = new Database(databasePath, {
@@ -73,7 +73,8 @@ export const configureSqliteConnection = (
   database: Database,
   { databasePath, readonly = false }: { databasePath: string; readonly?: boolean }
 ) => {
-  database.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
+  database.exec('PRAGMA busy_timeout = 5000;');
+  database.exec('PRAGMA foreign_keys = ON;');
 
   if (!readonly) {
     if (databasePath !== ':memory:') {
@@ -95,6 +96,14 @@ export const configureSqliteConnection = (
 
   if (foreignKeys !== 1) {
     throw new SqlitePragmaError('Unable to enable SQLite foreign key enforcement');
+  }
+
+  const busyTimeout = database
+    .query<{ timeout: number }, []>('PRAGMA busy_timeout')
+    .get()?.timeout;
+
+  if (busyTimeout !== 5_000) {
+    throw new SqlitePragmaError(`Unable to configure SQLite busy timeout; current timeout is ${busyTimeout ?? 'unknown'}`);
   }
 };
 

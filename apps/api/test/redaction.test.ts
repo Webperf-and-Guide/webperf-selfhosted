@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   isSensitiveHeaderName,
+  maxRedactedJsonResponseBytes,
   redactJsonResponse,
   redactSensitiveData,
   redactUrlQuery,
@@ -14,7 +15,27 @@ describe('API secret redaction', () => {
     expect(isSensitiveHeaderName('X-API-Key')).toBe(true);
     expect(isSensitiveHeaderName('x-release-token')).toBe(true);
     expect(isSensitiveHeaderName('x-client-password')).toBe(true);
+    expect(isSensitiveHeaderName('apikey')).toBe(true);
+    expect(isSensitiveHeaderName('AccessToken')).toBe(true);
+    expect(isSensitiveHeaderName('csrfToken')).toBe(true);
+    expect(isSensitiveHeaderName('sessiontoken')).toBe(true);
     expect(isSensitiveHeaderName('x-cache-keyspace')).toBe(false);
+  });
+
+  test('bounds recursive redaction and replaces circular references', () => {
+    const circular: Record<string, unknown> = { token: 'private-token' };
+    circular.self = circular;
+
+    expect(redactSensitiveData(circular)).toEqual({
+      token: redactedValue,
+      self: redactedValue
+    });
+
+    let nested: Record<string, unknown> = { secret: 'private-secret' };
+    for (let index = 0; index < 40; index += 1) {
+      nested = { child: nested };
+    }
+    expect(JSON.stringify(redactSensitiveData(nested))).toContain(redactedValue);
   });
 
   test('masks sensitive headers, cookies, and webhook secrets', () => {
@@ -58,7 +79,7 @@ describe('API secret redaction', () => {
     );
   });
 
-  test('drops stale content length when a JSON response body cannot be parsed', async () => {
+  test('fails closed when a JSON response cannot be safely redacted', async () => {
     const response = new Response('not-json', {
       headers: {
         'content-type': 'application/json',
@@ -67,6 +88,18 @@ describe('API secret redaction', () => {
     });
     const redacted = await redactJsonResponse(response);
     expect(redacted.headers.get('content-length')).toBeNull();
-    expect(await redacted.text()).toBe('not-json');
+    expect(redacted.status).toBe(500);
+    expect(await redacted.json()).toEqual({ error: 'Response was not valid JSON' });
+
+    const oversized = await redactJsonResponse(new Response('{"token":"private"}', {
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(maxRedactedJsonResponseBytes + 1)
+      }
+    }));
+    expect(oversized.status).toBe(500);
+    expect(await oversized.json()).toEqual({
+      error: 'Response exceeded the safe redaction byte limit'
+    });
   });
 });

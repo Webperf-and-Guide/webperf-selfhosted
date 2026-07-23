@@ -71,18 +71,22 @@ export const createStorageCrypto = ({
       const errors: unknown[] = [];
 
       for (const key of keys) {
+        let plaintext: string;
+
         try {
           const decipher = createDecipheriv('aes-256-gcm', key, envelope.iv);
           decipher.setAAD(associatedData);
           decipher.setAuthTag(envelope.tag);
-          const plaintext = Buffer.concat([
+          plaintext = Buffer.concat([
             decipher.update(envelope.ciphertext),
             decipher.final()
           ]).toString('utf8');
-          return JSON.parse(plaintext);
         } catch (error) {
           errors.push(error);
+          continue;
         }
+
+        return JSON.parse(plaintext);
       }
 
       throw new AggregateError(errors, 'Unable to decrypt persisted payload');

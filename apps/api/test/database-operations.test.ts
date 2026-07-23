@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -67,6 +67,15 @@ describe('SQLite operations', () => {
     const report = doctorSqliteDatabase(databasePath);
     expect(report.ok).toBe(true);
     expect(report.migrations.pending).toEqual([]);
+  });
+
+  test('creates a private database parent directory', () => {
+    const { directory } = createTempPaths();
+    const privateDirectory = join(directory, 'private-state');
+    const database = openSqliteDatabase(join(privateDirectory, 'webperf.sqlite'));
+    database.close();
+
+    expect(statSync(privateDirectory).mode & 0o777).toBe(0o700);
   });
 
   test('rechecks migration state under one write lock when another runner wins', () => {

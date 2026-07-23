@@ -129,4 +129,25 @@ describe('browser audit redaction', () => {
       redactBrowserAuditBytesInPlace(new TextEncoder().encode(source), input)
     )).toBe(source);
   });
+
+  test('keeps short credential boundaries and ASCII whitespace aligned in both paths', () => {
+    const input = {
+      customHeaders: [{ name: 'X-Code', value: 'abc' }],
+      cookies: [{ name: 'sid', value: 'ok' }],
+      artifactUpload: null
+    } as BrowserAuditWorkerRequest;
+    const source = 'X-Code\v:\fabc/host sid=ok@domain X-Code:abc_suffix sid=okay';
+
+    const redactedText = redactBrowserAuditText(source, input);
+    const redactedBytes = new TextDecoder().decode(
+      redactBrowserAuditBytesInPlace(new TextEncoder().encode(source), input)
+    );
+
+    for (const redacted of [redactedText, redactedBytes]) {
+      expect(redacted).not.toContain('abc/host');
+      expect(redacted).not.toContain('ok@domain');
+      expect(redacted).toContain('X-Code:abc_suffix');
+      expect(redacted).toContain('sid=okay');
+    }
+  });
 });

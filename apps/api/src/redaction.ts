@@ -38,14 +38,33 @@ const compactSensitiveHeaderNames = new Set([
   'signingkey',
   'encryptionkey'
 ]);
+const sensitiveHeaderNameStems = [
+  'token',
+  'secret',
+  'key',
+  'password',
+  'passwd',
+  'credential',
+  'bearer'
+] as const;
+const sensitiveHeaderNameStemPattern = new RegExp(
+  `(?:^|[-_])(?:${sensitiveHeaderNameStems.join('|')})(?:$|[-_])`
+);
+const sensitiveHeaderNameStemSet = new Set<string>(sensitiveHeaderNameStems);
 
 export const isSensitiveHeaderName = (name: string) => {
   const normalized = name.trim().toLowerCase();
   const compact = normalized.replaceAll(/[-_]/g, '');
   return exactSensitiveHeaderNames.has(normalized)
-    || /(?:^|[-_])(?:token|secret|key|password|passwd|credential|bearer)(?:$|[-_])/.test(normalized)
+    || sensitiveHeaderNameStemPattern.test(normalized)
     || compactSensitiveHeaderNames.has(compact)
-    || (compact.startsWith('x') && compactSensitiveHeaderNames.has(compact.slice(1)));
+    || (
+      compact.startsWith('x')
+      && (
+        compactSensitiveHeaderNames.has(compact.slice(1))
+        || sensitiveHeaderNameStemSet.has(compact.slice(1))
+      )
+    );
 };
 
 const isSensitivePropertyName = (name: string) =>
@@ -91,7 +110,10 @@ const redactSensitiveDataAtDepth = (
   }
 
   const source = value as Record<string, unknown>;
-  const result: Record<string, unknown> = {};
+  // JSON permits `__proto__` as an ordinary key. A null prototype prevents
+  // bracket assignment from invoking Object.prototype.__proto__ and silently
+  // dropping that key from the redacted response.
+  const result: Record<string, unknown> = Object.create(null);
   const name = typeof source.name === 'string' ? source.name : null;
   const redactNamedValue = parentKey === 'cookies' || (name !== null && isSensitiveHeaderName(name));
   ancestors.add(value);

@@ -11,6 +11,7 @@ const ascii = {
   digitMin: '0'.charCodeAt(0),
   doubleQuote: '"'.charCodeAt(0),
   equals: '='.charCodeAt(0),
+  formFeed: '\f'.charCodeAt(0),
   fragment: '#'.charCodeAt(0),
   hyphen: '-'.charCodeAt(0),
   lineFeed: '\n'.charCodeAt(0),
@@ -24,13 +25,11 @@ const ascii = {
   tab: '\t'.charCodeAt(0),
   underscore: '_'.charCodeAt(0),
   uppercaseMax: 'Z'.charCodeAt(0),
-  uppercaseMin: 'A'.charCodeAt(0)
+  uppercaseMin: 'A'.charCodeAt(0),
+  verticalTab: '\v'.charCodeAt(0)
 } as const;
 const urlDelimiters = new Set(Buffer.from("\t\r\n \"'<>`", 'ascii'));
 const adjacentUrlDelimiters = new Set(Buffer.from(',;)]}|', 'ascii'));
-const contextualValueDelimiters = new Set(
-  Buffer.from("\t\r\n \"'`,;}])<>|", 'ascii')
-);
 
 export const redactBrowserAuditText = (value: string, input: BrowserAuditWorkerRequest) => {
   const redacted = redactKnownValues(value, input);
@@ -207,7 +206,7 @@ const redactShortContexts = (value: string, pairs: SensitivePair[]) => {
 
   for (const pair of pairs) {
     const pattern = new RegExp(
-      `(^|[^A-Za-z0-9_.-])(${escapeCaseInsensitiveAscii(pair.name)}\\s*[:=]\\s*)${escapeRegExp(pair.value)}(?![A-Za-z0-9_.-])`,
+      `(^|[^A-Za-z0-9_.-])(${escapeCaseInsensitiveAscii(pair.name)}[\\t\\n\\v\\f\\r ]*[:=][\\t\\n\\v\\f\\r ]*)${escapeRegExp(pair.value)}(?![A-Za-z0-9_.-])`,
       'gm'
     );
     redacted = redacted.replace(pattern, `$1$2${redactedValue}`);
@@ -316,7 +315,7 @@ const redactShortContextsInPlace = (bytes: Buffer, pairs: SensitivePair[]) => {
       const valueEnd = valueStart + value.byteLength;
       if (
         startsWithBuffer(bytes, valueStart, value)
-        && (valueEnd === bytes.length || contextualValueDelimiters.has(bytes[valueEnd]!))
+        && (valueEnd === bytes.length || !isIdentifierByte(bytes[valueEnd]!))
       ) {
         bytes.fill('*', valueStart, valueEnd);
         index = valueEnd - 1;
@@ -365,6 +364,8 @@ const isIdentifierByte = (value: number) =>
 const isAsciiWhitespace = (value: number) =>
   value === ascii.tab
   || value === ascii.lineFeed
+  || value === ascii.verticalTab
+  || value === ascii.formFeed
   || value === ascii.carriageReturn
   || value === ascii.space;
 

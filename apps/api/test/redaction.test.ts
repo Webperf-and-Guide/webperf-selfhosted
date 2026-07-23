@@ -19,7 +19,24 @@ describe('API secret redaction', () => {
     expect(isSensitiveHeaderName('AccessToken')).toBe(true);
     expect(isSensitiveHeaderName('csrfToken')).toBe(true);
     expect(isSensitiveHeaderName('sessiontoken')).toBe(true);
+    expect(isSensitiveHeaderName('xsecret')).toBe(true);
+    expect(isSensitiveHeaderName('xpassword')).toBe(true);
+    expect(isSensitiveHeaderName('xkey')).toBe(true);
     expect(isSensitiveHeaderName('x-cache-keyspace')).toBe(false);
+    expect(isSensitiveHeaderName('xmonkey')).toBe(false);
+  });
+
+  test('preserves JSON reserved keys without changing the redacted object prototype', () => {
+    const source = JSON.parse(
+      '{"__proto__":{"token":"private"},"constructor":"kept","prototype":"kept"}'
+    );
+    const redacted = redactSensitiveData(source) as Record<string, unknown>;
+
+    expect(Object.getPrototypeOf(redacted)).toBeNull();
+    expect(Object.hasOwn(redacted, '__proto__')).toBe(true);
+    expect(JSON.parse(JSON.stringify(redacted))).toEqual(JSON.parse(
+      `{"__proto__":{"token":"${redactedValue}"},"constructor":"kept","prototype":"kept"}`
+    ));
   });
 
   test('bounds recursive redaction and replaces circular references', () => {

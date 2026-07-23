@@ -132,6 +132,7 @@ Current repo state as of 2026-07-22:
 - Browser Audit terminal-state semantics now live in the shared contract, while Reports polling validates every response and backs off from one to five seconds when status is unchanged instead of issuing a fixed 180-request burst
 - internal workspace packages now consume `@webperf/contracts` through `workspace:*` consistently instead of mixing `file:` and workspace references, which keeps the Bun lockfile stable enough for `bun install --frozen-lockfile` in GitHub Actions
 - `ci-selfhost` now validates Compose through the checked-in `compose:config` script, which uses `infra/docker-compose/.env.example` instead of assuming repository-local secrets during static config validation
+- API and Browser Audit redaction now preserve JSON reserved keys safely and apply identical short-credential boundary and ASCII-whitespace rules across string and streaming byte paths
 - Browser Audit compatibility parsing now requires at least one actual legacy toolchain version before inferring Lighthouse, and artifact locator storage segments retain an explicit 160-character contract bound
 - executor outbound policy classification now shares one hostname normalizer with the DNS-pinned transport so bracket, case, and trailing-dot handling cannot drift between trust decisions
 - the consolidated CI workflow now caches Bun dependencies for documentation checks, annotates the pinned Rust toolchain action, and bounds the required aggregate gate with an explicit one-minute timeout

@@ -4,6 +4,8 @@ FROM oven/bun:1.3.13-slim
 # puppeteer-core dependency. Pinning it here makes the downloaded browser an
 # explicit, reviewable image input instead of a CDN-time default.
 ARG CHROME_VERSION=146.0.7680.153
+ARG DEBIAN_CHROMIUM_VERSION=146.0.7680.153-1~deb13u1
+ARG DEBIAN_CHROMIUM_SNAPSHOT=20260320T220114Z
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -68,8 +70,13 @@ COPY . /workspace/webperf-selfhosted
 WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-    apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox \
+    test "${DEBIAN_CHROMIUM_VERSION%%-*}" = "$CHROME_VERSION" \
+    && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false update \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false install -y --no-install-recommends \
+      "chromium=$DEBIAN_CHROMIUM_VERSION" "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \
     && rm -rf /var/lib/apt/lists/* \
+    && rm -f /tmp/chromium-snapshot.list \
     && mkdir -p /opt/google \
     && ln -s /usr/lib/chromium /opt/google/chrome; \
   else \

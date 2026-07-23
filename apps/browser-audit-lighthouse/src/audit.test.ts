@@ -68,7 +68,7 @@ describe('Lighthouse Chrome launch policy', () => {
       'report.json',
       'application/json',
       payload,
-      responseFor('0'.repeat(64))
+      { fetchImpl: responseFor('0'.repeat(64)) }
     )).rejects.toThrow('did not match');
     await expect(uploadArtifact(
       input,
@@ -76,7 +76,44 @@ describe('Lighthouse Chrome launch policy', () => {
       'report.json',
       'application/json',
       payload,
-      responseFor(createHash('sha256').update(payload).digest('hex'))
+      {
+        fetchImpl: responseFor(createHash('sha256').update(payload).digest('hex'))
+      }
     )).resolves.toHaveLength(1);
+  });
+
+  test('refuses artifact uploads after the shared audit deadline', async () => {
+    const payload = new TextEncoder().encode('{}');
+    const input = {
+      executionId: 'audit_deadline',
+      policy: {
+        timeouts: { totalTimeoutMs: 5_000 }
+      },
+      artifactUpload: {
+        baseUrl: 'https://api.example.test',
+        bearerToken: 'signed-upload-token',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        maxArtifactBytes: 1_024,
+        allowedContentTypes: ['application/json']
+      }
+    } as BrowserAuditWorkerRequest;
+    let fetchCalls = 0;
+
+    await expect(uploadArtifact(
+      input,
+      'lighthouse-json',
+      'report.json',
+      'application/json',
+      payload,
+      {
+        deadline: 999,
+        now: () => 1_000,
+        async fetchImpl() {
+          fetchCalls += 1;
+          throw new Error('fetch must not run after the deadline');
+        }
+      }
+    )).rejects.toThrow('Audit exceeded total timeout');
+    expect(fetchCalls).toBe(0);
   });
 });

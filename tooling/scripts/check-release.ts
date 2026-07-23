@@ -111,6 +111,41 @@ if (ciWorkflow !== undefined && ciWorkflow.includes(':latest')) {
   violations.push('ci.yml: the mutable latest tag is not part of the development channel');
 }
 
+try {
+  const browserAuditDockerfile = readFileSync(
+    join(root, 'apps/browser-audit-lighthouse/Dockerfile'),
+    'utf8'
+  );
+  const chromeVersion = browserAuditDockerfile.match(/^ARG CHROME_VERSION=(\S+)$/m)?.[1];
+  const debianChromiumVersion = browserAuditDockerfile
+    .match(/^ARG DEBIAN_CHROMIUM_VERSION=(\S+)$/m)?.[1];
+  const debianSnapshot = browserAuditDockerfile
+    .match(/^ARG DEBIAN_CHROMIUM_SNAPSHOT=(\d{8}T\d{6}Z)$/m)?.[1];
+
+  if (
+    !chromeVersion
+    || debianChromiumVersion !== `${chromeVersion}-1~deb13u1`
+  ) {
+    violations.push(
+      'browser-audit-lighthouse Dockerfile: arm64 Debian Chromium must match CHROME_VERSION exactly'
+    );
+  }
+  if (
+    !debianSnapshot
+    || !browserAuditDockerfile.includes(
+      'snapshot.debian.org/archive/debian-security/%s/'
+    )
+    || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')
+    || !browserAuditDockerfile.includes('"chromium-sandbox=$DEBIAN_CHROMIUM_VERSION"')
+  ) {
+    violations.push(
+      'browser-audit-lighthouse Dockerfile: arm64 Chromium must use the pinned Debian security snapshot and package version'
+    );
+  }
+} catch {
+  violations.push('browser-audit-lighthouse Dockerfile is missing or unreadable');
+}
+
 for (const { path: retiredPath } of retiredReleasePaths) {
   if (existsSync(join(root, retiredPath))) {
     violations.push(`${retiredPath}: retired mutable image metadata path still exists`);

@@ -75,6 +75,8 @@ export const runBrowserAudit = async ({
     throw new Error('Chrome executable is not configured');
   }
 
+  const deadline = Date.now() + input.policy.timeouts.totalTimeoutMs;
+
   await validateBrowserRequestUrl(input.targetUrl, { allowlist: config.hostAllowlist });
 
   for (const step of input.policy.flow.steps) {
@@ -157,7 +159,6 @@ export const runBrowserAudit = async ({
 
     await applySetupState(page, input);
 
-    const deadline = Date.now() + input.policy.timeouts.totalTimeoutMs;
     let navigationSeen = false;
 
     for (const [index, step] of input.policy.flow.steps.entries()) {
@@ -209,7 +210,8 @@ export const runBrowserAudit = async ({
           'screenshot',
           'screenshot.png',
           lighthouseArtifactContentTypes.screenshot,
-          screenshot
+          screenshot,
+          { deadline }
         )));
       } catch (error) {
         issues.push({
@@ -243,7 +245,8 @@ export const runBrowserAudit = async ({
           'lighthouse-json',
           'flow-result.json',
           lighthouseArtifactContentTypes.json,
-          new TextEncoder().encode(redactBrowserAuditText(JSON.stringify(rawFlowResult, null, 2), input))
+          new TextEncoder().encode(redactBrowserAuditText(JSON.stringify(rawFlowResult, null, 2), input)),
+          { deadline }
         ))
       );
     }
@@ -255,7 +258,8 @@ export const runBrowserAudit = async ({
           'lighthouse-html',
           'report.html',
           lighthouseArtifactContentTypes.html,
-          new TextEncoder().encode(redactBrowserAuditText(reportHtml, input))
+          new TextEncoder().encode(redactBrowserAuditText(reportHtml, input)),
+          { deadline }
         ))
       );
     }
@@ -267,7 +271,8 @@ export const runBrowserAudit = async ({
           'trace',
           'trace.json',
           lighthouseArtifactContentTypes.trace,
-          redactBrowserAuditBytesInPlace(traceBuffer, input)
+          redactBrowserAuditBytesInPlace(traceBuffer, input),
+          { deadline }
         ))
       );
     }
@@ -409,7 +414,7 @@ const waitForUrl = async (
 };
 
 const enforceDeadline = (deadline: number, totalTimeoutMs: number) => {
-  if (Date.now() > deadline) {
+  if (Date.now() >= deadline) {
     throw new Error(`Audit exceeded total timeout of ${totalTimeoutMs}ms`);
   }
 };
@@ -573,20 +578,39 @@ type ArtifactFetch = (
   init?: RequestInit
 ) => Promise<Response>;
 
+type ArtifactUploadOptions = {
+  fetchImpl?: ArtifactFetch;
+  deadline?: number;
+  now?: () => number;
+};
+
 export const uploadArtifact = async (
   input: BrowserAuditWorkerRequest,
   kind: BrowserAuditArtifactKind,
   filename: string,
   contentType: string,
   payload: Uint8Array,
-  fetchImpl: ArtifactFetch = fetch
+  options: ArtifactUploadOptions = {}
 ) => {
   if (!input.artifactUpload) {
     return [];
   }
 
-  if (Date.parse(input.artifactUpload.expiresAt) <= Date.now()) {
+  const now = options.now ?? Date.now;
+  const currentTime = now();
+  const authorizationExpiresAt = Date.parse(input.artifactUpload.expiresAt);
+
+  if (authorizationExpiresAt <= currentTime) {
     throw new Error('Artifact upload authorization expired');
+  }
+
+  const deadline = options.deadline
+    ?? currentTime + input.policy.timeouts.totalTimeoutMs;
+  const remainingAuditMs = deadline - currentTime;
+  if (remainingAuditMs <= 0) {
+    throw new Error(
+      `Audit exceeded total timeout of ${input.policy.timeouts.totalTimeoutMs}ms`
+    );
   }
 
   if (payload.byteLength > input.artifactUpload.maxArtifactBytes) {
@@ -599,7 +623,7 @@ export const uploadArtifact = async (
     throw new Error('Artifact content type is not allowed by the upload policy');
   }
 
-  const response = await fetchImpl(
+  const response = await (options.fetchImpl ?? fetch)(
     `${input.artifactUpload.baseUrl}/internal/browser-audits/${input.executionId}/artifacts?kind=${kind}&filename=${encodeURIComponent(filename)}`,
     {
       method: 'POST',
@@ -610,7 +634,9 @@ export const uploadArtifact = async (
         'x-artifact-size': String(payload.byteLength)
       },
       body: Buffer.from(payload),
-      signal: AbortSignal.timeout(input.policy.timeouts.totalTimeoutMs)
+      signal: AbortSignal.timeout(
+        Math.min(remainingAuditMs, authorizationExpiresAt - currentTime)
+      )
     }
   );
 

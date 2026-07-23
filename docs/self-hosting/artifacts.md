@@ -4,6 +4,8 @@ WebPerf persists Browser Audit files in a local filesystem store by default.
 SQLite stores only the artifact index: audit ownership, registry kind,
 normalized filename, content type, byte size, SHA-256 digest, storage key, and
 creation time. Artifact bytes are never stored in a SQLite BLOB.
+The repository validates index metadata against the public artifact contracts
+before every write and again when reading persisted rows.
 
 ## Configuration
 

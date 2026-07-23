@@ -20,8 +20,10 @@ import type {
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
+  browserAuditArtifactContentTypesForKind,
   browserAuditArtifactLimit,
-  browserAuditIdentifierMaxLength,
+  browserAuditArtifactLocatorSchema,
+  browserAuditArtifactRefSchema,
   browserAuditResourceSchema,
   checkProfileSchema,
   checkProfileRunSchema,
@@ -215,6 +217,67 @@ type BrowserAuditArtifactRow = {
   sha256: string;
   storage_key: string;
   created_at: string;
+};
+
+type BrowserAuditArtifactCandidate = {
+  id: unknown;
+  auditId: unknown;
+  registryVersion: unknown;
+  kind: unknown;
+  filename: unknown;
+  contentType: unknown;
+  byteSize: unknown;
+  sha256: unknown;
+  storageKey: unknown;
+  createdAt: unknown;
+};
+
+const normalizeBrowserAuditArtifactRecord = (
+  artifact: BrowserAuditArtifactCandidate
+): BrowserAuditArtifactRecord | null => {
+  const locator = browserAuditArtifactLocatorSchema.safeParse({
+    auditId: artifact.auditId,
+    artifactId: artifact.id
+  });
+  const reference = browserAuditArtifactRefSchema.safeParse({
+    id: artifact.id,
+    registryVersion: artifact.registryVersion,
+    kind: artifact.kind,
+    url: '/internal/browser-audit-artifact',
+    filename: artifact.filename,
+    contentType: artifact.contentType,
+    byteSize: artifact.byteSize,
+    sha256: artifact.sha256,
+    createdAt: artifact.createdAt
+  });
+
+  if (
+    !locator.success
+    || !reference.success
+    || artifact.registryVersion !== 'v1'
+    || reference.data.filename === null
+    || reference.data.byteSize === null
+    || reference.data.sha256 === null
+    || typeof artifact.storageKey !== 'string'
+    || artifact.storageKey !== `${locator.data.auditId}/${locator.data.artifactId}`
+    || !browserAuditArtifactContentTypesForKind(reference.data.kind)
+      .includes(reference.data.contentType)
+  ) {
+    return null;
+  }
+
+  return {
+    id: locator.data.artifactId,
+    auditId: locator.data.auditId,
+    registryVersion: reference.data.registryVersion,
+    kind: reference.data.kind,
+    filename: reference.data.filename,
+    contentType: reference.data.contentType,
+    byteSize: reference.data.byteSize,
+    sha256: reference.data.sha256,
+    storageKey: artifact.storageKey,
+    createdAt: reference.data.createdAt
+  };
 };
 
 type JsonSchema<T> = {
@@ -610,31 +673,7 @@ export const createSqliteJobRepository = ({
   const parseBrowserAuditArtifact = (
     row: BrowserAuditArtifactRow
   ): BrowserAuditArtifactRecord | null => {
-    if (
-      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(row.id)
-      || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(row.audit_id)
-      || row.registry_version !== 'v1'
-      || row.kind.length > browserAuditIdentifierMaxLength
-      || !/^[a-z0-9][a-z0-9._-]*$/.test(row.kind)
-      || row.filename.length < 1
-      || row.filename.length > 255
-      || row.content_type.length < 1
-      || row.content_type.length > 200
-      || !Number.isSafeInteger(row.byte_size)
-      || row.byte_size < 0
-      || !/^[a-f0-9]{64}$/.test(row.sha256)
-      || row.storage_key !== `${row.audit_id}/${row.id}`
-      || Number.isNaN(Date.parse(row.created_at))
-    ) {
-      console.warn(JSON.stringify({
-        service: 'webperf-api',
-        warning: 'browser_audit_artifact_row_invalid',
-        artifactId: row.id
-      }));
-      return null;
-    }
-
-    return {
+    const artifact = normalizeBrowserAuditArtifactRecord({
       id: row.id,
       auditId: row.audit_id,
       registryVersion: row.registry_version,
@@ -645,7 +684,18 @@ export const createSqliteJobRepository = ({
       sha256: row.sha256,
       storageKey: row.storage_key,
       createdAt: row.created_at
-    };
+    });
+
+    if (!artifact) {
+      console.warn(JSON.stringify({
+        service: 'webperf-api',
+        warning: 'browser_audit_artifact_row_invalid',
+        artifactId: row.id
+      }));
+      return null;
+    }
+
+    return artifact;
   };
 
   const getEntity = <T>(kind: EntityKind, id: string, schema: JsonSchema<T>) => {
@@ -996,28 +1046,36 @@ export const createSqliteJobRepository = ({
       persistBrowserAudit(browserAudit);
     },
     saveBrowserAuditArtifact(artifact) {
+      const validatedArtifact = normalizeBrowserAuditArtifactRecord(artifact);
+      if (!validatedArtifact) {
+        throw new TypeError('Browser Audit artifact metadata is invalid');
+      }
+
       const save = db.transaction(() => {
-        const existing = getBrowserAuditArtifactStatement.get(artifact.auditId, artifact.id);
+        const existing = getBrowserAuditArtifactStatement.get(
+          validatedArtifact.auditId,
+          validatedArtifact.id
+        );
         if (existing) {
           return false;
         }
 
-        const count = countBrowserAuditArtifactsStatement.get(artifact.auditId)?.count ?? 0;
+        const count = countBrowserAuditArtifactsStatement.get(validatedArtifact.auditId)?.count ?? 0;
         if (count >= maximumBrowserAuditArtifactsPerAudit) {
           return false;
         }
 
         const result = saveBrowserAuditArtifactStatement.run(
-          artifact.id,
-          artifact.auditId,
-          artifact.registryVersion,
-          artifact.kind,
-          artifact.filename,
-          artifact.contentType,
-          artifact.byteSize,
-          artifact.sha256,
-          artifact.storageKey,
-          artifact.createdAt
+          validatedArtifact.id,
+          validatedArtifact.auditId,
+          validatedArtifact.registryVersion,
+          validatedArtifact.kind,
+          validatedArtifact.filename,
+          validatedArtifact.contentType,
+          validatedArtifact.byteSize,
+          validatedArtifact.sha256,
+          validatedArtifact.storageKey,
+          validatedArtifact.createdAt
         ) as { changes?: number };
         return (result.changes ?? 0) === 1;
       });

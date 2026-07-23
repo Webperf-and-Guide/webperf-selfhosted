@@ -430,6 +430,40 @@ describe('Browser Audit artifact indexes', () => {
     database.close();
   });
 
+  test('rejects invalid artifact metadata before writing an index row', () => {
+    const repository = createSqliteJobRepository({
+      databasePath: join(createTempDirectory(), 'webperf.sqlite'),
+      encryptionSecret: 'artifact-validation-encryption-secret'
+    });
+    const artifact = {
+      id: 'artifact_invalid',
+      auditId: 'audit_invalid',
+      registryVersion: 'v1' as const,
+      kind: 'lighthouse-json',
+      filename: 'report.json',
+      contentType: 'application/json',
+      byteSize: 128,
+      sha256: 'a'.repeat(64),
+      storageKey: 'audit_invalid/artifact_invalid',
+      createdAt: '2026-07-22T00:00:00.000Z'
+    };
+
+    for (const invalidArtifact of [
+      { ...artifact, storageKey: '../artifact_invalid' },
+      { ...artifact, sha256: 'not-a-sha256-digest' },
+      { ...artifact, contentType: 'text/html' },
+      { ...artifact, createdAt: 'not-a-timestamp' }
+    ]) {
+      expect(() => repository.saveBrowserAuditArtifact(invalidArtifact)).toThrow(
+        'Browser Audit artifact metadata is invalid'
+      );
+    }
+
+    expect(repository.listBrowserAuditArtifacts('audit_invalid')).toEqual([]);
+    expect(repository.listBrowserAuditArtifactStorageKeys()).toEqual([]);
+    repository.close();
+  });
+
   test('removes expired indexes and files as one retention reconciliation flow', async () => {
     const directory = createTempDirectory();
     const databasePath = join(directory, 'webperf.sqlite');

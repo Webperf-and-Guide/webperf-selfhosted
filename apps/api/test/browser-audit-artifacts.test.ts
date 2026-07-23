@@ -125,6 +125,36 @@ describe('local Browser Audit artifact storage', () => {
     ).text()).toBe('{"score":0.91}');
   });
 
+  test('rejects duplicate artifact publication without replacing the original bytes', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const original = new TextEncoder().encode('original');
+    const replacement = new TextEncoder().encode('replaced');
+    const identity = {
+      auditId: 'audit_duplicate',
+      artifactId: 'artifact_duplicate',
+      maxBytes: 1_024
+    };
+
+    const stored = await store.write({
+      ...identity,
+      body: new Response(original).body,
+      expectedBytes: original.byteLength
+    });
+    await expect(store.write({
+      ...identity,
+      body: new Response(replacement).body,
+      expectedBytes: replacement.byteLength
+    })).rejects.toMatchObject({
+      name: 'ArtifactStoreValidationError',
+      status: 409
+    });
+
+    expect(await new Response(
+      (await store.openDownload(stored.storageKey, original.byteLength)).body
+    ).text()).toBe('original');
+  });
+
   test('preserves fresh unindexed and temporary files until the reconciliation grace expires', async () => {
     const root = join(createTempDirectory(), 'artifacts');
     const auditPath = join(root, 'audit_fresh');
@@ -391,6 +421,18 @@ describe('Browser Audit artifact indexes', () => {
       'a'.repeat(64),
       '2026-07-22T00:00:00.000Z'
     );
+    database.query(`
+      INSERT INTO browser_audit_artifacts (
+        id, audit_id, registry_version, kind, filename, content_type,
+        byte_size, sha256, storage_key, created_at
+      ) VALUES ('artifact_kind_too_long', 'audit_corrupt', 'v1', ?,
+        'report.json', 'application/json', 1, ?,
+        'audit_corrupt/artifact_kind_too_long', ?)
+    `).run(
+      `a${'b'.repeat(120)}`,
+      'b'.repeat(64),
+      '2026-07-22T00:00:00.000Z'
+    );
     database.close();
 
     const repository = createSqliteJobRepository({
@@ -398,6 +440,9 @@ describe('Browser Audit artifact indexes', () => {
       encryptionSecret: 'artifact-corruption-encryption-secret'
     });
     expect(repository.getBrowserAuditArtifact('audit_corrupt', 'bad/id')).toBeNull();
+    expect(
+      repository.getBrowserAuditArtifact('audit_corrupt', 'artifact_kind_too_long')
+    ).toBeNull();
     expect(repository.listBrowserAuditArtifacts('audit_corrupt')).toEqual([]);
     repository.close();
   });

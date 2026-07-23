@@ -28,6 +28,16 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export const executionPayloadMaxDepth = 32;
 export const executionPayloadMaxBytes = 256 * 1_024;
 export const defaultExecutionRetryDelayMs = 1_000;
+export const executionJobMaxAttempts = 20;
+export const executionLeaseOwnerMaxLength = 160;
+export const executionLeaseDurationMinMs = 1_000;
+export const executionLeaseDurationMaxMs = 3_600_000;
+export const executionRetryDelayMaxMs = 86_400_000;
+export const executionAvailabilityMaxDelayDays = 7;
+export const executionAvailabilityMaxDelayMs =
+  executionAvailabilityMaxDelayDays * 24 * 60 * 60 * 1_000;
+export const executionErrorCodeMaxLength = 120;
+export const executionErrorMessageMaxLength = 1_000;
 const utf8Encoder = new TextEncoder();
 const reservedJsonObjectKeys = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -81,8 +91,8 @@ export const jsonValueSchema = rawJsonValueSchema.superRefine((value, context) =
 });
 
 export const executionJobErrorSchema = z.object({
-  code: z.string().min(1).max(120),
-  message: z.string().min(1).max(1_000),
+  code: z.string().min(1).max(executionErrorCodeMaxLength),
+  message: z.string().min(1).max(executionErrorMessageMaxLength),
   retryable: z.boolean()
 });
 export type ExecutionJobError = z.infer<typeof executionJobErrorSchema>;
@@ -93,10 +103,10 @@ export const executionJobSchema = z
     kind: executionJobKindSchema,
     resourceId: executionJobIdSchema,
     status: executionJobStatusSchema,
-    leaseOwner: z.string().min(1).max(160).nullable(),
+    leaseOwner: z.string().min(1).max(executionLeaseOwnerMaxLength).nullable(),
     leaseExpiresAt: z.string().datetime().nullable(),
     attemptCount: z.number().int().nonnegative(),
-    maxAttempts: z.number().int().positive().max(20),
+    maxAttempts: z.number().int().positive().max(executionJobMaxAttempts),
     availableAt: z.string().datetime(),
     payload: jsonValueSchema,
     error: executionJobErrorSchema.nullable(),
@@ -144,20 +154,24 @@ export const enqueueExecutionJobSchema = z.object({
   id: executionJobIdSchema,
   kind: executionJobKindSchema,
   resourceId: executionJobIdSchema,
-  maxAttempts: z.number().int().positive().max(20).default(3),
+  maxAttempts: z.number().int().positive().max(executionJobMaxAttempts).default(3),
   availableAt: z.string().datetime().optional(),
   payload: jsonValueSchema
 });
 export type EnqueueExecutionJob = z.infer<typeof enqueueExecutionJobSchema>;
 
 export const executionJobLeaseRequestSchema = z.object({
-  leaseOwner: z.string().min(1).max(160),
-  leaseDurationMs: z.number().int().min(1_000).max(3_600_000)
+  leaseOwner: z.string().min(1).max(executionLeaseOwnerMaxLength),
+  leaseDurationMs: z
+    .number()
+    .int()
+    .min(executionLeaseDurationMinMs)
+    .max(executionLeaseDurationMaxMs)
 });
 export type ExecutionJobLeaseRequest = z.infer<typeof executionJobLeaseRequestSchema>;
 
 export const executionJobOwnerRequestSchema = z.object({
-  leaseOwner: z.string().min(1).max(160)
+  leaseOwner: z.string().min(1).max(executionLeaseOwnerMaxLength)
 });
 export type ExecutionJobOwnerRequest = z.infer<typeof executionJobOwnerRequestSchema>;
 
@@ -167,7 +181,7 @@ export const executionJobFailRequestSchema = executionJobOwnerRequestSchema.exte
     .number()
     .int()
     .min(0)
-    .max(86_400_000)
+    .max(executionRetryDelayMaxMs)
     .optional()
     .describe(
       `Delay before a retry becomes claimable; defaults to ${defaultExecutionRetryDelayMs}ms when omitted.`

@@ -4,6 +4,7 @@ const maxRedactionDepth = 32;
 const staleEntityHeaderNames = new Set([
   'content-encoding',
   'content-length',
+  'content-md5',
   'content-range',
   'etag'
 ]);

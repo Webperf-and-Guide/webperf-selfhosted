@@ -20,14 +20,21 @@ import type {
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
+  browserAuditIdentifierMaxLength,
   browserAuditResourceSchema,
   checkProfileSchema,
   checkProfileRunSchema,
   comparisonResourceSchema,
   defaultExecutionRetryDelayMs,
   enqueueExecutionJobSchema,
+  executionAvailabilityMaxDelayDays,
+  executionAvailabilityMaxDelayMs,
   executionJobErrorSchema,
   executionJobSchema,
+  executionLeaseDurationMaxMs,
+  executionLeaseDurationMinMs,
+  executionLeaseOwnerMaxLength,
+  executionRetryDelayMaxMs,
   exportResourceSchema,
   latencyJobDetailSchema,
   propertySchema,
@@ -597,6 +604,7 @@ export const createSqliteJobRepository = ({
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(row.id)
       || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(row.audit_id)
       || row.registry_version !== 'v1'
+      || row.kind.length > browserAuditIdentifierMaxLength
       || !/^[a-z0-9][a-z0-9._-]*$/.test(row.kind)
       || row.filename.length < 1
       || row.filename.length > 255
@@ -749,9 +757,14 @@ export const createSqliteJobRepository = ({
   const enqueueExecution = (input: EnqueueExecutionJob, now: Date) => {
     const parsed = enqueueExecutionJobSchema.parse(input);
     const nowIso = now.toISOString();
-    const availableAt = parsed.availableAt
-      ? new Date(parsed.availableAt).toISOString()
-      : nowIso;
+    const availableAtDate = parsed.availableAt ? new Date(parsed.availableAt) : now;
+    if (availableAtDate.getTime() - now.getTime() > executionAvailabilityMaxDelayMs) {
+      throw new Error(
+        'Execution availability must not be more than '
+        + `${executionAvailabilityMaxDelayDays} days in the future`
+      );
+    }
+    const availableAt = availableAtDate.toISOString();
     const row = enqueueExecutionJobStatement.get(
       parsed.id,
       parsed.kind,
@@ -1164,8 +1177,14 @@ export const createSqliteJobRepository = ({
       const error = executionJobErrorSchema.parse(input.error);
       const retryDelayMs = input.retryDelayMs ?? defaultExecutionRetryDelayMs;
 
-      if (!Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 86_400_000) {
-        throw new Error('Execution retry delay must be an integer between 0 and 86400000ms');
+      if (
+        !Number.isSafeInteger(retryDelayMs)
+        || retryDelayMs < 0
+        || retryDelayMs > executionRetryDelayMaxMs
+      ) {
+        throw new Error(
+          `Execution retry delay must be an integer between 0 and ${executionRetryDelayMaxMs}ms`
+        );
       }
 
       const fail = db.transaction(() => {
@@ -1265,8 +1284,10 @@ const assertNever = (value: never): never => {
 };
 
 const assertLeaseOwner = (leaseOwner: string) => {
-  if (leaseOwner.length < 1 || leaseOwner.length > 160) {
-    throw new Error('Execution lease owner must contain between 1 and 160 characters');
+  if (leaseOwner.length < 1 || leaseOwner.length > executionLeaseOwnerMaxLength) {
+    throw new Error(
+      `Execution lease owner must contain between 1 and ${executionLeaseOwnerMaxLength} characters`
+    );
   }
 };
 
@@ -1275,10 +1296,13 @@ const getLeaseExpiresAt = (input: ExecutionJobLeaseInput, now: Date) => {
 
   if (
     !Number.isSafeInteger(input.leaseDurationMs)
-    || input.leaseDurationMs < 1_000
-    || input.leaseDurationMs > 3_600_000
+    || input.leaseDurationMs < executionLeaseDurationMinMs
+    || input.leaseDurationMs > executionLeaseDurationMaxMs
   ) {
-    throw new Error('Execution lease duration must be an integer between 1000 and 3600000ms');
+    throw new Error(
+      'Execution lease duration must be an integer between '
+      + `${executionLeaseDurationMinMs} and ${executionLeaseDurationMaxMs}ms`
+    );
   }
 
   return new Date(now.getTime() + input.leaseDurationMs).toISOString();

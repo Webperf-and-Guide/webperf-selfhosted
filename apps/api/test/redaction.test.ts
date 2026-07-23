@@ -111,6 +111,7 @@ describe('API secret redaction', () => {
       headers: {
         'content-type': 'application/json',
         'content-length': '100',
+        'content-md5': 'stale-digest',
         'access-control-allow-origin': 'https://console.example.test',
         'x-webperf-metadata': 'preserved',
         'x-api-key': 'private-response-key'
@@ -118,6 +119,7 @@ describe('API secret redaction', () => {
     });
     const redacted = await redactJsonResponse(response);
     expect(redacted.headers.get('content-length')).toBeNull();
+    expect(redacted.headers.get('content-md5')).toBeNull();
     expect(redacted.headers.get('access-control-allow-origin'))
       .toBe('https://console.example.test');
     expect(redacted.headers.get('x-webperf-metadata')).toBe('preserved');

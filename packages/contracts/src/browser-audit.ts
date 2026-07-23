@@ -5,6 +5,7 @@ export const browserAuditDslVersion = 'v1' as const;
 export const browserAuditProtocolVersion = 'v1' as const;
 export const browserAuditArtifactRegistryVersion = 'v1' as const;
 export const browserAuditArtifactLimit = 50;
+export const browserAuditIdentifierMaxLength = 120;
 export const browserAuditScoreKeyLimit = 50;
 export const defaultBrowserAuditArtifactContentTypes = [
   'application/gzip',
@@ -22,7 +23,7 @@ const browserAuditIdentifierSchema = z
   .string()
   .trim()
   .min(1)
-  .max(120)
+  .max(browserAuditIdentifierMaxLength)
   .regex(/^[a-z0-9][a-z0-9._-]*$/);
 const browserAuditScoreKeyIdentifierPattern = /^[a-z][a-zA-Z0-9]*$/;
 const browserAuditLegacyUrlSchema = z.string().url();

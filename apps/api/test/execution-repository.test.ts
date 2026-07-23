@@ -5,7 +5,10 @@ import type {
   CheckProfileRun,
   LatencyJobDetail
 } from '@webperf/contracts';
-import { browserAuditResourceSchema } from '@webperf/contracts';
+import {
+  browserAuditResourceSchema,
+  executionAvailabilityMaxDelayMs
+} from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -471,6 +474,37 @@ describe('durable execution repository', () => {
         payload: { auditId: 'audit_2' }
       })
     ).toThrow('Execution job id already belongs to a different resource');
+
+    repository.close();
+  });
+
+  test('bounds how far execution availability may be scheduled into the future', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    const now = new Date('2026-07-22T00:00:00.000Z');
+    const maximumAvailableAt = new Date(
+      now.getTime() + executionAvailabilityMaxDelayMs
+    ).toISOString();
+
+    expect(repository.enqueueExecutionJob({
+      id: 'exec_available_boundary',
+      kind: 'network_probe',
+      resourceId: 'job_available_boundary',
+      maxAttempts: 2,
+      availableAt: maximumAvailableAt,
+      payload: { jobId: 'job_available_boundary' }
+    }, now).availableAt).toBe(maximumAvailableAt);
+
+    expect(() => repository.enqueueExecutionJob({
+      id: 'exec_available_too_far',
+      kind: 'network_probe',
+      resourceId: 'job_available_too_far',
+      maxAttempts: 2,
+      availableAt: new Date(
+        now.getTime() + executionAvailabilityMaxDelayMs + 1
+      ).toISOString(),
+      payload: { jobId: 'job_available_too_far' }
+    }, now)).toThrow('more than 7 days');
 
     repository.close();
   });

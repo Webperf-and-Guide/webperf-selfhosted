@@ -138,6 +138,7 @@ Current repo state as of 2026-07-22:
 - local artifact reconciliation now preserves non-owned root entries, rejects dot-only display filenames, and revalidates intermediate audit directories before downloads or deletes
 - executor lease renewal now retries only transient API failures inside a conservative local lease deadline, while fatal process events enter the same bounded graceful-shutdown path with structured diagnostics
 - webhook delivery now requires HTTPS by default, with a separate explicit legacy-HTTP opt-in that does not relax public-address pinning or redirect blocking
+- artifact publication now rejects duplicate filesystem identities without replacing bytes, persisted artifact kinds and execution availability are bounded by shared contracts, stale response digests are removed after redaction, and configured webhook signing secrets require at least 16 characters
 - Compose validation now enforces dropped Linux capabilities for every production service, including the Chromium runner, and release metadata failures identify each invalid field
 - Browser Audit compatibility parsing now requires at least one actual legacy toolchain version before inferring Lighthouse, and artifact locator storage segments retain an explicit 160-character contract bound
 - executor outbound policy classification now shares one hostname normalizer with the DNS-pinned transport so bracket, case, and trailing-dot handling cannot drift between trust decisions

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  browserAuditIdentifierMaxLength,
   browserAuditArtifactKindSchema,
   browserAuditArtifactContentTypesForKind,
   browserAuditArtifactLocatorSchema,
@@ -75,6 +76,12 @@ describe('engine-neutral Browser Audit Protocol', () => {
       'application/json'
     );
     expect(() => browserAuditArtifactKindSchema.parse('../report')).toThrow();
+    expect(browserAuditArtifactKindSchema.safeParse(
+      `a${'b'.repeat(browserAuditIdentifierMaxLength - 1)}`
+    ).success).toBe(true);
+    expect(browserAuditArtifactKindSchema.safeParse(
+      `a${'b'.repeat(browserAuditIdentifierMaxLength)}`
+    ).success).toBe(false);
     expect(() => browserAuditScoresSchema.parse({ 'not-valid': 0.5 })).toThrow(
       'lowercase-start'
     );

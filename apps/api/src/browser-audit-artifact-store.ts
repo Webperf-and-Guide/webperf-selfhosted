@@ -38,7 +38,7 @@ export interface BrowserAuditArtifactStore {
     maxBytes: number;
   }): Promise<StoredArtifactFile>;
   openDownload(storageKey: string, expectedBytes: number): Promise<{
-    body: BodyInit;
+    body: ReadableStream<Uint8Array>;
     byteSize: number;
   }>;
   delete(storageKey: string): Promise<void>;
@@ -53,7 +53,7 @@ export class ArtifactStoreValidationError extends Error {
 
   constructor(
     message: string,
-    readonly status: 400 | 413 = 400
+    readonly status: 400 | 409 | 413 = 400
   ) {
     super(message);
   }
@@ -186,7 +186,14 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
       await handle.chmod(0o600);
       await handle.close();
       closed = true;
-      await link(temporaryPath, destinationPath);
+      try {
+        await link(temporaryPath, destinationPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new ArtifactStoreValidationError('Artifact already exists', 409);
+        }
+        throw error;
+      }
       published = true;
       await rm(temporaryPath, { force: true });
 
@@ -279,10 +286,10 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     }
     const orphanCutoffMs = nowMs - minimumOrphanAgeMs;
     await this.ensureRoot();
-    const valid = new Set([...validStorageKeys].map((key) => {
+    for (const key of validStorageKeys) {
       this.pathForStorageKey(key);
-      return key;
-    }));
+    }
+    const valid = new Set(validStorageKeys);
     let removedFiles = 0;
     let removedDirectories = 0;
 

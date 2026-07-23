@@ -12,7 +12,11 @@ import {
   networkProbeExecutionContextSchema,
   networkProbeExecutionPayloadSchema
 } from '../src/execution-resources';
-import { executionProviderSchema } from '../src/public-api';
+import {
+  createWebhookAlertTargetSchema,
+  executionProviderSchema,
+  webhookAlertTargetSchema
+} from '../src/public-api';
 
 const nestedPayload = (depth: number): JsonValue => {
   let value: JsonValue = 'leaf';
@@ -158,6 +162,45 @@ describe('execution job contracts', () => {
     expect(defaultExecutionRetryDelayMs).toBe(1_000);
     expect(executionJobFailRequestSchema.shape.retryDelayMs.description)
       .toContain('defaults to 1000ms');
+  });
+
+  test('requires configured webhook signing secrets to meet the minimum length', () => {
+    const persistedTarget = {
+      id: 'webhook_contract',
+      name: 'Release hook',
+      url: 'https://hooks.example.com/webperf',
+      enabled: true
+    };
+    const createTarget = {
+      name: persistedTarget.name,
+      url: persistedTarget.url
+    };
+
+    expect(webhookAlertTargetSchema.safeParse({
+      ...persistedTarget,
+      secret: null
+    }).success).toBe(true);
+    expect(webhookAlertTargetSchema.safeParse({
+      ...persistedTarget,
+      secret: 'legacy'
+    }).success).toBe(true);
+    expect(webhookAlertTargetSchema.parse({
+      ...persistedTarget,
+      secret: ''
+    }).secret).toBeNull();
+    expect(createWebhookAlertTargetSchema.safeParse(createTarget).success).toBe(true);
+    expect(createWebhookAlertTargetSchema.safeParse({
+      ...createTarget,
+      secret: 'x'.repeat(16)
+    }).success).toBe(true);
+    expect(createWebhookAlertTargetSchema.safeParse({
+      ...createTarget,
+      secret: 'short'
+    }).success).toBe(false);
+    expect(createWebhookAlertTargetSchema.safeParse({
+      ...createTarget,
+      secret: ''
+    }).success).toBe(false);
   });
 
   test('enforces retry and lease state invariants', () => {

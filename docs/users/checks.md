@@ -54,6 +54,7 @@ the executor's explicit `SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP=true`
 opt-in, which does not permit private addresses. Each delivery includes an `Idempotency-Key`; when
 a target secret is configured, `X-WebPerf-Signature` contains
 `t=<unix-seconds>,v1=<HMAC-SHA256>` over `<unix-seconds>.<exact JSON body>`.
+Newly configured signing secrets must contain between 16 and 200 characters.
 The same timestamp is sent as `X-WebPerf-Timestamp`; receivers should require a
 small freshness window before accepting the signature.
 

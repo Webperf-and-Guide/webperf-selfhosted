@@ -102,12 +102,20 @@ export const alertTriggerSchema = z.object({
 });
 export type AlertTrigger = z.infer<typeof alertTriggerSchema>;
 
+const configuredWebhookSecretSchema = z.string().min(16).max(200);
+const persistedWebhookSecretSchema = z.preprocess(
+  (value) => value === '' ? null : value,
+  z.string().min(1).max(200).nullable()
+);
+
 export const webhookAlertTargetSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
   url: z.string().url(),
   enabled: z.boolean().default(true),
-  secret: z.string().max(200).nullable().default(null)
+  // Keep non-empty legacy secrets readable; every new write uses the stricter
+  // create schema below, while an old empty value means "not configured".
+  secret: persistedWebhookSecretSchema.default(null)
 });
 export type WebhookAlertTarget = z.infer<typeof webhookAlertTargetSchema>;
 
@@ -115,7 +123,7 @@ export const createWebhookAlertTargetSchema = z.object({
   name: z.string().min(1).max(120),
   url: z.string().url(),
   enabled: z.boolean().optional(),
-  secret: z.string().max(200).optional()
+  secret: configuredWebhookSecretSchema.optional()
 });
 export type CreateWebhookAlertTargetInput = z.infer<typeof createWebhookAlertTargetSchema>;
 

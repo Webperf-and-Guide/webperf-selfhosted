@@ -72,7 +72,7 @@ export const createWebhookExecutionHandler = ({
         'content-type': 'application/json',
         'idempotency-key': executionJob.id,
         'x-webperf-timestamp': String(signatureTimestamp),
-        ...(target.secret
+        ...(target.secret !== null
           ? {
               'x-webperf-signature': createWebhookSignature(
                 target.secret,

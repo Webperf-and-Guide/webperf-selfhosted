@@ -162,15 +162,20 @@ function parseImageMatrix(
     return [];
   }
 
-  let document: WorkflowDocument;
+  let document: unknown;
   try {
-    document = Bun.YAML.parse(content) as WorkflowDocument;
+    document = Bun.YAML.parse(content);
   } catch {
     violations.push(`${file}: workflow YAML is invalid`);
     return [];
   }
 
-  const include = document.jobs?.[jobId]?.strategy?.matrix?.include;
+  if (document === null || typeof document !== 'object' || Array.isArray(document)) {
+    violations.push(`${file}: workflow YAML is not a valid mapping`);
+    return [];
+  }
+
+  const include = (document as WorkflowDocument).jobs?.[jobId]?.strategy?.matrix?.include;
   if (!Array.isArray(include)) {
     violations.push(`${file}: ${jobId} image matrix include list is missing`);
     return [];

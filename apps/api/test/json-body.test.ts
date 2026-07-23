@@ -67,4 +67,32 @@ describe('bounded JSON request bodies', () => {
       10
     )).rejects.toBeInstanceOf(JsonBodyEmptyError);
   });
+
+  test('cancels and unlocks a request stream when reading fails', async () => {
+    const readError = new Error('simulated transport failure');
+    let cancelled = 0;
+    let released = 0;
+    const request = {
+      headers: new Headers(),
+      body: {
+        getReader() {
+          return {
+            async read() {
+              throw readError;
+            },
+            async cancel() {
+              cancelled += 1;
+            },
+            releaseLock() {
+              released += 1;
+            }
+          };
+        }
+      }
+    } as unknown as Request;
+
+    await expect(readBoundedJson(request, 10)).rejects.toBe(readError);
+    expect(cancelled).toBe(1);
+    expect(released).toBe(1);
+  });
 });

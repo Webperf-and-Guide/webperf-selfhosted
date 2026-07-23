@@ -133,9 +133,9 @@ const parseEnvelope = (value: string) => {
     throw new InvalidEncryptedPayloadEnvelopeError();
   }
 
-  const iv = Buffer.from(parts[3] ?? '', 'base64url');
-  const tag = Buffer.from(parts[4] ?? '', 'base64url');
-  const ciphertext = Buffer.from(parts[5] ?? '', 'base64url');
+  const iv = Buffer.from(parts[3]!, 'base64url');
+  const tag = Buffer.from(parts[4]!, 'base64url');
+  const ciphertext = Buffer.from(parts[5]!, 'base64url');
 
   if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0) {
     throw new InvalidEncryptedPayloadEnvelopeError();

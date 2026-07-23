@@ -56,7 +56,6 @@ export const readBoundedJson = async (
 
       byteSize += value.byteLength;
       if (byteSize > maxBytes) {
-        await cancelReader(reader);
         throw new JsonBodyTooLargeError(maxBytes);
       }
 
@@ -71,6 +70,9 @@ export const readBoundedJson = async (
       }
       bytes.set(value, byteSize - value.byteLength);
     }
+  } catch (error) {
+    await cancelReader(reader);
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -88,6 +90,6 @@ const cancelReader = async (reader: ReadableStreamDefaultReader<Uint8Array>) => 
   try {
     await reader.cancel();
   } catch {
-    // The connection may already be closed; the size error remains authoritative.
+    // The connection may already be closed; the original read error remains authoritative.
   }
 };

@@ -196,6 +196,9 @@ pub async fn measure_url(
             final_url: Some(display_url(&current)),
             redirect_count,
             timings: base_timings(started_at.elapsed(), last_dns_ms, last_ttfb_ms),
+            // reqwest does not expose the complete negotiated TLS tuple used by
+            // the public contract. Keep this nullable instead of synthesizing
+            // server_name from the URL; final_url already preserves authority.
             tls: None,
             error: None,
         };

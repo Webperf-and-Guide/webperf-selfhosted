@@ -103,7 +103,7 @@ const main = async () => {
     }));
   }
 
-  const stopProcessHeartbeat = startProcessHeartbeat({
+  const stopProcessHeartbeat = await startProcessHeartbeat({
     heartbeatPath:
       process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath,
     onWriteFailure: () => console.error(JSON.stringify({

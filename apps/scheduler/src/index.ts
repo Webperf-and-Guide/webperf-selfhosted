@@ -51,7 +51,7 @@ const main = async () => {
     apiBaseUrl: runtime.SELFHOST_SCHEDULER_API_BASE_URL,
     pollIntervalSeconds: runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   });
-  const stopProcessHeartbeat = startProcessHeartbeat({
+  const stopProcessHeartbeat = await startProcessHeartbeat({
     heartbeatPath:
       process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath,
     onWriteFailure: () => logger.error({ event: 'process_heartbeat_write_failed' })

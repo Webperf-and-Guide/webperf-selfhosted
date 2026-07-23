@@ -9,9 +9,10 @@ describe('self-host process heartbeat', () => {
     const directory = mkdtempSync(join(tmpdir(), 'webperf-heartbeat-'));
     const heartbeatPath = join(directory, 'worker');
     let writeFailures = 0;
-    const stop = startProcessHeartbeat({
+    const stop = await startProcessHeartbeat({
       heartbeatPath,
       intervalMs: 5,
+      failureReportIntervalMs: 10,
       onWriteFailure: () => {
         writeFailures += 1;
       }
@@ -21,19 +22,19 @@ describe('self-host process heartbeat', () => {
       expect(Number.parseInt(readFileSync(heartbeatPath, 'utf8'), 10)).toBeGreaterThan(0);
       rmSync(directory, { recursive: true, force: true });
       await Bun.sleep(25);
-      expect(writeFailures).toBe(1);
+      expect(writeFailures).toBeGreaterThanOrEqual(1);
     } finally {
       stop();
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  test('fails fast when the first heartbeat cannot be written', () => {
+  test('fails fast when the first heartbeat cannot be written', async () => {
     const removedDirectory = mkdtempSync(join(tmpdir(), 'webperf-heartbeat-missing-'));
     rmSync(removedDirectory, { recursive: true, force: true });
 
-    expect(() => startProcessHeartbeat({
+    await expect(startProcessHeartbeat({
       heartbeatPath: join(removedDirectory, 'worker')
-    })).toThrow();
+    })).rejects.toThrow();
   });
 });

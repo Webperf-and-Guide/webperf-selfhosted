@@ -12,6 +12,7 @@ const browserAuditInitialPollingIntervalMs = 1_000;
 const browserAuditMaximumPollingIntervalMs = 5_000;
 const browserAuditPollingBackoffMultiplier = 1.5;
 const browserAuditMaximumNotFoundResponses = 5;
+const maximumBrowserAuditApiErrorLength = 500;
 
 const createAbortError = () => {
   if (typeof DOMException !== 'undefined') {
@@ -32,6 +33,54 @@ const isAbortError = (error: unknown) =>
 class BrowserAuditPollingError extends Error {
   override name = 'BrowserAuditPollingError';
 }
+
+class BrowserAuditProtocolError extends Error {
+  override name = 'BrowserAuditProtocolError';
+}
+
+export const parseBrowserAuditResourcePayload = (value: unknown) => {
+  const parsed = browserAuditResourceSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new BrowserAuditProtocolError('Browser Audit API returned an invalid response.');
+  }
+  return parsed.data;
+};
+
+export const readBrowserAuditApiError = (value: unknown, fallback: string) => {
+  if (!value || typeof value !== 'object' || !('error' in value)) {
+    return fallback;
+  }
+  const error = value.error;
+  if (typeof error !== 'string') {
+    return fallback;
+  }
+  const normalized = error.trim();
+  return normalized.length > 0 && normalized.length <= maximumBrowserAuditApiErrorLength
+    ? normalized
+    : fallback;
+};
+
+export const isRetryableBrowserAuditStatus = (status: number) =>
+  status >= 500 && status <= 599;
+
+export const readBrowserAuditResponsePayload = async (response: Response): Promise<unknown> => {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+};
+
+const discardResponseBody = async (response: Response) => {
+  if (!response.body) {
+    return;
+  }
+  try {
+    await response.body.cancel();
+  } catch {
+    // A locked or already-consumed body has no remaining connection resource to release here.
+  }
+};
 
 const waitForPollingInterval = (signal: AbortSignal, timeoutMs: number) =>
   new Promise<void>((resolve, reject) => {
@@ -192,12 +241,16 @@ export class ReportsController {
         }),
         signal: submissionController.signal
       });
-      const payload = (await response.json()) as BrowserAuditResource & { error?: string };
+      const rawPayload = await readBrowserAuditResponsePayload(response);
 
       if (!response.ok) {
-        this.state.browserAuditSubmitError = payload.error ?? 'Failed to start a browser audit.';
+        this.state.browserAuditSubmitError = readBrowserAuditApiError(
+          rawPayload,
+          'Failed to start a browser audit.'
+        );
         return;
       }
+      const payload = parseBrowserAuditResourcePayload(rawPayload);
 
       this.state.selectedBrowserAuditId = payload.id;
       this.state.browserAuditStatusMessage = 'Browser Audit queued. Waiting for the executor result.';
@@ -272,6 +325,7 @@ export class ReportsController {
         }
       );
       if (response.status === 404) {
+        await discardResponseBody(response);
         consecutiveNotFound += 1;
         previousStatus = null;
         if (consecutiveNotFound >= browserAuditMaximumNotFoundResponses) {
@@ -283,10 +337,18 @@ export class ReportsController {
         continue;
       }
       consecutiveNotFound = 0;
+      if (isRetryableBrowserAuditStatus(response.status)) {
+        await discardResponseBody(response);
+        pollingIntervalMs = nextPollingInterval(pollingIntervalMs);
+        continue;
+      }
       if (!response.ok) {
+        await discardResponseBody(response);
         throw new Error(`Browser Audit status request failed with HTTP ${response.status}`);
       }
-      const audit = browserAuditResourceSchema.parse(await response.json());
+      const audit = parseBrowserAuditResourcePayload(
+        await readBrowserAuditResponsePayload(response)
+      );
 
       if (audit && isBrowserAuditTerminalExecutionStatus(audit.status)) {
         return audit;

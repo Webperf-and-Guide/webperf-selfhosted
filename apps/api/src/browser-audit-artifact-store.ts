@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
+import { constants as osConstants } from 'node:os';
 import { dlopen, FFIType, ptr, read, type Pointer } from 'bun:ffi';
 import {
   link,
@@ -13,7 +14,6 @@ import {
 import { parse, resolve, sep } from 'node:path';
 
 const safeStorageSegment = /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/;
-const posixErrnoNoEntry = 2;
 
 export type StoredArtifactFile = {
   storageKey: string;
@@ -574,26 +574,20 @@ const loadNativeUnlinkBinding = (): NativeUnlinkBinding => {
   } as const;
 
   if (process.platform === 'darwin') {
-    const library = dlopen('/usr/lib/libSystem.B.dylib', {
+    return createNativeUnlinkBinding(
+      '/usr/lib/libSystem.B.dylib',
+      '__error',
       unlinkat,
-      __error: errnoAccessor
-    });
-    return {
-      unlinkat: (directoryFd, path, flags) =>
-        library.symbols.unlinkat(directoryFd, path, flags),
-      errno: () => library.symbols.__error()
-    };
+      errnoAccessor
+    );
   }
   if (process.platform === 'linux') {
-    const library = dlopen('libc.so.6', {
+    return createNativeUnlinkBinding(
+      'libc.so.6',
+      '__errno_location',
       unlinkat,
-      __errno_location: errnoAccessor
-    });
-    return {
-      unlinkat: (directoryFd, path, flags) =>
-        library.symbols.unlinkat(directoryFd, path, flags),
-      errno: () => library.symbols.__errno_location()
-    };
+      errnoAccessor
+    );
   }
 
   throw new Error(
@@ -601,8 +595,39 @@ const loadNativeUnlinkBinding = (): NativeUnlinkBinding => {
   );
 };
 
+const createNativeUnlinkBinding = <ErrnoSymbol extends string>(
+  libraryPath: string,
+  errnoSymbol: ErrnoSymbol,
+  unlinkatDefinition: {
+    readonly args: readonly [FFIType.i32, FFIType.ptr, FFIType.i32];
+    readonly returns: FFIType.i32;
+  },
+  errnoDefinition: {
+    readonly args: readonly [];
+    readonly returns: FFIType.ptr;
+  }
+): NativeUnlinkBinding => {
+  const definitions = {
+    unlinkat: unlinkatDefinition,
+    [errnoSymbol]: errnoDefinition
+  } as {
+    unlinkat: typeof unlinkatDefinition;
+  } & Record<ErrnoSymbol, typeof errnoDefinition>;
+  const library = dlopen(libraryPath, definitions);
+  const symbols = library.symbols as unknown as {
+    unlinkat: (directoryFd: number, path: Pointer, flags: number) => number;
+  } & Record<ErrnoSymbol, () => Pointer | null>;
+  const errno = symbols[errnoSymbol];
+
+  return {
+    unlinkat: (directoryFd, path, flags) =>
+      symbols.unlinkat(directoryFd, path, flags),
+    errno: () => errno()
+  };
+};
+
 const handleUnlinkError = (errno: number, entryName: string) => {
-  if (errno === posixErrnoNoEntry) {
+  if (errno === osConstants.errno.ENOENT) {
     return;
   }
 

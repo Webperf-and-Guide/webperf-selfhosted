@@ -39,6 +39,7 @@ const productionFile = resolve(repositoryRoot, 'infra/docker-compose/compose.yml
 const developmentFile = resolve(repositoryRoot, 'infra/docker-compose/compose.dev.yml');
 const browserSeccompFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json');
 const composeRenderTimeoutMs = 30_000;
+const maximumTmpfsBytes = 2 * 1024 ** 3;
 const defaultServiceNames = ['api', 'console', 'executor', 'probe', 'scheduler'];
 const expectedImages: Record<string, string> = {
   api: 'webperf-api',
@@ -232,7 +233,7 @@ function renderCompose(files: string[], profiles: string[] = []): ComposeModel {
     const stderr = result.stderr.toString().trim();
     if (result.exitCode === null) {
       throw new Error(
-        `docker compose config timed out after ${composeRenderTimeoutMs / 1_000} seconds${stderr ? `: ${stderr}` : ''}`
+        `docker compose config did not complete (timeout after ${composeRenderTimeoutMs / 1_000} seconds or Docker unavailable)${stderr ? `: ${stderr}` : ''}`
       );
     }
     throw new Error(stderr || 'docker compose config failed');
@@ -275,10 +276,21 @@ function assertSecureTmpfs(
 ) {
   const entry = service?.tmpfs?.find((candidate) => candidate.split(':', 1)[0] === target);
   assert(entry, `${label} must use a tmpfs for ${target}`);
-  const options = new Set(entry.slice(target.length + 1).split(','));
+  const optionList = entry.slice(target.length + 1).split(',');
+  const options = new Set(optionList);
   for (const option of ['rw', 'nosuid', 'nodev', 'noexec']) {
     assert(options.has(option), `${label} ${target} tmpfs must include ${option}`);
   }
+  const sizeOptions = optionList.filter((option) => option.startsWith('size='));
+  assert(
+    sizeOptions.length === 1,
+    `${label} ${target} tmpfs must define exactly one size limit`
+  );
+  const sizeBytes = parseSizeToBytes(sizeOptions[0]!.slice('size='.length));
+  assert(
+    Number.isFinite(sizeBytes) && sizeBytes > 0 && sizeBytes <= maximumTmpfsBytes,
+    `${label} ${target} tmpfs size must be between 1 byte and 2 GiB`
+  );
 }
 
 function assertSecurityParity(

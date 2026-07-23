@@ -561,7 +561,7 @@ const uploadArtifact = async (
   if (
     uploaded.kind !== kind
     || uploaded.filename !== filename
-    || uploaded.contentType !== registeredContentType
+    || normalizeArtifactContentType(uploaded.contentType) !== registeredContentType
     || uploaded.byteSize !== payload.byteLength
     || !uploaded.sha256
   ) {

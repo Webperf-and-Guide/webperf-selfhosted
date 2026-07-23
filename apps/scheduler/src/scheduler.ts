@@ -287,12 +287,28 @@ export const describeSchedulerError = (error: unknown) => {
     };
   }
 
+  const systemCode = (error as { code?: unknown } | null)?.code;
+  const errorMessage = error instanceof Error
+    ? sanitizeSchedulerErrorMessage(error.message)
+    : null;
   return {
     errorType: error instanceof Error
       ? error.name.replaceAll(/[^A-Za-z0-9_.:-]/g, '').slice(0, 120) || 'Error'
-      : 'UnknownError'
+      : 'UnknownError',
+    ...(typeof systemCode === 'string' && /^[A-Z0-9_]{1,64}$/.test(systemCode)
+      ? { systemCode }
+      : {}),
+    ...(errorMessage ? { errorMessage } : {})
   };
 };
+
+const sanitizeSchedulerErrorMessage = (value: string) => value
+  .replaceAll(/\b(?:Bearer|Basic)\s+[^\s,;]+/gi, '[REDACTED]')
+  .replaceAll(/https?:\/\/[^\s,;]+/gi, '[URL]')
+  .replaceAll(/[A-Za-z0-9+/_=-]{16,}/g, '[REDACTED]')
+  .replaceAll(/[^\x20-\x7E]/g, '')
+  .trim()
+  .slice(0, 200);
 
 const waitForNextPoll = (durationMs: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
@@ -322,6 +338,9 @@ const raceWithAbort = async <Result>(operation: Promise<Result>, signal: AbortSi
     onAbort = () => reject(normalizeSchedulerAbortError(signal));
     signal.addEventListener('abort', onAbort, { once: true });
   });
+  // Keep an explicit rejection observer when abort wins the race and the body
+  // operation settles later after its stream has been interrupted.
+  void operation.catch(() => undefined);
 
   try {
     return await Promise.race([operation, aborted]);

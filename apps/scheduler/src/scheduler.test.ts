@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  describeSchedulerError,
   dispatchScheduledChecks,
   runScheduler,
   SchedulerDispatchError,
@@ -226,5 +227,24 @@ describe('self-host scheduler boundary', () => {
 
     expect(dispatchCount).toBe(4);
     expect(delays).toEqual([2_000, 3_000, 1_000]);
+  });
+
+  test('keeps bounded generic diagnostics without reflecting credentials', () => {
+    const error = Object.assign(
+      new TypeError(
+        'fetch https://operator:secret@example.test/path?token=value with Bearer scheduler-secret-must-not-leak failed'
+      ),
+      { code: 'ECONNRESET' }
+    );
+
+    const diagnostic = describeSchedulerError(error);
+
+    expect(diagnostic).toEqual({
+      errorType: 'TypeError',
+      systemCode: 'ECONNRESET',
+      errorMessage: 'fetch [URL] with [REDACTED] failed'
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('operator:secret');
+    expect(JSON.stringify(diagnostic)).not.toContain('scheduler-secret-must-not-leak');
   });
 });

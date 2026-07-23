@@ -1,3 +1,8 @@
+import {
+  resolveDebugProxyUpstream,
+  stripHopByHopHeaders
+} from './debug-proxy-policy';
+
 const target = readTarget();
 const port = readPort();
 
@@ -6,36 +11,25 @@ Bun.serve({
   port,
   async fetch(request) {
     const requestUrl = new URL(request.url);
-    const upstreamUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, target);
+    const upstreamUrl = resolveDebugProxyUpstream(target, requestUrl);
     const headers = new Headers(request.headers);
-    const connectionHeaders = (headers.get('connection') ?? '')
-      .split(',')
-      .map((name) => name.trim().toLowerCase())
-      .filter(Boolean);
-
-    for (const name of [
-      ...connectionHeaders,
-      'connection',
-      'host',
-      'keep-alive',
-      'proxy-authenticate',
-      'proxy-authorization',
-      'proxy-connection',
-      'te',
-      'trailer',
-      'transfer-encoding',
-      'upgrade'
-    ]) {
-      headers.delete(name);
-    }
+    stripHopByHopHeaders(headers);
+    headers.delete('host');
 
     try {
-      return await fetch(upstreamUrl, {
+      const upstreamResponse = await fetch(upstreamUrl, {
         method: request.method,
         headers,
         body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
         redirect: 'manual',
         signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)])
+      });
+      const responseHeaders = new Headers(upstreamResponse.headers);
+      stripHopByHopHeaders(responseHeaders);
+      return new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        headers: responseHeaders
       });
     } catch (error) {
       console.error(

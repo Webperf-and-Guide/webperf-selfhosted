@@ -11,6 +11,7 @@ import {
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getSqliteMigrationState, openSqliteDatabase } from './sqlite';
+import type { StorageCrypto } from '../storage-crypto';
 
 export type SqliteIntegrityReport = {
   ok: boolean;
@@ -57,6 +58,14 @@ const tableExists = (database: Database, table: string) => Boolean(
     )
     .get(table)
 );
+const encryptedPayloadMigrationId = '20260722_001_encrypted_payloads_v2';
+const persistedPayloadColumns = [
+  { table: 'jobs', column: 'payload_json' },
+  { table: 'saved_entities', column: 'payload_json' },
+  { table: 'check_profile_runs', column: 'payload_json' },
+  { table: 'execution_jobs', column: 'payload_json' },
+  { table: 'execution_jobs', column: 'error_json' }
+] as const;
 
 export const defaultSqliteBackupPath = (databasePath: string, now = new Date()) => {
   assertFileDatabase(databasePath);
@@ -312,12 +321,14 @@ export const maintainSqliteDatabase = ({
 export const restoreSqliteDatabase = ({
   databasePath,
   sourcePath,
+  storageCrypto,
   backupCurrent = true,
   allowPendingMigrations = false,
   now = new Date()
 }: {
   databasePath: string;
   sourcePath: string;
+  storageCrypto: StorageCrypto;
   backupCurrent?: boolean;
   allowPendingMigrations?: boolean;
   now?: Date;
@@ -361,6 +372,10 @@ export const restoreSqliteDatabase = ({
       throw new Error(
         `SQLite restore source is missing required migrations: ${sourceMigrations.pending.join(', ')}`
       );
+    }
+
+    if (sourceMigrations.applied.some((migration) => migration.id === encryptedPayloadMigrationId)) {
+      verifySqliteStorageCrypto(source, storageCrypto);
     }
 
     const currentBackupPath = backupCurrent && existsSync(databasePath)
@@ -410,4 +425,63 @@ export const restoreSqliteDatabase = ({
   } finally {
     closeSource();
   }
+};
+
+export const verifySqliteStorageCrypto = (
+  database: Database,
+  storageCrypto: StorageCrypto
+) => {
+  let checkedPayloads = 0;
+
+  for (const { table, column } of persistedPayloadColumns) {
+    if (!tableExists(database, table)) {
+      continue;
+    }
+
+    let lastRowId: string | null = null;
+    const readFirstBatch = database.query<
+      { row_id: string; encrypted_value: string },
+      []
+    >(`
+      SELECT CAST(rowid AS TEXT) AS row_id, ${column} AS encrypted_value
+      FROM ${table}
+      WHERE ${column} IS NOT NULL
+      ORDER BY rowid
+      LIMIT 100
+    `);
+    const readNextBatch = database.query<
+      { row_id: string; encrypted_value: string },
+      [string]
+    >(`
+      SELECT CAST(rowid AS TEXT) AS row_id, ${column} AS encrypted_value
+      FROM ${table}
+      WHERE rowid > CAST(? AS INTEGER) AND ${column} IS NOT NULL
+      ORDER BY rowid
+      LIMIT 100
+    `);
+
+    while (true) {
+      const rows: Array<{ row_id: string; encrypted_value: string }> = lastRowId === null
+        ? readFirstBatch.all()
+        : readNextBatch.all(lastRowId);
+      if (rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        try {
+          storageCrypto.parse(row.encrypted_value);
+        } catch (cause) {
+          throw new Error(
+            `SQLite restore source contains a payload incompatible with the configured internal secret (${table}.${column}, rowid ${row.row_id})`,
+            { cause }
+          );
+        }
+        checkedPayloads += 1;
+        lastRowId = row.row_id;
+      }
+    }
+  }
+
+  return checkedPayloads;
 };

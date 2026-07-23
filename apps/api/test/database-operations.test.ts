@@ -21,6 +21,7 @@ import { createSqliteJobRepository } from '../src/repository';
 
 const tempDirectories: string[] = [];
 const encryptionSecret = 'database-operations-test-secret';
+const storageCrypto = () => createStorageCrypto({ currentSecret: encryptionSecret });
 
 const createTempPaths = () => {
   const directory = mkdtempSync(join(tmpdir(), 'webperf-database-'));
@@ -35,7 +36,7 @@ const createTempPaths = () => {
 const migrateDatabase = (databasePath: string) => {
   const database = openSqliteDatabase(databasePath);
   const result = applySqliteMigrations(database, {
-    storageCrypto: createStorageCrypto({ currentSecret: encryptionSecret })
+    storageCrypto: storageCrypto()
   });
   return { database, result };
 };
@@ -124,7 +125,7 @@ describe('SQLite operations', () => {
       'queued',
       '2026-07-22T00:00:00.000Z',
       '2026-07-22T00:00:00.000Z',
-      'encrypted-placeholder'
+      storageCrypto().stringify({ id: 'job_restore' })
     );
 
     backupSqliteDatabase({ databasePath, destinationPath: backupPath });
@@ -134,6 +135,7 @@ describe('SQLite operations', () => {
     const restored = restoreSqliteDatabase({
       databasePath,
       sourcePath: backupPath,
+      storageCrypto: storageCrypto(),
       now: new Date('2026-07-22T12:00:00.000Z')
     });
     expect(restored.currentBackupPath).not.toBeNull();
@@ -162,12 +164,14 @@ describe('SQLite operations', () => {
     expect(() => restoreSqliteDatabase({
       databasePath,
       sourcePath: legacyPath,
+      storageCrypto: storageCrypto(),
       backupCurrent: false
     })).toThrow('missing required migrations');
 
     const result = restoreSqliteDatabase({
       databasePath,
       sourcePath: legacyPath,
+      storageCrypto: storageCrypto(),
       backupCurrent: false,
       allowPendingMigrations: true
     });
@@ -181,6 +185,41 @@ describe('SQLite operations', () => {
       )
       .get()?.name).toBe('legacy_data');
     restored.close();
+  });
+
+  test('rejects an incompatible restore secret before replacing the destination', () => {
+    const { directory } = createTempPaths();
+    const sourcePath = join(directory, 'encrypted-source.sqlite');
+    const destinationPath = join(directory, 'destination.sqlite');
+    const { database } = migrateDatabase(sourcePath);
+    database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      'job_encrypted_restore',
+      'https://example.com/',
+      'succeeded',
+      '2026-07-22T00:00:00.000Z',
+      '2026-07-22T00:00:00.000Z',
+      storageCrypto().stringify({ id: 'job_encrypted_restore' })
+    );
+    database.close();
+    const destination = new Database(destinationPath, { create: true });
+    destination.exec('CREATE TABLE destination_marker (value TEXT NOT NULL);');
+    destination.query('INSERT INTO destination_marker (value) VALUES (?)').run('preserved');
+    destination.close();
+
+    expect(() => restoreSqliteDatabase({
+      databasePath: destinationPath,
+      sourcePath,
+      storageCrypto: createStorageCrypto({ currentSecret: 'different-restore-secret' }),
+      backupCurrent: false
+    })).toThrow('incompatible with the configured internal secret');
+
+    const unchanged = new Database(destinationPath, { readonly: true });
+    expect(unchanged.query<{ value: string }, []>('SELECT value FROM destination_marker').get())
+      .toEqual({ value: 'preserved' });
+    unchanged.close();
   });
 
   test('cleans only expired retained data and can run full maintenance', () => {

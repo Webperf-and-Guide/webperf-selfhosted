@@ -100,7 +100,7 @@ const requireStorageCrypto = () => {
   const nextSecret = process.env.SELFHOST_INTERNAL_SECRET_NEXT?.trim() || undefined;
 
   if (!currentSecret || currentSecret.length < 16) {
-    throw new Error('SELFHOST_INTERNAL_SECRET must contain at least 16 characters for migrations');
+    throw new Error('SELFHOST_INTERNAL_SECRET must contain at least 16 characters for migrations and restore');
   }
 
   if (nextSecret && nextSecret.length < 16) {
@@ -163,6 +163,7 @@ const backup = () => {
 };
 
 const restore = () => {
+  const storageCrypto = requireStorageCrypto();
   const databasePath = resolveDatabasePath();
   const configuredSource = optionValue('--from') ?? positionalArgs[0];
 
@@ -174,6 +175,7 @@ const restore = () => {
   const result = restoreSqliteDatabase({
     databasePath,
     sourcePath,
+    storageCrypto,
     backupCurrent: !hasFlag('--no-backup'),
     allowPendingMigrations: hasFlag('--allow-pending-migrations')
   });

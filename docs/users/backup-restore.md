@@ -76,7 +76,10 @@ docker compose --env-file .env -f compose.yml run --rm --no-deps \
 Restore uses a verified temporary file, makes a safety backup of the current
 database by default, atomically replaces the database, and removes only exact
 SQLite sidecars. It rejects a snapshot with pending migrations unless
-`--allow-pending-migrations` is explicitly supplied.
+`--allow-pending-migrations` is explicitly supplied. For an encrypted schema it
+also decrypts every persisted payload with the configured current/next internal
+secret before changing the live database, so a mismatched recovery key fails
+before replacement.
 
 ## Restore artifacts
 
@@ -85,6 +88,11 @@ the API. Preserve the current directory as a safety copy rather than merging
 two generations. A volume-aware backup tool is preferred; if using
 `docker compose cp`, make the replacement while the API and executor are
 stopped and confirm ownership remains writable by UID/GID `1000`.
+
+Startup and maintenance reconciliation retain unindexed artifact files and
+directories younger than one hour. This grace window prevents a concurrent
+upload that has published its file but not yet committed its SQLite row from
+being mistaken for an orphan; a later maintenance pass removes true orphans.
 
 After both parts are restored, use the saved internal secret and run:
 

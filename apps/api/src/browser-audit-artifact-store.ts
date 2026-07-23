@@ -23,6 +23,11 @@ export type ArtifactReconciliationResult = {
   removedFiles: number;
   removedDirectories: number;
 };
+export const artifactReconciliationGraceMs = 60 * 60 * 1_000;
+export type ArtifactReconciliationOptions = {
+  minimumOrphanAgeMs?: number;
+  now?: Date;
+};
 
 export interface BrowserAuditArtifactStore {
   write(input: {
@@ -37,7 +42,10 @@ export interface BrowserAuditArtifactStore {
     byteSize: number;
   }>;
   delete(storageKey: string): Promise<void>;
-  reconcile(validStorageKeys: ReadonlySet<string>): Promise<ArtifactReconciliationResult>;
+  reconcile(
+    validStorageKeys: ReadonlySet<string>,
+    options?: ArtifactReconciliationOptions
+  ): Promise<ArtifactReconciliationResult>;
 }
 
 export class ArtifactStoreValidationError extends Error {
@@ -222,7 +230,20 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     await rm(path, { force: true });
   }
 
-  async reconcile(validStorageKeys: ReadonlySet<string>): Promise<ArtifactReconciliationResult> {
+  async reconcile(
+    validStorageKeys: ReadonlySet<string>,
+    options: ArtifactReconciliationOptions = {}
+  ): Promise<ArtifactReconciliationResult> {
+    const minimumOrphanAgeMs = options.minimumOrphanAgeMs ?? artifactReconciliationGraceMs;
+    if (!Number.isSafeInteger(minimumOrphanAgeMs) || minimumOrphanAgeMs < 0) {
+      throw new Error('Artifact reconciliation grace must be a non-negative integer');
+    }
+    const now = options.now ?? new Date();
+    const nowMs = now.getTime();
+    if (!Number.isFinite(nowMs)) {
+      throw new Error('Artifact reconciliation time must be valid');
+    }
+    const orphanCutoffMs = nowMs - minimumOrphanAgeMs;
     await this.ensureRoot();
     const valid = new Set([...validStorageKeys].map((key) => {
       this.pathForStorageKey(key);
@@ -248,20 +269,65 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         const artifactPath = resolve(auditPath, artifactEntry.name);
         const storageKey = `${auditEntry.name}/${artifactEntry.name}`;
 
-        if (
-          !artifactEntry.isFile()
-          || artifactEntry.isSymbolicLink()
-          || !safeStorageSegment.test(artifactEntry.name)
-          || !valid.has(storageKey)
-        ) {
-          await rm(artifactPath, { recursive: true, force: true });
-          removedFiles += 1;
+        const safeRegularFile = artifactEntry.isFile() && !artifactEntry.isSymbolicLink();
+        const indexedFile = safeRegularFile
+          && safeStorageSegment.test(artifactEntry.name)
+          && valid.has(storageKey);
+
+        if (indexedFile) {
+          continue;
         }
+
+        if (safeRegularFile && minimumOrphanAgeMs > 0) {
+          let file;
+          try {
+            file = await lstat(artifactPath);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+              continue;
+            }
+            throw error;
+          }
+          if (file.isFile() && !file.isSymbolicLink() && file.mtimeMs > orphanCutoffMs) {
+            continue;
+          }
+        }
+
+        await rm(artifactPath, { recursive: true, force: true });
+        removedFiles += 1;
       }
 
-      if ((await readdir(auditPath)).length === 0) {
-        await rmdir(auditPath);
-        removedDirectories += 1;
+      let remainingEntries;
+      try {
+        remainingEntries = await readdir(auditPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          continue;
+        }
+        throw error;
+      }
+
+      if (remainingEntries.length === 0) {
+        let directory;
+        try {
+          directory = await lstat(auditPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            continue;
+          }
+          throw error;
+        }
+        if (minimumOrphanAgeMs === 0 || directory.mtimeMs <= orphanCutoffMs) {
+          try {
+            await rmdir(auditPath);
+            removedDirectories += 1;
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== 'ENOTEMPTY' && code !== 'ENOENT') {
+              throw error;
+            }
+          }
+        }
       }
     }
 

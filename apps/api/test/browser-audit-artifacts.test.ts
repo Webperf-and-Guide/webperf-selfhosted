@@ -114,12 +114,46 @@ describe('local Browser Audit artifact storage', () => {
 
     mkdirSync(join(root, 'audit_orphan'));
     writeFileSync(join(root, 'audit_orphan', 'artifact_orphan'), 'orphan');
-    const reconciled = await store.reconcile(new Set([stored.storageKey]));
+    const reconciled = await store.reconcile(new Set([stored.storageKey]), {
+      minimumOrphanAgeMs: 0
+    });
     expect(reconciled.removedFiles).toBe(1);
     expect(reconciled.removedDirectories).toBe(1);
     expect(await new Response(
       (await store.openDownload(stored.storageKey, body.byteLength)).body
     ).text()).toBe('{"score":0.91}');
+  });
+
+  test('preserves fresh unindexed and temporary files until the reconciliation grace expires', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const auditPath = join(root, 'audit_fresh');
+    mkdirSync(auditPath, { recursive: true });
+    writeFileSync(join(auditPath, 'artifact_fresh'), 'fresh');
+    writeFileSync(join(auditPath, 'artifact_pending.tmp-upload'), 'pending');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const startedAt = new Date();
+
+    expect(await store.reconcile(new Set(), { now: startedAt })).toEqual({
+      removedFiles: 0,
+      removedDirectories: 0
+    });
+    expect(await Bun.file(join(auditPath, 'artifact_fresh')).exists()).toBe(true);
+    expect(await Bun.file(join(auditPath, 'artifact_pending.tmp-upload')).exists()).toBe(true);
+
+    expect(await store.reconcile(new Set(), {
+      now: new Date(startedAt.getTime() + 60 * 60 * 1_000 + 1)
+    })).toEqual({
+      removedFiles: 2,
+      removedDirectories: 0
+    });
+    expect(await Bun.file(join(auditPath, 'artifact_fresh')).exists()).toBe(false);
+
+    expect(await store.reconcile(new Set(), {
+      now: new Date(startedAt.getTime() + 2 * 60 * 60 * 1_000 + 2)
+    })).toEqual({
+      removedFiles: 0,
+      removedDirectories: 1
+    });
   });
 
   test('rejects traversal, symlinks, declared-size mismatches, and byte-limit overflow', async () => {
@@ -258,7 +292,7 @@ describe('Browser Audit artifact indexes', () => {
       .map((row) => row.storage_key);
     database.close();
 
-    expect(await store.reconcile(new Set(validStorageKeys)))
+    expect(await store.reconcile(new Set(validStorageKeys), { minimumOrphanAgeMs: 0 }))
       .toMatchObject({ removedFiles: 1, removedDirectories: 1 });
     await expect(store.openDownload(stored.storageKey, stored.byteSize))
       .rejects.toThrow();

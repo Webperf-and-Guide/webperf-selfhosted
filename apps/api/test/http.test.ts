@@ -541,7 +541,9 @@ describe('api service monitoring expansion', () => {
         executionId: createdBrowserAudit.id,
         score: 0.91
       });
-      expect(jsonArtifactDownload.headers.get('content-length'))
+      expect(jsonArtifact.byteSize)
+        .toBe(new TextEncoder().encode(expectedJsonArtifact).byteLength);
+      expect(jsonArtifactDownload.headers.get('x-webperf-artifact-bytes'))
         .toBe(String(new TextEncoder().encode(expectedJsonArtifact).byteLength));
       expect(await jsonArtifactDownload.text()).toBe(expectedJsonArtifact);
 

@@ -26,8 +26,10 @@ generated storage key all agree. Stale or cross-audit grants are rejected.
 
 Artifacts are downloaded through the console or the administrator-authenticated
 API route. Responses are attachments with `nosniff`, a digest-based ETag, and
-`no-store`. The console adds the administrator token server-side; the browser
-does not receive it.
+`no-store`. Descriptor-backed downloads stream without reopening the validated
+path; `X-WebPerf-Artifact-Bytes` carries the verified size because Bun serves
+these streams with chunked transfer encoding. The console adds the
+administrator token server-side; the browser does not receive it.
 
 Missing bytes for an indexed file are reported as unavailable rather than
 silently replaced. Verify the displayed SHA-256 digest when moving an artifact

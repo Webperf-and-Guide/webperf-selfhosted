@@ -3088,9 +3088,9 @@ async function handleBrowserAuditArtifactDownload(
       headers: {
         'cache-control': 'private, no-store',
         'content-type': artifact.contentType,
-        'content-length': String(download.byteSize),
         'content-disposition': `attachment; filename="${artifact.filename}"`,
         'x-content-type-options': 'nosniff',
+        'x-webperf-artifact-bytes': String(download.byteSize),
         etag: `"sha256-${artifact.sha256}"`
       }
     });

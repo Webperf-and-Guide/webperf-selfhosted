@@ -1,6 +1,12 @@
 export const redactedValue = '[REDACTED]';
 export const maxRedactedJsonResponseBytes = 5 * 1024 * 1024;
 const maxRedactionDepth = 32;
+const staleEntityHeaderNames = new Set([
+  'content-encoding',
+  'content-length',
+  'content-range',
+  'etag'
+]);
 
 const exactSensitiveHeaderNames = new Set([
   'authorization',
@@ -173,11 +179,15 @@ export const redactJsonResponse = async (response: Response) => {
 
 const readBoundedResponseText = async (response: Response, maxBytes: number) => {
   const contentLengthHeader = response.headers.get('content-length');
-  const declaredBytes = contentLengthHeader === null
-    ? Number.NaN
-    : Number.parseInt(contentLengthHeader, 10);
+  const normalizedContentLength = contentLengthHeader?.trim() ?? '';
+  const declaredBytes = /^(?:0|[1-9]\d*)$/.test(normalizedContentLength)
+    ? Number(normalizedContentLength)
+    : Number.NaN;
 
-  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+  if (
+    (Number.isFinite(declaredBytes) && declaredBytes > maxBytes)
+    || declaredBytes === Number.POSITIVE_INFINITY
+  ) {
     await response.body?.cancel().catch(() => {});
     return null;
   }
@@ -219,10 +229,7 @@ const readBoundedResponseText = async (response: Response, maxBytes: number) => 
 };
 
 const safeRedactionFailureResponse = (message: string, response: Response) => {
-  const headers = new Headers(response.headers);
-  for (const entityHeader of ['content-encoding', 'content-length', 'content-range', 'etag']) {
-    headers.delete(entityHeader);
-  }
+  const headers = buildSafeResponseHeaders(response);
   headers.set('content-type', 'application/json; charset=utf-8');
   headers.set('cache-control', 'no-store');
 
@@ -234,11 +241,22 @@ const safeRedactionFailureResponse = (message: string, response: Response) => {
 };
 
 const rebuildResponse = (body: BodyInit | null, response: Response) => {
-  const headers = new Headers(response.headers);
-  headers.delete('content-length');
+  const headers = buildSafeResponseHeaders(response);
   return new Response(body, {
     status: response.status,
     statusText: response.statusText,
     headers
   });
+};
+
+const buildSafeResponseHeaders = (response: Response) => {
+  const headers = new Headers(response.headers);
+
+  for (const name of [...headers.keys()]) {
+    if (staleEntityHeaderNames.has(name) || isSensitiveHeaderName(name)) {
+      headers.delete(name);
+    }
+  }
+
+  return headers;
 };

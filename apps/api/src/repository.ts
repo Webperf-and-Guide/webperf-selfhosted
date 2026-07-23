@@ -232,6 +232,8 @@ type BrowserAuditArtifactCandidate = {
   createdAt: unknown;
 };
 
+const browserAuditArtifactMetadataSchema = browserAuditArtifactRefSchema.omit({ url: true });
+
 const normalizeBrowserAuditArtifactRecord = (
   artifact: BrowserAuditArtifactCandidate
 ): BrowserAuditArtifactRecord | null => {
@@ -239,11 +241,10 @@ const normalizeBrowserAuditArtifactRecord = (
     auditId: artifact.auditId,
     artifactId: artifact.id
   });
-  const reference = browserAuditArtifactRefSchema.safeParse({
+  const reference = browserAuditArtifactMetadataSchema.safeParse({
     id: artifact.id,
     registryVersion: artifact.registryVersion,
     kind: artifact.kind,
-    url: '/internal/browser-audit-artifact',
     filename: artifact.filename,
     contentType: artifact.contentType,
     byteSize: artifact.byteSize,

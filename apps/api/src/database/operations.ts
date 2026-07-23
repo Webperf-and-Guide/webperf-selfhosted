@@ -53,6 +53,7 @@ const countChanges = (result: unknown) =>
   (result as { changes?: number }).changes ?? 0;
 
 const retentionDeleteBatchSize = 500;
+export const defaultSqliteStorageCryptoVerificationLimit = 100_000;
 
 const deleteRowsInBatches = (deleteBatch: () => unknown) => {
   let deleted = 0;
@@ -302,7 +303,8 @@ export const cleanupSqliteRetention = (
   }
 
   if (tableExists(database, 'saved_entities')) {
-    const statement = database.query<never, [string, number]>(`
+    const statement = tableExists(database, 'execution_jobs')
+      ? database.query<never, [string, number]>(`
       DELETE FROM saved_entities
       WHERE rowid IN (
         SELECT entity.rowid
@@ -321,6 +323,16 @@ export const cleanupSqliteRetention = (
                 AND execution.status IN ('queued', 'leased', 'running')
             )
           )
+        LIMIT ?
+      )
+    `)
+      : database.query<never, [string, number]>(`
+      DELETE FROM saved_entities
+      WHERE rowid IN (
+        SELECT rowid
+        FROM saved_entities
+        WHERE kind IN ('comparison', 'export', 'analysis', 'browser_audit')
+          AND updated_at < ?
         LIMIT ?
       )
     `);
@@ -405,6 +417,7 @@ export const restoreSqliteDatabase = ({
   storageCrypto,
   backupCurrent = true,
   allowPendingMigrations = false,
+  maximumPayloadsToVerify = defaultSqliteStorageCryptoVerificationLimit,
   now = new Date()
 }: {
   databasePath: string;
@@ -412,6 +425,7 @@ export const restoreSqliteDatabase = ({
   storageCrypto: StorageCrypto;
   backupCurrent?: boolean;
   allowPendingMigrations?: boolean;
+  maximumPayloadsToVerify?: number;
   now?: Date;
 }) => {
   assertFileDatabase(databasePath);
@@ -458,7 +472,9 @@ export const restoreSqliteDatabase = ({
     const verifiedEncryptedPayloads = sourceMigrations.applied.some(
       (migration) => migration.id === encryptedPayloadMigration.id
     )
-      ? verifySqliteStorageCrypto(source, storageCrypto)
+      ? verifySqliteStorageCrypto(source, storageCrypto, {
+          maximumPayloads: maximumPayloadsToVerify
+        })
       : 0;
 
     const currentBackupPath = backupCurrent && existsSync(databasePath)
@@ -486,6 +502,9 @@ export const restoreSqliteDatabase = ({
       throw new Error(`SQLite restored snapshot failed integrity verification: ${temporaryIntegrity.integrityMessages.join('; ')}`);
     }
 
+    // Restore is intentionally offline: the operator docs and CLI workflow
+    // require API, scheduler, and executor writers to be stopped before these
+    // WAL sidecars are removed and the destination inode is replaced.
     for (const sidecarPath of [`${databasePath}-wal`, `${databasePath}-shm`, `${databasePath}-journal`]) {
       rmSync(sidecarPath, { force: true });
     }
@@ -512,8 +531,17 @@ export const restoreSqliteDatabase = ({
 
 export const verifySqliteStorageCrypto = (
   database: Database,
-  storageCrypto: StorageCrypto
+  storageCrypto: StorageCrypto,
+  {
+    maximumPayloads = defaultSqliteStorageCryptoVerificationLimit
+  }: {
+    maximumPayloads?: number;
+  } = {}
 ) => {
+  if (!Number.isSafeInteger(maximumPayloads) || maximumPayloads < 1) {
+    throw new Error('SQLite payload verification limit must be a positive integer');
+  }
+
   let checkedPayloads = 0;
 
   for (const { table, column } of persistedPayloadColumns) {
@@ -553,6 +581,12 @@ export const verifySqliteStorageCrypto = (
         }
 
         for (const row of rows) {
+          if (checkedPayloads >= maximumPayloads) {
+            throw new Error(
+              `SQLite restore source exceeds the encrypted payload verification limit of ${maximumPayloads}`
+            );
+          }
+
           try {
             storageCrypto.parse(row.encrypted_value);
           } catch (cause) {

@@ -60,6 +60,11 @@ Stop every writer before restore. Restore verifies the source, creates a safety
 backup of the current database by default, verifies a temporary snapshot, then
 atomically replaces the database and removes exact SQLite sidecar files.
 
+Encrypted payload verification is fail-closed and bounded to 100,000 payloads
+by default. A larger trusted backup can raise that ceiling explicitly with
+`--max-verify-payloads <count>`; WebPerf never samples and silently accepts
+unchecked encrypted rows.
+
 ```sh
 bun run selfhost:restore -- ./backups/webperf.sqlite
 ```

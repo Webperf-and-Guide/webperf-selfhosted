@@ -82,6 +82,10 @@ secret before changing the live database, so a mismatched recovery key fails
 before replacement. The JSON result reports `verifiedEncryptedPayloads` so the
 operator can confirm how many encrypted rows were checked.
 
+The default verification ceiling is 100,000 payloads. For a larger trusted
+backup, add `--max-verify-payloads <count>` rather than bypassing verification;
+restore still decrypts every row below the explicit bound before replacement.
+
 ## Restore artifacts
 
 Restore the artifact directory from the same recovery point before starting

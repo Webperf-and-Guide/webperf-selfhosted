@@ -9,6 +9,7 @@ import {
   backupSqliteDatabase,
   createSqliteBackupFromConnection,
   defaultSqliteBackupPath,
+  defaultSqliteStorageCryptoVerificationLimit,
   doctorSqliteDatabase,
   maintainSqliteDatabase,
   restoreSqliteDatabase
@@ -55,6 +56,7 @@ const valueOptions = new Set([
   '--backup-output',
   '--output',
   '--from',
+  '--max-verify-payloads',
   '--retention-days',
   '--artifacts'
 ]);
@@ -198,7 +200,12 @@ const restore = () => {
     sourcePath,
     storageCrypto,
     backupCurrent: !hasFlag('--no-backup'),
-    allowPendingMigrations: hasFlag('--allow-pending-migrations')
+    allowPendingMigrations: hasFlag('--allow-pending-migrations'),
+    maximumPayloadsToVerify: parsePositiveInteger(
+      optionValue('--max-verify-payloads'),
+      defaultSqliteStorageCryptoVerificationLimit,
+      'Restore payload verification limit'
+    )
   });
 
   return { ok: true, command: 'restore', ...result };
@@ -268,7 +275,7 @@ const printHelp = () => {
 Commands:
   selfhost:migrate [--backup] [--backup-output <path>] [--database <path>]
   selfhost:backup [--output <path>] [--database <path>]
-  selfhost:restore -- <path> [--no-backup] [--allow-pending-migrations] [--database <path>]
+  selfhost:restore -- <path> [--no-backup] [--allow-pending-migrations] [--max-verify-payloads <count>] [--database <path>]
   selfhost:doctor [--database <path>]
   selfhost:maintenance [--retention-days <days>] [--vacuum] [--database <path>] [--artifacts <path>]`);
 };

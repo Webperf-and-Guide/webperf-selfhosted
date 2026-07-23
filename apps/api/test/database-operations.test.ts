@@ -8,12 +8,14 @@ import {
   cleanupSqliteRetention,
   doctorSqliteDatabase,
   maintainSqliteDatabase,
-  restoreSqliteDatabase
+  restoreSqliteDatabase,
+  verifySqliteStorageCrypto
 } from '../src/database/operations';
 import {
   applySqliteMigrations,
   IncompatibleSqliteSchemaError,
-  openSqliteDatabase
+  openSqliteDatabase,
+  SqliteMigrationError
 } from '../src/database/sqlite';
 import { sqliteMigrations } from '../src/database/migrations';
 import { createStorageCrypto } from '../src/storage-crypto';
@@ -62,6 +64,8 @@ describe('SQLite operations', () => {
     expect(database.query<{ timeout: number }, []>('PRAGMA busy_timeout').get()?.timeout)
       .toBe(5_000);
     expect(database.query<{ foreign_keys: number }, []>('PRAGMA foreign_keys').get()?.foreign_keys)
+      .toBe(1);
+    expect(database.query<{ synchronous: number }, []>('PRAGMA synchronous').get()?.synchronous)
       .toBe(1);
     expect(database.query<{ wal_autocheckpoint: number }, []>('PRAGMA wal_autocheckpoint').get()?.wal_autocheckpoint)
       .toBe(1_000);
@@ -127,6 +131,38 @@ describe('SQLite operations', () => {
       SELECT COUNT(*) AS count FROM jobs WHERE payload_json LIKE 'webperf:enc:v2:%'
     `).get()?.count).toBe(205);
     database.close();
+  });
+
+  test('identifies the migration that failed without losing the original cause', () => {
+    const { databasePath } = createTempPaths();
+    const database = openSqliteDatabase(databasePath);
+    const crypto = storageCrypto();
+    sqliteMigrations[0]!.up(database, { storageCrypto: crypto });
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `);
+    database.query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
+      sqliteMigrations[0]!.id,
+      '2026-07-22T00:00:00.000Z'
+    );
+    database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES ('job_invalid_json', 'https://example.com/', 'queued', ?, ?, '{')
+    `).run('2026-07-22T00:00:00.000Z', '2026-07-22T00:00:00.000Z');
+
+    try {
+      applySqliteMigrations(database, { storageCrypto: crypto });
+      throw new Error('Expected the encrypted payload migration to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SqliteMigrationError);
+      expect((error as SqliteMigrationError).migrationId).toBe(sqliteMigrations[1]!.id);
+      expect((error as Error).cause).toBeInstanceOf(SyntaxError);
+    } finally {
+      database.close();
+    }
   });
 
   test('refuses to open a database migrated by an unknown newer version', () => {
@@ -251,6 +287,31 @@ describe('SQLite operations', () => {
     unchanged.close();
   });
 
+  test('fails closed when encrypted payload verification exceeds its explicit bound', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    const crypto = storageCrypto();
+    const insert = database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, 'https://example.com/', 'succeeded', ?, ?, ?)
+    `);
+    for (const id of ['job_verify_1', 'job_verify_2']) {
+      insert.run(
+        id,
+        '2026-07-22T00:00:00.000Z',
+        '2026-07-22T00:00:00.000Z',
+        crypto.stringify({ id })
+      );
+    }
+    insert.finalize();
+
+    expect(() => verifySqliteStorageCrypto(database, crypto, { maximumPayloads: 1 }))
+      .toThrow('verification limit of 1');
+    expect(() => verifySqliteStorageCrypto(database, crypto, { maximumPayloads: 0 }))
+      .toThrow('positive integer');
+    database.close();
+  });
+
   test('cleans only expired retained data and can run full maintenance', () => {
     const { databasePath } = createTempPaths();
     const { database } = migrateDatabase(databasePath);
@@ -365,6 +426,39 @@ describe('SQLite operations', () => {
     expect(database.query<{ count: number }, []>(`
       SELECT COUNT(*) AS count FROM check_profile_runs
     `).get()?.count).toBe(0);
+    database.close();
+  });
+
+  test('cleans derived resources from an intentionally partial schema', () => {
+    const database = new Database(':memory:');
+    database.exec(`
+      CREATE TABLE saved_entities (
+        kind TEXT NOT NULL,
+        id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        PRIMARY KEY (kind, id)
+      );
+      INSERT INTO saved_entities (kind, id, created_at, updated_at, payload_json)
+      VALUES
+        ('comparison', 'comparison_old', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'),
+        ('property', 'property_old', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload');
+    `);
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 0,
+      checkRuns: 0,
+      executionJobs: 0,
+      derivedResources: 1,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ id: string }, []>('SELECT id FROM saved_entities').all())
+      .toEqual([{ id: 'property_old' }]);
     database.close();
   });
 

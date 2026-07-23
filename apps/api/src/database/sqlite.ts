@@ -43,6 +43,14 @@ export class SqlitePragmaError extends Error {
   override readonly name = 'SqlitePragmaError';
 }
 
+export class SqliteMigrationError extends Error {
+  override readonly name = 'SqliteMigrationError';
+
+  constructor(readonly migrationId: string, options?: ErrorOptions) {
+    super(`SQLite migration failed: ${migrationId}`, options);
+  }
+}
+
 export const openSqliteDatabase = (
   databasePath: string,
   options: { readonly?: boolean; create?: boolean } = {}
@@ -88,6 +96,15 @@ export const configureSqliteConnection = (
     }
 
     database.exec('PRAGMA synchronous = NORMAL;');
+    const synchronous = database
+      .query<{ synchronous: number }, []>('PRAGMA synchronous')
+      .get()?.synchronous;
+
+    if (synchronous !== 1) {
+      throw new SqlitePragmaError(
+        `Unable to configure SQLite synchronous mode; current mode is ${synchronous ?? 'unknown'}`
+      );
+    }
     // Keep the SQLite default explicit so WAL growth policy remains visible and
     // stable across runtime upgrades. Busy readers may still defer checkpoints.
     database.exec('PRAGMA wal_autocheckpoint = 1000;');
@@ -189,7 +206,11 @@ export const applySqliteMigrations = (
         continue;
       }
 
-      migration.up(database, context);
+      try {
+        migration.up(database, context);
+      } catch (cause) {
+        throw new SqliteMigrationError(migration.id, { cause });
+      }
       database
         .query<never, [string, string]>(
           'INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)'

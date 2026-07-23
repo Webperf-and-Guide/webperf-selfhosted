@@ -289,9 +289,8 @@ export const runBrowserAudit = async ({
     } catch {}
     try {
       await browser.close();
-    } finally {
-      await networkProxy.close().catch(() => undefined);
-    }
+    } catch {}
+    await networkProxy.close().catch(() => undefined);
   }
 };
 
@@ -425,7 +424,7 @@ export const launchBrowser = async (
 export const buildChromeLaunchArgs = (
   config: Pick<BrowserAuditWorkerConfig, 'allowNoSandbox'>,
   networkProxyUrl?: string
-) => {
+): string[] => {
   const args = [
     '--headless=new',
     '--disable-dev-shm-usage',

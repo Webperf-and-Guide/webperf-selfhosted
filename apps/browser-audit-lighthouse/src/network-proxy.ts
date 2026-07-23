@@ -14,6 +14,7 @@ import {
 
 const proxyHost = '127.0.0.1';
 const connectTimeoutMs = 10_000;
+const httpIdleTimeoutMs = 30_000;
 const hopByHopHeaders = new Set([
   'connection',
   'keep-alive',
@@ -72,9 +73,11 @@ export const startBrowserNetworkProxy = async ({
     );
   });
   server.on('upgrade', (_request, socket) => {
+    socket.once('error', () => undefined);
     socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
   });
   server.on('clientError', (_error, socket) => {
+    socket.once('error', () => undefined);
     socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
   });
   server.on('connection', trackSocket);
@@ -124,6 +127,10 @@ const proxyHttpRequest = async (
   resolveTarget: (value: string) => ReturnType<typeof resolveBrowserRequestTarget>,
   trackSocket: (socket: Socket) => Socket
 ) => {
+  let upstream: ReturnType<typeof createHttpRequest> | null = null;
+  request.once('error', () => upstream?.destroy());
+  response.once('error', () => upstream?.destroy());
+
   try {
     if (!request.url) {
       throw new Error('Proxy request URL is missing');
@@ -135,7 +142,7 @@ const proxyHttpRequest = async (
 
     const headers = sanitizeHeaders(request.headers);
     headers.host = target.url.host;
-    const upstream = createHttpRequest({
+    upstream = createHttpRequest({
       host: target.address,
       family: target.family,
       port: Number(target.url.port || '80'),
@@ -143,18 +150,24 @@ const proxyHttpRequest = async (
       path: `${target.url.pathname}${target.url.search}`,
       headers
     });
-    upstream.on('socket', trackSocket);
-    upstream.once('response', (upstreamResponse) => {
+    const targetRequest = upstream;
+    targetRequest.on('socket', trackSocket);
+    targetRequest.setTimeout(
+      httpIdleTimeoutMs,
+      () => targetRequest.destroy(new Error('Browser proxy HTTP request timed out'))
+    );
+    targetRequest.once('response', (upstreamResponse) => {
       response.writeHead(
         upstreamResponse.statusCode ?? 502,
         sanitizeHeaders(upstreamResponse.headers)
       );
+      upstreamResponse.once('error', () => response.destroy());
       upstreamResponse.pipe(response);
     });
-    upstream.once('error', () => sendProxyError(response));
-    request.once('aborted', () => upstream.destroy());
-    response.once('close', () => upstream.destroy());
-    request.pipe(upstream);
+    targetRequest.once('error', () => sendProxyError(response));
+    request.once('aborted', () => targetRequest.destroy());
+    response.once('close', () => targetRequest.destroy());
+    request.pipe(targetRequest);
   } catch {
     sendProxyError(response);
   }
@@ -169,6 +182,9 @@ const proxyConnectRequest = async (
   trackSocket: (socket: Socket) => Socket
 ) => {
   let established = false;
+  let upstream: Socket | null = null;
+  clientSocket.once('error', () => upstream?.destroy());
+  clientSocket.once('close', () => upstream?.destroy());
 
   try {
     const authority = request.url;
@@ -176,27 +192,27 @@ const proxyConnectRequest = async (
       throw new Error('Proxy CONNECT authority is invalid');
     }
     const target = await resolveTarget(`https://${authority}/`);
-    const upstream = trackSocket(connectTarget({
+    upstream = trackSocket(connectTarget({
       host: target.address,
       family: target.family,
       port: Number(target.url.port || '443')
     }));
-    upstream.setTimeout(
+    const targetSocket = upstream;
+    targetSocket.setTimeout(
       connectTimeoutMs,
-      () => upstream.destroy(new Error('Browser proxy connection timed out'))
+      () => targetSocket.destroy(new Error('Browser proxy connection timed out'))
     );
-    upstream.once('connect', () => {
+    targetSocket.once('connect', () => {
       established = true;
-      upstream.setTimeout(0);
+      targetSocket.setTimeout(0);
       clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.byteLength > 0) {
-        upstream.write(head);
+        targetSocket.write(head);
       }
-      clientSocket.pipe(upstream);
-      upstream.pipe(clientSocket);
+      clientSocket.pipe(targetSocket);
+      targetSocket.pipe(clientSocket);
     });
-    clientSocket.once('close', () => upstream.destroy());
-    upstream.once('error', () => {
+    targetSocket.once('error', () => {
       if (established) {
         clientSocket.destroy();
       } else {

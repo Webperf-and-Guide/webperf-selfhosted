@@ -138,14 +138,27 @@ export const resolveBrowserRequestTarget = async (
     }
   }
 
-  return { url, ...normalizedAddresses[0]!, allowlisted };
+  const selectedAddress = normalizedAddresses[0];
+  if (!selectedAddress) {
+    throw new Error(`Browser request host ${hostname} did not resolve`);
+  }
+  return { url, ...selectedAddress, allowlisted };
 };
 
 export const installBrowserNetworkGuard = async (
   page: Page,
   allowlist: string[]
 ) => {
-  let blockedError: Error | null = null;
+  const blockedErrors: Error[] = [];
+  const recordBlockedError = (error: unknown, fallback: string) => {
+    const normalized = error instanceof Error ? error : new Error(fallback);
+    if (
+      blockedErrors.length < 8
+      && !blockedErrors.some((existing) => existing.message === normalized.message)
+    ) {
+      blockedErrors.push(normalized);
+    }
+  };
   await page.setRequestInterception(true);
 
   const handleRequest = async (request: HTTPRequest) => {
@@ -157,27 +170,36 @@ export const installBrowserNetworkGuard = async (
       await validateBrowserRequestUrl(request.url(), { allowlist });
       await request.continue();
     } catch (error) {
-      blockedError ??= error instanceof Error ? error : new Error('Browser request blocked by network policy');
-      await request.abort('blockedbyclient');
+      recordBlockedError(error, 'Browser request blocked by network policy');
+      try {
+        await request.abort('blockedbyclient');
+      } catch (abortError) {
+        recordBlockedError(abortError, 'Browser request abort failed');
+      }
     }
   };
 
   page.on('request', (request) => {
     void handleRequest(request).catch(async (error) => {
-      blockedError ??= error instanceof Error
-        ? error
-        : new Error('Browser request interceptor failed');
+      recordBlockedError(error, 'Browser request interceptor failed');
       if (!request.isInterceptResolutionHandled()) {
         try {
           await request.abort('blockedbyclient');
-        } catch {}
+        } catch (abortError) {
+          recordBlockedError(abortError, 'Browser request abort failed');
+        }
       }
     });
   });
   page.on('popup', (popup) => {
-    blockedError ??= new Error('New browser windows are blocked');
+    recordBlockedError(
+      new Error('New browser windows are blocked'),
+      'New browser windows are blocked'
+    );
     if (popup) {
-      void popup.close();
+      void popup.close().catch((error) => {
+        recordBlockedError(error, 'Failed to close a new browser window');
+      });
     }
   });
   page.browser().on('targetcreated', (target) => {
@@ -186,7 +208,10 @@ export const installBrowserNetworkGuard = async (
     }
 
     void (async () => {
-      blockedError ??= new Error('New browser windows are blocked');
+      recordBlockedError(
+        new Error('New browser windows are blocked'),
+        'New browser windows are blocked'
+      );
       const popup = await target.page();
       if (!popup) {
         return;
@@ -194,14 +219,14 @@ export const installBrowserNetworkGuard = async (
       await popup.setRequestInterception(true);
       popup.on('request', (request) => {
         if (!request.isInterceptResolutionHandled()) {
-          void request.abort('blockedbyclient').catch(() => undefined);
+          void request.abort('blockedbyclient').catch((error) => {
+            recordBlockedError(error, 'Popup request abort failed');
+          });
         }
       });
       await popup.close();
     })().catch((error) => {
-      blockedError ??= error instanceof Error
-        ? error
-        : new Error('Failed to close a new browser window');
+      recordBlockedError(error, 'Failed to close a new browser window');
     });
   });
 
@@ -210,11 +235,22 @@ export const installBrowserNetworkGuard = async (
 
   return {
     throwIfBlocked(cause?: unknown) {
-      if (blockedError) {
-        throw cause === undefined
-          ? blockedError
-          : new Error(blockedError.message, { cause });
+      const [primaryError, ...additionalErrors] = blockedErrors;
+      if (!primaryError) {
+        return;
       }
+
+      const causes = cause === undefined
+        ? additionalErrors
+        : [cause, ...additionalErrors];
+      if (causes.length === 0) {
+        throw primaryError;
+      }
+      throw new Error(primaryError.message, {
+        cause: causes.length === 1
+          ? causes[0]
+          : new AggregateError(causes, 'Additional browser network failures')
+      });
     }
   };
 };

@@ -81,7 +81,8 @@ docker compose \
 This temporarily publishes the API at `127.0.0.1:8788`. To inspect the optional
 runner, first start its `browser-audit` profile and then start
 `browser-audit-debug`; that proxy binds `127.0.0.1:8081`. Neither debug proxy
-binds a non-loopback interface.
+binds a non-loopback interface. Debug proxy requests have an 8 MiB body limit;
+oversized requests receive `413` before any upstream call.
 
 All production services have health checks, restart and stop policies, log
 rotation, non-root users, and configurable CPU/memory ceilings. Services are

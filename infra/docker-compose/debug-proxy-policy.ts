@@ -10,6 +10,16 @@ const hopByHopHeaders = [
   'upgrade'
 ] as const;
 
+export const maximumDebugProxyRequestBytes = 8 * 1_024 * 1_024;
+
+export class DebugProxyRequestBodyTooLargeError extends Error {
+  override readonly name = 'DebugProxyRequestBodyTooLargeError';
+
+  constructor(readonly maxBytes: number) {
+    super(`Debug proxy request body must not exceed ${maxBytes} bytes`);
+  }
+}
+
 export const resolveDebugProxyUpstream = (
   target: URL,
   requestUrl: URL
@@ -29,5 +39,79 @@ export const stripHopByHopHeaders = (headers: Headers) => {
 
   for (const name of [...connectionHeaders, ...hopByHopHeaders]) {
     headers.delete(name);
+  }
+};
+
+export const readBoundedDebugProxyBody = async (
+  request: Request,
+  maxBytes = maximumDebugProxyRequestBytes
+): Promise<Uint8Array | undefined> => {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error('Debug proxy request body limit must be a positive integer');
+  }
+
+  const contentLengthValue = request.headers.get('content-length');
+  if (contentLengthValue && /^\d+$/.test(contentLengthValue)) {
+    const contentLength = Number(contentLengthValue);
+    if (!Number.isSafeInteger(contentLength) || contentLength > maxBytes) {
+      await cancelBody(request.body);
+      throw new DebugProxyRequestBodyTooLargeError(maxBytes);
+    }
+  }
+
+  if (!request.body) {
+    return undefined;
+  }
+
+  const reader = request.body.getReader();
+  let bytes = new Uint8Array(Math.min(maxBytes, 8 * 1_024));
+  let byteSize = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      byteSize += value.byteLength;
+      if (byteSize > maxBytes) {
+        throw new DebugProxyRequestBodyTooLargeError(maxBytes);
+      }
+
+      if (byteSize > bytes.byteLength) {
+        const nextCapacity = Math.min(
+          maxBytes,
+          Math.max(byteSize, bytes.byteLength * 2)
+        );
+        const nextBytes = new Uint8Array(nextCapacity);
+        nextBytes.set(bytes);
+        bytes = nextBytes;
+      }
+      bytes.set(value, byteSize - value.byteLength);
+    }
+  } catch (error) {
+    await cancelReader(reader);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  return bytes.subarray(0, byteSize);
+};
+
+const cancelBody = async (body: ReadableStream<Uint8Array> | null) => {
+  try {
+    await body?.cancel();
+  } catch {
+    // The client may already be gone; the byte-limit error remains authoritative.
+  }
+};
+
+const cancelReader = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  try {
+    await reader.cancel();
+  } catch {
+    // The client may already be gone; the original read error remains authoritative.
   }
 };

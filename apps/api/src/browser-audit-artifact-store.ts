@@ -213,8 +213,13 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         throw error;
       }
       destinationPublished = true;
-      await unlinkPinnedDirectoryEntry(auditDirectory, temporaryEntry);
-      temporaryRemoved = true;
+      try {
+        await unlinkPinnedDirectoryEntry(auditDirectory, temporaryEntry);
+        temporaryRemoved = true;
+      } catch {
+        // Publication already owns the completed bytes. Keep it valid and let
+        // retention reconciliation retry removal of the orphaned temporary link.
+      }
       await assertPinnedDirectory(
         auditPath,
         auditDirectory,

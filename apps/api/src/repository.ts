@@ -1268,6 +1268,12 @@ export const createSqliteJobRepository = ({
         }
 
         if (['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
+          if (executionJob.status === 'failed') {
+            syncTerminalExecutionResource(
+              executionJob,
+              executionJob.completedAt ?? now.toISOString()
+            );
+          }
           return executionJob;
         }
 
@@ -1327,7 +1333,10 @@ export const createSqliteJobRepository = ({
         if (executionJob?.status === 'cancelled') {
           // A previous cancellation can commit the queue transition before a
           // resource-sync failure. Repeating the idempotent sync repairs that split.
-          syncTerminalExecutionResource(executionJob, nowIso);
+          syncTerminalExecutionResource(
+            executionJob,
+            executionJob.completedAt ?? nowIso
+          );
           return executionJob;
         }
 

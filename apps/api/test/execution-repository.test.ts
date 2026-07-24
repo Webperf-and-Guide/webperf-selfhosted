@@ -338,6 +338,26 @@ describe('durable execution repository', () => {
       completedAt: '2026-07-22T00:00:01.000Z',
       error: 'Browser Audit execution stopped before producing a result'
     });
+    repository.saveBrowserAudit(browserAuditResourceSchema.parse({
+      ...createBrowserAudit(failedLease.resourceId),
+      status: 'running',
+      startedAt: '2026-07-22T00:00:00.500Z'
+    }));
+    expect(repository.failExecutionJob({
+      id: failedLease.id,
+      leaseOwner: 'executor-failed',
+      error: {
+        code: 'execution_timeout',
+        message: 'Execution exceeded the configured time limit',
+        retryable: true
+      }
+    }, new Date('2026-07-22T00:00:01.500Z'))?.status).toBe('failed');
+    expect(repository.getBrowserAudit(failedLease.resourceId)).toMatchObject({
+      status: 'failed',
+      startedAt: '2026-07-22T00:00:00.500Z',
+      completedAt: '2026-07-22T00:00:01.000Z',
+      error: 'Browser Audit execution stopped before producing a result'
+    });
 
     const expiredLease = repository.claimExecutionJob(
       { leaseOwner: 'executor-expired', leaseDurationMs: 1_000 },

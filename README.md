@@ -1,171 +1,176 @@
-# webperf-selfhosted
+# WebPerf
 
-Self-hosted open-core WebPerf for release verification, scheduled checks, and baseline diffing across representative regions.
+Self-hosted release verification for teams that need to answer one practical
+question: **did this deploy get worse?**
 
-License: [Apache-2.0](LICENSE)
+WebPerf runs repeatable network checks across representative cities, keeps run
+history and baselines in SQLite, and produces deterministic comparisons and
+exports. The default installation is a small, single-organization stack with
+an operator console, API, scheduler, durable executor, and Rust probe. An
+engine-neutral Browser Audit Protocol and Lighthouse reference runner are
+available as an optional profile.
 
-WebPerf has two distinct product surfaces:
+[Apache-2.0](LICENSE) · [User guides](docs/users/README.md) ·
+[Public API](docs/architecture/public-api-surface.md) · [Security](SECURITY.md)
 
-- `webperf-selfhosted`: the self-hosted OSS/open-core product
-- `webperf.and.guide`: the managed cloud product and business layer
+## Screenshots
 
-This repository is the self-hosted source of truth for:
+![WebPerf manual release verification workspace](docs/assets/console-overview.png)
 
-- `apps/console`: SvelteKit UI for configuring checks and reviewing runs
-- `apps/api`: Bun + SQLite API service for saved config, run dispatch, history, comparisons, and reports
-- `apps/scheduler`: polling worker for scheduled check dispatch
-- `apps/probe-rs`: Rust probe runtime
-- `apps/browser-audit-worker`: optional Bun-first browser audit runtime
-- `packages/contracts`, `packages/domain-core`, `packages/config`, `packages/report-core`, `packages/ui`
-- `infra/docker-compose`: Docker Compose bundle
-- `infra/docker`: runtime image metadata consumed by the managed cloud repo
+![WebPerf comparisons, exports, analyses, and Browser Audit workspace](docs/assets/console-reports.png)
 
-This repository is intentionally not the home for:
+## Docker quick start
 
-- billing, pricing, usage metering, or quotas
-- tenant/workspace auth and seat management
-- cloud-only orchestration, managed runner scaling, or private admin surfaces
-- hosted artifact retention and internal ops automation
-- AI analyst product features beyond structured deterministic outputs
+Use a tagged bundle from
+[GitHub Releases](https://github.com/Webperf-and-Guide/webperf-selfhosted/releases).
+The bundle pins every runtime image by OCI digest; a source checkout and Bun
+are not required.
 
-See:
+```sh
+# After downloading webperf-selfhosted-v0.x.y.tar.gz and SHA256SUMS:
+sha256sum --check SHA256SUMS
+tar -xzf webperf-selfhosted-v*.tar.gz
+cd webperf-selfhosted-v*/
+sha256sum --check SHA256SUMS
 
-- [docs/self-hosting/feature-scope.md](docs/self-hosting/feature-scope.md)
-- [docs/comparison/cloud-vs-selfhosted.md](docs/comparison/cloud-vs-selfhosted.md)
-- [docs/github-launch.md](docs/github-launch.md)
-- [SECURITY.md](SECURITY.md)
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-- [CHANGELOG.md](CHANGELOG.md)
+cp .env.example .env
+chmod 600 .env
+```
 
-Provider-specific deployment walkthroughs can live on the managed product site when they are useful,
-but the install and runtime docs in this repo should stay vendor-neutral.
+Generate four independent secrets with `openssl rand -base64 32` and replace
+the placeholder values for `SELFHOST_ADMIN_TOKEN`,
+`SELFHOST_INTERNAL_SECRET`, `PROBE_SHARED_SECRET`, and
+`BROWSER_AUDIT_SHARED_SECRET` in `.env`. Then start the default stack:
 
-## What It Does
+```sh
+docker compose --env-file .env -f compose.yml up -d
+docker compose --env-file .env -f compose.yml ps
+curl --fail http://127.0.0.1:5173/
+```
 
-- runs network-probe checks across representative cities instead of relying on a single URL or a single region
-- stores saved sites, route groups, region sets, checks, runs, baselines, comparisons, and exports in SQLite
-- includes a self-host console, API, scheduler, Rust probe runtime, and an optional Bun browser-audit worker
-- focuses on release verification questions like "did this deploy get worse?" rather than general-purpose observability
+Open `http://127.0.0.1:5173`. Only the console is published, and it binds to
+loopback. The API, scheduler, executor, probe, and optional browser runner stay
+on internal Compose networks.
 
-## Quick Start
+Read the full [installation guide](docs/users/install.md) before using a
+non-local hostname or upgrading an existing database.
 
-Fastest local path:
+## Core features
 
-```bash
-bun install
+- One-off Fast Checks for deploy smoke tests and incident verification.
+- Reusable Sites, Route Groups, Region Sets, and Checks with request overrides,
+  latency or uptime policy, webhook alerts, and interval schedules.
+- Durable SQLite-backed execution leases, bounded retry, graceful shutdown,
+  and restart recovery instead of API-process fire-and-forget work.
+- Latest-vs-previous and pinned-baseline comparisons, deterministic Analysis,
+  and JSON/CSV exports.
+- A 41-city public catalog with operator-controlled active probes and up to
+  four representative regions per run.
+- Encrypted persisted payloads, secret redaction, HMAC-authenticated runtimes,
+  and connection-layer SSRF protection.
+- Authenticated local artifact storage with size limits, SHA-256 indexes,
+  retention reconciliation, and streaming downloads.
+
+Start with the [operator guide index](docs/users/README.md), then follow
+[Regions](docs/users/regions.md), [Checks](docs/users/checks.md), and
+[Scheduling](docs/users/scheduling.md) for the normal setup flow.
+
+## Optional Browser Audit
+
+Browser Audit is off by default. Enable the `browser-audit` profile to add the
+Lighthouse reference runner for navigation, snapshot, and timespan flows:
+
+```sh
+# In .env:
+# SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080
+
+docker compose --env-file .env --profile browser-audit -f compose.yml up -d
+```
+
+Ubuntu 24.04 and other AppArmor 4 hosts must first load the bundled
+`browser-audit.apparmor` profile and add `-f compose.apparmor.yml` to that
+command. The [Browser Audits guide](docs/users/browser-audits.md) has the
+persistent host setup.
+
+The runner has no public host port, keeps Chrome sandboxing enabled, uses 1 GiB
+of shared memory, and accepts one audit at a time. Compose drops all Linux
+capabilities and restores only `SYS_CHROOT`, which Chromium needs to enter its
+sandbox root; `SYS_ADMIN` remains absent. Audits are queued through the durable
+executor; result contracts remain engine-neutral so another compatible runner
+can be added without changing public report shapes.
+
+See [Browser Audits](docs/users/browser-audits.md) and
+[artifact storage](docs/users/artifacts.md).
+
+## Security warning
+
+> WebPerf self-hosted is a trusted, single-organization deployment. Do not
+> expose the console directly to the public internet. For remote access, keep
+> the console on loopback and put it behind a TLS reverse proxy plus an
+> additional access-control layer. Never publish the API, probe, executor,
+> scheduler, Browser Audit runner, or `debug` profile.
+
+Only `GET /health`, `GET /v1/capabilities`, and
+`GET /openapi/public.json` are intentionally unauthenticated at the API
+boundary. All data and execution routes require the administrator credential;
+internal dispatch and execution routes require the internal credential.
+
+Read [Security](docs/users/security.md),
+[reverse proxy guidance](docs/users/reverse-proxy.md), and
+[self-host authentication](docs/security/auth-and-secrets.md) before external
+access.
+
+## Self-hosted and WebPerf Cloud
+
+| | `webperf-selfhosted` | `webperf.and.guide` |
+| --- | --- | --- |
+| Operations | You install, secure, back up, and upgrade it | Managed service operations |
+| Organization model | One trusted organization | Hosted teams, workspaces, and permissions |
+| Runners | Your probes and optional browser runner | Managed orchestration and runner fleet |
+| Product logic | Public contracts, deterministic reports, self-host workflow | Billing, quotas, collaboration, and managed automation |
+| Data | Your SQLite database and artifact volume | Hosted storage and retention |
+
+This repository is the public source of truth for self-host contracts, schemas,
+domain models, report logic, console/API behavior, deployment examples, and
+runtime images. It intentionally excludes billing, multi-tenancy, managed
+fleet orchestration, private provider credentials, and AI analyst product
+features. See [Cloud vs self-hosted](docs/users/cloud-vs-self-hosted.md).
+
+## Upgrade and backup
+
+Back up both the SQLite database and artifact directory before every upgrade.
+Keep the matching `.env` secrets with the recovery record: encrypted payloads
+cannot be restored without the internal secret that encrypted them.
+
+- [Backup and restore](docs/users/backup-restore.md)
+- [Upgrade a digest-pinned release](docs/users/upgrade.md)
+- [Troubleshooting](docs/users/troubleshooting.md)
+- [Release images, SBOMs, and provenance](docs/quickstart/runtime-images.md)
+
+## Contributor setup
+
+Source development requires Bun `1.3.13`, Rust `1.86`, and the local toolchain
+described in [Contributor development](docs/contributors/development.md).
+
+```sh
+bun install --frozen-lockfile
 bun run dev
-```
 
-Default local URLs:
-
-- console: `http://localhost:5173`
-- api: `http://127.0.0.1:8788`
-- probe: `http://127.0.0.1:8080`
-- browser-audit worker when run separately: `http://127.0.0.1:8081`
-
-Launch-ready docs are grouped into five operator paths:
-
-- [single-machine quickstart](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/single-machine.md)
-- [docker compose install](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/local-compose.md)
-- [optional browser-audit worker](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/self-hosting/browser-audit-worker.md)
-- [parallel local dev](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md)
-- [GHCR runtime images](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md)
-
-Provider-specific deployment walkthroughs belong on `webperf.and.guide`, not in this repo.
-
-## Useful Commands
-
-```bash
 bun run check
-bun run dev:browser-audit-worker
-bun run dev:parallel:cloud
-bun run smoke:console
-bun run smoke:compose
-bun run smoke:compose:browser-audit
-bun run capture:console:baselines
-bun run --cwd apps/api check
-bun test apps/api/test
-bun run test:report-core
-bun run compose:config
+bun test
+cargo fmt --all --check --manifest-path apps/probe-rs/Cargo.toml
+cargo clippy --workspace --all-targets --manifest-path apps/probe-rs/Cargo.toml -- -D warnings
+cargo test --workspace --manifest-path apps/probe-rs/Cargo.toml
 ```
 
-## Public API
+User-visible changes require a Sampo changeset. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
+[release guide](docs/contributors/releases.md) before opening a PR.
 
-The current v1 resource-oriented surface is intentionally stabilized around:
+## Reference
 
-- `sites`
-- `routeGroups`
-- `regionSets`
-- `checks`
-- `runs`
-- `comparisons`
-- `exports`
-- `analyses`
-- `browserAudits`
-- `capabilities`
-
-`runs` stay intentionally split between:
-
-- nested run lists at `GET /v1/checks/:checkId/runs`
-- persisted run detail at `GET /v1/runs/:runId`
-
-Compatibility aliases remain available for:
-
-- `/v1/properties`
-- `/v1/route-sets`
-- `/v1/region-packs`
-- `/v1/check-profiles`
-
-See [public-api-surface.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/architecture/public-api-surface.md) for the current freeze line and list-query contract.
-
-## Parallel Local Dev
-
-Use [parallel-local-dev.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/parallel-local-dev.md) when `webperf-selfhosted` and `webperf.and.guide` need to run side-by-side.
-
-## Optional Browser Audit Direct-Run
-
-`apps/browser-audit-worker` remains an optional runtime, but the self-host API can call it directly when you configure:
-
-- `SELFHOST_BROWSER_AUDIT_BASE_URL`
-- `BROWSER_AUDIT_SHARED_SECRET`
-- `BROWSER_AUDIT_SHARED_SECRET_NEXT` for secret rotation
-
-This direct-run surface is intentionally limited to persisted summaries and artifact metadata. It does not pull managed queue, fleet, provider, or tenancy logic into OSS.
-
-## Compose Bundle
-
-Compose assets live in [infra/docker-compose/docker-compose.yml](infra/docker-compose/docker-compose.yml).
-
-Install and scheduling notes live in:
-
-- [docs/quickstart/local-compose.md](docs/quickstart/local-compose.md)
-- [docs/architecture/execution-model.md](docs/architecture/execution-model.md)
-- [docs/self-hosting/browser-audit-worker.md](docs/self-hosting/browser-audit-worker.md)
-- [examples/github-actions/scheduler-dispatch.yml](examples/github-actions/scheduler-dispatch.yml)
-
-## Release Tooling
-
-This repo uses Sampo for release metadata.
-
-```bash
-bun run sampo:add
-bun run sampo:release:dry-run
-bun run sampo:release
-bun run sampo:publish
-```
-
-Pending release notes live under `.sampo/changesets/`.
-
-## Published Images
-
-See [runtime-images.md](/Users/imjlk/repos/and-guide/webperf-selfhosted/docs/quickstart/runtime-images.md) for the current GHCR image policy and checked-in metadata refs.
-
-Cloud local development continues to consume OSS packages through sibling `file:` dependencies, while runtime images continue to publish through GHCR.
-Merges or direct pushes to `main` automatically publish the probe and browser-audit images through the checked-in GitHub Actions workflows.
-
-## Public Launch Notes
-
-Public launch notes live in:
-
-- [docs/github-launch.md](docs/github-launch.md) for repo description, topics, and first-release polish
-- [LICENSE](LICENSE) for the selected Apache-2.0 terms
+- [Canonical public API and compatibility policy](docs/architecture/public-api-surface.md)
+- [Durable execution model](docs/architecture/execution-model.md)
+- [Engine-neutral Browser Audit Protocol](docs/architecture/browser-audit-protocol.md)
+- [Feature scope](docs/self-hosting/feature-scope.md)
+- [Changelog](CHANGELOG.md)

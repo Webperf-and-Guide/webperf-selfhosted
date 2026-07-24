@@ -12,5 +12,9 @@ export const buildControlOpenApiDocument = (options: ControlOpenApiOptions) =>
   buildOpenApiSkeletonDocument({
     ...options,
     contract: controlContract,
-    tags: [...CONTROL_OPENAPI_TAG_DEFINITIONS]
+    tags: [...CONTROL_OPENAPI_TAG_DEFINITIONS],
+    bearerAuth: {
+      schemeName: 'selfhostAdminToken',
+      description: 'SELFHOST_ADMIN_TOKEN for protected compatibility operations.'
+    }
   });

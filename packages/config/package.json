@@ -15,17 +15,25 @@
       "types": "./src/public.ts",
       "import": "./src/public.ts"
     },
-    "./cloud": {
-      "types": "./src/cloud.ts",
-      "import": "./src/cloud.ts"
-    },
     "./selfhost": {
       "types": "./src/selfhost.ts",
       "import": "./src/selfhost.ts"
     },
+    "./selfhost-console": {
+      "types": "./src/selfhost-console.ts",
+      "import": "./src/selfhost-console.ts"
+    },
     "./selfhost-scheduler": {
       "types": "./src/selfhost-scheduler.ts",
       "import": "./src/selfhost-scheduler.ts"
+    },
+    "./selfhost-executor": {
+      "types": "./src/selfhost-executor.ts",
+      "import": "./src/selfhost-executor.ts"
+    },
+    "./selfhost-process-heartbeat": {
+      "types": "./src/selfhost-process-heartbeat.ts",
+      "import": "./src/selfhost-process-heartbeat.ts"
     }
   },
   "peerDependencies": {

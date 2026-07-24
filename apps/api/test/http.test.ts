@@ -7,10 +7,17 @@ import { appContract, opsContract, publicContract } from '@webperf/contracts';
 import { controlContract } from '@webperf/contracts/control-contract';
 import type { CheckProfileReportResponse } from '@webperf/contracts';
 import { createBrowserAuditSignature } from '@webperf/domain-core';
+import { createBrowserAuditExecutionHandler } from '../../executor/src/browser-audit-handler';
+import { createExecutorApiClient } from '../../executor/src/client';
+import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
+import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
+import { createWebhookExecutionHandler } from '../../executor/src/webhook-handler';
+import { dispatchScheduledChecks } from '../../scheduler/src/scheduler';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { JobRepository } from '../src/repository';
 
 type MockProbeScenario = {
   latencyMs: number;
@@ -28,7 +35,16 @@ const selfhostEnvKeys = [
   'SELFHOST_API_HOST',
   'SELFHOST_API_PORT',
   'SELFHOST_DATABASE_PATH',
+  'SELFHOST_ARTIFACTS_PATH',
+  'SELFHOST_ARTIFACT_UPLOAD_BASE_URL',
+  'SELFHOST_MAX_ARTIFACT_BYTES',
+  'SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS',
+  'SELFHOST_ADMIN_TOKEN',
+  'SELFHOST_ADMIN_TOKEN_NEXT',
+  'SELFHOST_INTERNAL_SECRET',
+  'SELFHOST_INTERNAL_SECRET_NEXT',
   'PROBE_SHARED_SECRET',
+  'PROBE_SHARED_SECRET_NEXT',
   'SELFHOST_ACTIVE_REGION_CODES_JSON',
   'SELFHOST_REGION_IDS_JSON',
   'SELFHOST_PROBE_BASE_URLS_JSON',
@@ -38,10 +54,37 @@ const selfhostEnvKeys = [
   'SELFHOST_BROWSER_AUDIT_BASE_URL'
 ] as const;
 
+const testAdminToken = 'test-admin-token-keep-server-side';
+const testInternalSecret = 'test-internal-secret-for-services';
+const testProbeSecret = 'test-probe-shared-secret';
+const defaultBrowserAuditSecret = 'test-browser-audit-shared-secret';
+const nativeFetch = globalThis.fetch;
+const apiCredentialsByOrigin = new Map<string, { adminToken: string; internalSecret: string }>();
+const fetch = Object.assign((
+  input: Parameters<typeof globalThis.fetch>[0],
+  init?: Parameters<typeof globalThis.fetch>[1]
+) => {
+  const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
+  const url = new URL(request.url);
+  const credentials = apiCredentialsByOrigin.get(url.origin);
+
+  if (!credentials) {
+    return nativeFetch(request);
+  }
+
+  const headers = new Headers(request.headers);
+  const token = url.pathname === '/v1/scheduler/dispatch' || url.pathname.startsWith('/internal/')
+    ? credentials.internalSecret
+    : credentials.adminToken;
+  headers.set('authorization', `Bearer ${token}`);
+  return nativeFetch(new Request(request, { headers }));
+}, { preconnect: nativeFetch.preconnect });
+
 const tempDirs: string[] = [];
 const startedServers: Array<{ stop: (closeActiveConnections?: boolean) => void }> = [];
 
 afterEach(() => {
+  apiCredentialsByOrigin.clear();
   for (const server of startedServers.splice(0)) {
     server.stop(true);
   }
@@ -81,29 +124,36 @@ describe('api service monitoring expansion', () => {
         },
         browserAuditRequests
       );
+      const browserAuditExecutor = {
+        baseUrl: `http://127.0.0.1:${browserAuditWorker.port}`,
+        sharedSecret: 'browser-audit-secret'
+      };
       const webhook = startWebhookServer(webhookPayloads);
       const harness = await startSelfhostHarness(probe.port, {
-        browserAuditBaseUrl: `http://127.0.0.1:${browserAuditWorker.port}`,
-        browserAuditSharedSecret: 'browser-audit-secret'
+        browserAuditBaseUrl: browserAuditExecutor.baseUrl
       });
       const client = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc`
+          url: `${harness.baseUrl}/rpc`,
+          fetch
         })
       ) as ContractRouterClient<typeof controlContract>;
       const publicClient = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc/public`
+          url: `${harness.baseUrl}/rpc/public`,
+          fetch
         })
       ) as ContractRouterClient<typeof publicContract>;
       const appClient = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc/app`
+          url: `${harness.baseUrl}/rpc/app`,
+          fetch
         })
       ) as ContractRouterClient<typeof appContract>;
       const opsClient = createORPCClient(
         new RPCLink({
-          url: `${harness.baseUrl}/rpc/ops`
+          url: `${harness.baseUrl}/rpc/ops`,
+          fetch
         })
       ) as ContractRouterClient<typeof opsContract>;
 
@@ -114,6 +164,192 @@ describe('api service monitoring expansion', () => {
       expect((await appClient.system.regions()).regions.length).toBeGreaterThan(0);
       expect((await publicClient.capabilities.get()).deploymentModel).toBe('selfhost');
       expect((await publicClient.capabilities.get()).features.browserAuditDirectRun).toBe(true);
+      expect((await publicClient.capabilities.get()).metrics.networkProbe).toEqual({
+        version: 'v1',
+        dnsTiming: true,
+        tcpTiming: false,
+        tlsTiming: false,
+        responseHeaderTiming: true,
+        bodySampleTiming: false,
+        tlsMetadata: false
+      });
+
+      const unauthorizedSitesResponse = await nativeFetch(`${harness.baseUrl}/v1/sites`);
+      expect(unauthorizedSitesResponse.status).toBe(401);
+      expect(unauthorizedSitesResponse.headers.get('www-authenticate')).toContain('Bearer');
+      expect((await nativeFetch(`${harness.baseUrl}/v1/capabilities`)).status).toBe(200);
+      const publicHealth = await (await nativeFetch(`${harness.baseUrl}/health`)).json();
+      expect(publicHealth).toEqual({ service: 'webperf-api', ok: true });
+      expect((await nativeFetch(`${harness.baseUrl}/openapi/public.json`)).status).toBe(200);
+      expect((await nativeFetch(`${harness.baseUrl}/openapi/control.json`)).status).toBe(401);
+      const oversizedJsonResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify('x'.repeat(1_024 * 1_024))
+      });
+      expect(oversizedJsonResponse.status).toBe(413);
+      expect((await oversizedJsonResponse.json()).error).toContain('1048576 bytes');
+      expect(
+        (
+          await nativeFetch(`${harness.baseUrl}/v1/scheduler/dispatch`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${testAdminToken}` }
+          })
+        ).status
+      ).toBe(401);
+
+      harness.repository.enqueueExecutionJob({
+        id: 'exec_http_transport',
+        kind: 'network_probe',
+        resourceId: 'job_http_transport',
+        maxAttempts: 3,
+        payload: {
+          jobId: 'job_http_transport',
+          headers: [{ name: 'Authorization', value: 'Bearer executor-needs-this-value' }]
+        }
+      });
+      expect(
+        (
+          await nativeFetch(`${harness.baseUrl}/internal/execution-jobs/claim`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+          })
+        ).status
+      ).toBe(401);
+      expect(
+        (
+          await nativeFetch(`${harness.baseUrl}/internal/execution-jobs/claim`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${testAdminToken}`,
+              'content-type': 'application/json'
+            },
+            body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+          })
+        ).status
+      ).toBe(401);
+
+      const claimResponse = await fetch(`${harness.baseUrl}/internal/execution-jobs/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+      });
+      expect(claimResponse.status).toBe(200);
+      expect(claimResponse.headers.get('cache-control')).toBe('no-store');
+      const claimedExecution = await claimResponse.json();
+      expect(claimedExecution.status).toBe('leased');
+      expect(claimedExecution.payload.headers[0].value).toBe(
+        'Bearer executor-needs-this-value'
+      );
+
+      const startExecutionResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/start`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+        }
+      );
+      expect(startExecutionResponse.status).toBe(200);
+      expect((await startExecutionResponse.json()).status).toBe('running');
+
+      const nonBrowserGrantResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/artifact-upload-grant`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http' })
+        }
+      );
+      expect(nonBrowserGrantResponse.status).toBe(409);
+      expect(nonBrowserGrantResponse.headers.get('cache-control')).toBe('no-store');
+
+      const staleCompletionResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-stale' })
+        }
+      );
+      expect(staleCompletionResponse.status).toBe(409);
+
+      const completeExecutionResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/exec_http_transport/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http' })
+        }
+      );
+      expect(completeExecutionResponse.status).toBe(200);
+      expect((await completeExecutionResponse.json()).status).toBe('succeeded');
+
+      const invalidExecutionIdResponse = await fetch(
+        `${harness.baseUrl}/internal/execution-jobs/%25invalid/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseOwner: 'executor-http' })
+        }
+      );
+      expect(invalidExecutionIdResponse.status).toBe(400);
+      expect(invalidExecutionIdResponse.headers.get('cache-control')).toBe('no-store');
+
+      const originalClaimExecutionJob = harness.repository.claimExecutionJob;
+      harness.repository.claimExecutionJob = () => {
+        throw new Error('raw-sensitive-repository-error');
+      };
+      let failedTransportResponse: Response;
+
+      try {
+        failedTransportResponse = await fetch(
+          `${harness.baseUrl}/internal/execution-jobs/claim`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ leaseOwner: 'executor-http', leaseDurationMs: 60_000 })
+          }
+        );
+      } finally {
+        harness.repository.claimExecutionJob = originalClaimExecutionJob;
+      }
+
+      expect(failedTransportResponse.status).toBe(500);
+      expect(failedTransportResponse.headers.get('cache-control')).toBe('no-store');
+      const failedTransportBody = await failedTransportResponse.json();
+      expect(failedTransportBody.incidentId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
+      expect(JSON.stringify(failedTransportBody)).not.toContain('raw-sensitive-repository-error');
+
+      const originalCreateExecutionResource = harness.repository.createExecutionResource;
+      harness.repository.createExecutionResource = () => {
+        throw new Error('raw-sensitive-job-queue-error');
+      };
+      let failedJobResponse: Response;
+
+      try {
+        failedJobResponse = await fetch(`${harness.baseUrl}/v1/jobs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            url: 'https://example.com/',
+            regions: ['tokyo']
+          })
+        });
+      } finally {
+        harness.repository.createExecutionResource = originalCreateExecutionResource;
+      }
+
+      expect(failedJobResponse.status).toBe(500);
+      const failedJobBody = await failedJobResponse.json();
+      expect(failedJobBody).toMatchObject({ error: 'Failed to queue job' });
+      expect(failedJobBody.incidentId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
+      expect(JSON.stringify(failedJobBody)).not.toContain('raw-sensitive-job-queue-error');
 
       const openApiResponse = await fetch(`${harness.baseUrl}/openapi/control.json`);
       expect(openApiResponse.ok).toBe(true);
@@ -131,6 +367,21 @@ describe('api service monitoring expansion', () => {
       const property = await createProperty(harness.baseUrl);
       const routeSet = await createRouteSet(harness.baseUrl, property.id);
       const regionPack = await createRegionPack(harness.baseUrl);
+      const maskedWebhookSecretResponse = await postCheckProfile(harness.baseUrl, {
+        propertyId: property.id,
+        routeSetId: routeSet.id,
+        regionPackId: regionPack.id,
+        monitorType: 'latency',
+        latencyThresholdMs: 600,
+        webhookUrl: webhook.url,
+        webhookSecret: '[REDACTED]',
+        name: 'Reject masked webhook secret'
+      });
+      expect(maskedWebhookSecretResponse.status).toBe(400);
+      expect(await maskedWebhookSecretResponse.json()).toEqual({
+        error: 'A new webhook secret cannot use [REDACTED] as its value'
+      });
+
       const thresholdProfile = await createCheckProfile(harness.baseUrl, {
         propertyId: property.id,
         routeSetId: routeSet.id,
@@ -141,13 +392,21 @@ describe('api service monitoring expansion', () => {
         scheduleIntervalMinutes: 5
       });
 
-      const dispatchResponse = await fetch(
-        `${harness.baseUrl}/v1/scheduler/dispatch?now=2099-01-01T00:00:00.000Z`,
-        {
-          method: 'POST'
-        }
-      );
-      expect(dispatchResponse.ok).toBe(true);
+      const scheduledProfile = harness.repository.getCheckProfile(thresholdProfile.id)!;
+      harness.repository.saveCheckProfile({
+        ...scheduledProfile,
+        schedule: scheduledProfile.schedule
+          ? { ...scheduledProfile.schedule, nextRunAt: '2000-01-01T00:00:00.000Z' }
+          : null
+      });
+      const dispatchResult = await dispatchScheduledChecks({
+        apiBaseUrl: harness.baseUrl,
+        internalSecret: testInternalSecret,
+        fetchImpl: nativeFetch
+      });
+      expect(dispatchResult.payload.triggeredCount).toBe(1);
+      expect(dispatchResult.createdJobCount).toBe(1);
+      await drainExecutions(harness.baseUrl, probe.port);
 
       const thresholdReport = await waitForReport(
         harness.baseUrl,
@@ -158,6 +417,7 @@ describe('api service monitoring expansion', () => {
       expect(thresholdReport.latestRunSummary?.status).toBe('warning');
       expect(thresholdReport.latestRunSummary?.evaluation?.thresholdBreached).toBe(true);
       expect(thresholdReport.latestRunSummary?.evaluation?.failedChecks).toBe(0);
+      expect(thresholdReport.profile.request?.headers[0]?.value).toBe('[REDACTED]');
       expect(probeRequests).toHaveLength(1);
       expect(probeRequests[0]).toMatchObject({
         request: {
@@ -195,6 +455,7 @@ describe('api service monitoring expansion', () => {
         body: '{}'
       });
       expect(runResponse.ok).toBe(true);
+      await drainExecutions(harness.baseUrl, probe.port);
 
       const uptimeReport = await waitForReport(
         harness.baseUrl,
@@ -233,14 +494,23 @@ describe('api service monitoring expansion', () => {
         id: string;
         status: string;
         error: string | null;
-        result: { summary: { performanceScore: number | null }; artifacts: Array<{ kind: string }> } | null;
+        result: { scores: { performance: number | null }; artifacts: Array<{ kind: string }> } | null;
+        customHeaders: Array<{ name: string; value: string }>;
+        cookies: Array<{ name: string; value: string }>;
       };
-      expect(browserAuditCreateResponse.status).toBe(201);
-      expect(createdBrowserAudit.status).toBe('succeeded');
+      expect(browserAuditCreateResponse.status).toBe(202);
+      expect(createdBrowserAudit.status).toBe('queued');
       expect(createdBrowserAudit.error).toBeNull();
-      expect(createdBrowserAudit.result?.summary.performanceScore).toBe(0.91);
-      expect(createdBrowserAudit.result?.artifacts.some((artifact) => artifact.kind === 'html')).toBe(true);
+      expect(createdBrowserAudit.result).toBeNull();
+      expect(createdBrowserAudit.customHeaders[0]?.value).toBe('[REDACTED]');
+      expect(createdBrowserAudit.cookies[0]?.value).toBe('[REDACTED]');
+      expect(browserAuditRequests).toHaveLength(0);
+
+      await drainExecutions(harness.baseUrl, probe.port, browserAuditExecutor);
+
       expect(browserAuditRequests).toHaveLength(1);
+      expect(browserAuditRequests[0]?.customHeaders[0]?.value).toBe('Bearer smoke-token');
+      expect(browserAuditRequests[0]?.cookies[0]?.value).toBe('cookie-value');
       expect(browserAuditRequests[0]?.signature).not.toBe('pending');
       const expectedSignature = await createBrowserAuditSignature(
         'browser-audit-secret',
@@ -260,11 +530,64 @@ describe('api service monitoring expansion', () => {
       const browserAuditGetResponse = await fetch(`${harness.baseUrl}/v1/browser-audits/${createdBrowserAudit.id}`);
       const browserAuditDetail = await browserAuditGetResponse.json() as {
         id: string;
-        result: { summary: { performanceScore: number | null } } | null;
+        status: string;
+        result: {
+          scores: { performance: number | null };
+          artifacts: Array<{
+            id: string;
+            kind: string;
+            url: string;
+            filename: string;
+            contentType: string;
+            byteSize: number;
+            sha256: string;
+          }>;
+        } | null;
       };
       expect(browserAuditGetResponse.status).toBe(200);
       expect(browserAuditDetail.id).toBe(createdBrowserAudit.id);
-      expect(browserAuditDetail.result?.summary.performanceScore).toBe(0.91);
+      expect(browserAuditDetail.status).toBe('succeeded');
+      expect(browserAuditDetail.result?.scores.performance).toBe(0.91);
+      expect(
+        browserAuditDetail.result?.artifacts.some(
+          (artifact) => artifact.kind === 'lighthouse-html'
+        )
+      ).toBe(true);
+      const htmlArtifact = browserAuditDetail.result?.artifacts.find(
+        (artifact) => artifact.kind === 'lighthouse-html'
+      );
+      if (!htmlArtifact) {
+        throw new Error('Expected a persisted Lighthouse HTML artifact');
+      }
+      expect(htmlArtifact.url).toBe(
+        `/v1/browser-audits/${createdBrowserAudit.id}/artifacts/${htmlArtifact.id}`
+      );
+      expect(htmlArtifact.filename).toBe(`${createdBrowserAudit.id}.html`);
+      expect(htmlArtifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect((await nativeFetch(`${harness.baseUrl}${htmlArtifact.url}`)).status).toBe(401);
+      const artifactDownload = await fetch(`${harness.baseUrl}${htmlArtifact.url}`);
+      expect(artifactDownload.status).toBe(200);
+      expect(artifactDownload.headers.get('content-type')).toBe('text/html');
+      expect(artifactDownload.headers.get('content-disposition')).toContain(
+        `filename="${createdBrowserAudit.id}.html"`
+      );
+      expect(await artifactDownload.text()).toContain(`<title>${createdBrowserAudit.id}</title>`);
+      const jsonArtifact = browserAuditDetail.result?.artifacts.find(
+        (artifact) => artifact.kind === 'lighthouse-json'
+      );
+      if (!jsonArtifact) {
+        throw new Error('Expected a persisted Lighthouse JSON artifact');
+      }
+      const jsonArtifactDownload = await fetch(`${harness.baseUrl}${jsonArtifact.url}`);
+      const expectedJsonArtifact = JSON.stringify({
+        executionId: createdBrowserAudit.id,
+        score: 0.91
+      });
+      expect(jsonArtifact.byteSize)
+        .toBe(new TextEncoder().encode(expectedJsonArtifact).byteLength);
+      expect(jsonArtifactDownload.headers.get('x-webperf-artifact-bytes'))
+        .toBe(String(new TextEncoder().encode(expectedJsonArtifact).byteLength));
+      expect(await jsonArtifactDownload.text()).toBe(expectedJsonArtifact);
 
       browserAuditWorker.setScenario({
         status: 'failed',
@@ -292,10 +615,22 @@ describe('api service monitoring expansion', () => {
         error: string | null;
         result: unknown;
       };
-      expect(failedBrowserAuditResponse.status).toBe(201);
-      expect(failedBrowserAudit.status).toBe('failed');
-      expect(failedBrowserAudit.error).toBe('Lighthouse run failed');
+      expect(failedBrowserAuditResponse.status).toBe(202);
+      expect(failedBrowserAudit.status).toBe('queued');
+      expect(failedBrowserAudit.error).toBeNull();
       expect(failedBrowserAudit.result).toBeNull();
+
+      await drainExecutions(harness.baseUrl, probe.port, browserAuditExecutor);
+      const failedBrowserAuditDetail = await (
+        await fetch(`${harness.baseUrl}/v1/browser-audits/${failedBrowserAudit.id}`)
+      ).json() as {
+        status: string;
+        error: string | null;
+        result: unknown;
+      };
+      expect(failedBrowserAuditDetail.status).toBe('failed');
+      expect(failedBrowserAuditDetail.error).toBe('Lighthouse run failed');
+      expect(failedBrowserAuditDetail.result).toBeNull();
 
       const failedBrowserAuditListResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=10`);
       const failedBrowserAuditListPayload = await failedBrowserAuditListResponse.json() as {
@@ -326,6 +661,7 @@ describe('api service monitoring expansion', () => {
       expect(filteredChecksPayload.checks[0]?.name).toBe('Profile uptime');
 
       await runCheckProfile(harness.baseUrl, thresholdProfile.id);
+      await drainExecutions(harness.baseUrl, probe.port);
       const runs = await waitForRuns(harness.baseUrl, thresholdProfile.id, 2);
       const latestRun = runs[0]!;
       const previousRun = runs[1]!;
@@ -512,7 +848,7 @@ describe('api service monitoring expansion', () => {
           }
         })
       });
-      expect(alphaAuditResponse.status).toBe(201);
+      expect(alphaAuditResponse.status).toBe(202);
 
       const betaAuditResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
         method: 'POST',
@@ -530,7 +866,7 @@ describe('api service monitoring expansion', () => {
           }
         })
       });
-      expect(betaAuditResponse.status).toBe(201);
+      expect(betaAuditResponse.status).toBe(202);
 
       const browserAuditsPageResponse = await fetch(`${harness.baseUrl}/v1/browser-audits?pageSize=1`);
       const browserAuditsPagePayload = await browserAuditsPageResponse.json() as {
@@ -660,6 +996,23 @@ describe('api service monitoring expansion', () => {
       expect(compatibilityChecksPayload.pageInfo.totalCount).toBe(1);
       expect(compatibilityChecksPayload.pageInfo.filter).toBe('uptime');
       expect(compatibilityChecksPayload.checkProfiles[0]?.name).toBe('Profile uptime');
+
+      for (const [legacyPath, canonicalPath] of [
+        ['/v1/properties', '/v1/sites'],
+        ['/v1/route-sets', '/v1/route-groups'],
+        ['/v1/region-packs', '/v1/region-sets'],
+        ['/v1/check-profiles', '/v1/checks']
+      ] as const) {
+        const compatibilityResponse = await fetch(`${harness.baseUrl}${legacyPath}`);
+        expect(compatibilityResponse.status).toBe(200);
+        expect(compatibilityResponse.headers.get('deprecation')).toBe('true');
+        expect(compatibilityResponse.headers.get('link')).toContain(canonicalPath);
+        expect(compatibilityResponse.headers.get('warning')).toContain('Deprecated API path');
+      }
+
+      const canonicalSitesResponse = await fetch(`${harness.baseUrl}/v1/sites`);
+      expect(canonicalSitesResponse.status).toBe(200);
+      expect(canonicalSitesResponse.headers.get('deprecation')).toBeNull();
 
       const stabilizedPublicOpenApiResponse = await fetch(`${harness.baseUrl}/openapi/public.json`);
       const stabilizedPublicOpenApi = await stabilizedPublicOpenApiResponse.json() as {
@@ -791,16 +1144,22 @@ const startBrowserAuditWorkerServer = (
 
       if (url.pathname === '/capabilities') {
         return Response.json({
+          protocolVersion: 'v1',
           flowDslVersion: 'v1',
+          artifactRegistryVersion: 'v1',
           toolchain: {
-            flowDslVersion: 'v1',
-            bunVersion: '1.3.11',
-            chromeVersion: '136.0.0.0',
-            puppeteerVersion: '24.7.1',
-            lighthouseVersion: '12.6.0'
+            engine: { id: 'lighthouse', version: '12.6.0' },
+            browser: { name: 'Chrome', version: '136.0.0.0' },
+            runtime: { name: 'Bun', version: '1.3.11' },
+            components: [{ name: 'puppeteer-core', version: '24.7.1' }]
           },
           supportedCheckpointModes: ['navigation', 'snapshot', 'timespan'],
-          supportedArtifactKinds: ['json', 'html', 'screenshot', 'trace'],
+          supportedArtifactKinds: [
+            'lighthouse-json',
+            'lighthouse-html',
+            'screenshot',
+            'trace'
+          ],
           unsupportedFeatures: [],
           limits: {
             maxSteps: 20,
@@ -823,6 +1182,86 @@ const startBrowserAuditWorkerServer = (
 
       const startedAt = new Date().toISOString();
       const completedAt = new Date(Date.now() + 250).toISOString();
+      const artifactPayloads = current.status === 'succeeded'
+        ? [
+            {
+              kind: 'lighthouse-json',
+              filename: `${payload.executionId}.json`,
+              contentType: 'application/json',
+              body: JSON.stringify({ executionId: payload.executionId, score: 0.91 })
+            },
+            {
+              kind: 'lighthouse-html',
+              filename: `${payload.executionId}.html`,
+              contentType: 'text/html',
+              body: `<!doctype html><title>${payload.executionId}</title>`
+            }
+          ]
+        : [];
+      if (current.status === 'succeeded' && payload.artifactUpload) {
+        const uploadPath = `${payload.artifactUpload.baseUrl}/internal/browser-audits/${payload.executionId}/artifacts`;
+        const scopedHeaders = {
+          authorization: `Bearer ${payload.artifactUpload.bearerToken}`,
+          'content-type': 'application/json',
+          'x-artifact-size': '0'
+        };
+        const negativeChecks = await Promise.all([
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=report.json`, {
+            method: 'POST',
+            headers: {
+              ...scopedHeaders,
+              authorization: `${scopedHeaders.authorization}tampered`
+            }
+          }),
+          nativeFetch(
+            `${payload.artifactUpload.baseUrl}/internal/browser-audits/${payload.executionId}_other/artifacts?kind=lighthouse-json&filename=report.json`,
+            { method: 'POST', headers: scopedHeaders }
+          ),
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=${encodeURIComponent('../report.json')}`, {
+            method: 'POST',
+            headers: scopedHeaders
+          }),
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=report.json`, {
+            method: 'POST',
+            headers: { ...scopedHeaders, 'content-type': 'text/html' }
+          }),
+          nativeFetch(`${uploadPath}?kind=lighthouse-json&filename=report.json`, {
+            method: 'POST',
+            headers: {
+              ...scopedHeaders,
+              'x-artifact-size': String(payload.artifactUpload.maxArtifactBytes + 1)
+            }
+          })
+        ]);
+        expect(negativeChecks.map((response) => response.status))
+          .toEqual([401, 401, 400, 415, 413]);
+      }
+      const artifacts = await Promise.all(artifactPayloads.map(async (artifact) => {
+        if (!payload.artifactUpload) {
+          throw new Error('Expected a scoped artifact upload configuration');
+        }
+
+        const body = new TextEncoder().encode(artifact.body);
+        const response = await nativeFetch(
+          `${payload.artifactUpload.baseUrl}/internal/browser-audits/${payload.executionId}/artifacts?kind=${artifact.kind}&filename=${encodeURIComponent(artifact.filename)}`,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${payload.artifactUpload.bearerToken}`,
+              'content-type': artifact.contentType,
+              'content-length': String(body.byteLength),
+              'x-artifact-size': String(body.byteLength)
+            },
+            body
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Mock artifact upload failed: ${response.status} ${await response.text()}`);
+        }
+
+        return response.json();
+      }));
 
       return Response.json({
         executionId: payload.executionId,
@@ -830,13 +1269,7 @@ const startBrowserAuditWorkerServer = (
         result:
           current.status === 'succeeded'
             ? {
-                summary: {
-                  finalUrl: payload.targetUrl,
-                  statusCode: 200,
-                  performanceScore: 0.91,
-                  accessibilityScore: 0.96,
-                  bestPracticesScore: 0.89,
-                  seoScore: 0.94,
+                coreMetrics: {
                   fcpMs: 1_120,
                   lcpMs: 1_820,
                   cls: 0.02,
@@ -844,32 +1277,42 @@ const startBrowserAuditWorkerServer = (
                   tbtMs: 88,
                   speedIndexMs: 1_540
                 },
-                checkpoints: [],
-                issues: [],
-                artifacts: [
-                  {
-                    id: `${payload.executionId}_json`,
-                    kind: 'json',
-                    url: `https://artifacts.test/${payload.executionId}.json`,
-                    contentType: 'application/json',
-                    byteSize: 4096,
-                    createdAt: completedAt
+                scores: {
+                  performance: 0.91,
+                  accessibility: 0.96,
+                  bestPractices: 0.89,
+                  seo: 0.94
+                },
+                extendedMetrics: [],
+                checkpoints: [{
+                  id: 'navigation',
+                  mode: 'navigation',
+                  label: 'Navigation',
+                  finalUrl: payload.targetUrl,
+                  statusCode: 200,
+                  coreMetrics: {
+                    fcpMs: 1_120,
+                    lcpMs: 1_820,
+                    cls: 0.02,
+                    inpMs: 145,
+                    tbtMs: 88,
+                    speedIndexMs: 1_540
                   },
-                  {
-                    id: `${payload.executionId}_html`,
-                    kind: 'html',
-                    url: `https://artifacts.test/${payload.executionId}.html`,
-                    contentType: 'text/html',
-                    byteSize: 6144,
-                    createdAt: completedAt
-                  }
-                ],
+                  scores: {
+                    performance: 0.91,
+                    accessibility: 0.96,
+                    bestPractices: 0.89,
+                    seo: 0.94
+                  },
+                  extendedMetrics: []
+                }],
+                issues: [],
+                artifacts,
                 toolchain: {
-                  flowDslVersion: 'v1',
-                  bunVersion: '1.3.11',
-                  chromeVersion: '136.0.0.0',
-                  puppeteerVersion: '24.7.1',
-                  lighthouseVersion: '12.6.0'
+                  engine: { id: 'lighthouse', version: '12.6.0' },
+                  browser: { name: 'Chrome', version: '136.0.0.0' },
+                  runtime: { name: 'Bun', version: '1.3.11' },
+                  components: [{ name: 'puppeteer-core', version: '24.7.1' }]
                 },
                 startedAt,
                 completedAt
@@ -898,7 +1341,6 @@ const startSelfhostHarness = async (
   probePort: number,
   options?: {
     browserAuditBaseUrl?: string;
-    browserAuditSharedSecret?: string;
   }
 ) => {
   const controlPort = await openPort();
@@ -907,30 +1349,37 @@ const startSelfhostHarness = async (
   process.env.SELFHOST_API_HOST = '127.0.0.1';
   process.env.SELFHOST_API_PORT = `${controlPort}`;
   process.env.SELFHOST_DATABASE_PATH = databasePath;
-  process.env.PROBE_SHARED_SECRET = 'dev-shared-secret';
+  process.env.SELFHOST_ARTIFACTS_PATH = join(databaseDirectory, 'artifacts');
+  process.env.SELFHOST_ADMIN_TOKEN = testAdminToken;
+  process.env.SELFHOST_ADMIN_TOKEN_NEXT = '';
+  process.env.SELFHOST_INTERNAL_SECRET = testInternalSecret;
+  process.env.SELFHOST_INTERNAL_SECRET_NEXT = '';
   process.env.SELFHOST_ACTIVE_REGION_CODES_JSON = '["tokyo"]';
   process.env.SELFHOST_REGION_IDS_JSON = '{"tokyo":"JP"}';
   process.env.SELFHOST_PROBE_BASE_URLS_JSON = `{"tokyo":"http://127.0.0.1:${probePort}"}`;
   process.env.SELFHOST_MAX_TARGET_ATTEMPTS = '1';
 
-  if (options?.browserAuditBaseUrl && options.browserAuditSharedSecret) {
+  if (options?.browserAuditBaseUrl) {
     process.env.SELFHOST_BROWSER_AUDIT_BASE_URL = options.browserAuditBaseUrl;
-    process.env.BROWSER_AUDIT_SHARED_SECRET = options.browserAuditSharedSecret;
-    process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT = '';
   } else {
     delete process.env.SELFHOST_BROWSER_AUDIT_BASE_URL;
-    delete process.env.BROWSER_AUDIT_SHARED_SECRET;
-    delete process.env.BROWSER_AUDIT_SHARED_SECRET_NEXT;
   }
 
+  const baseUrl = `http://127.0.0.1:${controlPort}`;
+  apiCredentialsByOrigin.set(baseUrl, {
+    adminToken: testAdminToken,
+    internalSecret: testInternalSecret
+  });
   const modulePath = new URL(`../src/index.ts?instance=${crypto.randomUUID()}`, import.meta.url).href;
-  const module = (await import(modulePath)) as { server: { stop: (closeActiveConnections?: boolean) => void } };
+  const module = (await import(modulePath)) as {
+    server: { stop: (closeActiveConnections?: boolean) => void };
+    repository: JobRepository;
+  };
   startedServers.push(module.server);
 
-  const baseUrl = `http://127.0.0.1:${controlPort}`;
   await waitForHealth(baseUrl);
 
-  return { baseUrl };
+  return { baseUrl, repository: module.repository };
 };
 
 const waitForHealth = async (baseUrl: string) => {
@@ -949,6 +1398,83 @@ const waitForHealth = async (baseUrl: string) => {
   }
 
   throw new Error(`Timed out waiting for ${baseUrl}/health`);
+};
+
+const drainExecutions = async (
+  baseUrl: string,
+  probePort: number,
+  browserAudit?: { baseUrl: string; sharedSecret: string }
+) => {
+  const leaseOwner = `executor-http-${crypto.randomUUID()}`;
+  const client = createExecutorApiClient({
+    baseUrl,
+    internalSecret: testInternalSecret
+  });
+  const networkHandler = createNetworkExecutionHandler({
+    client,
+    leaseOwner,
+    probeSharedSecret: testProbeSecret,
+    probeBaseUrls: { tokyo: `http://127.0.0.1:${probePort}` }
+  });
+  const webhookHandler = createWebhookExecutionHandler({
+    client,
+    leaseOwner,
+    validateUrl: () => {},
+    // The integration receiver is loopback-only; production uses the executor's
+    // DNS-pinned public-network transport instead of this local test adapter.
+    requestImpl: async (url, init) => fetch(url, {
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+      signal: init.signal,
+      redirect: 'manual'
+    })
+  });
+  const browserAuditHandler = createBrowserAuditExecutionHandler({
+    client,
+    leaseOwner,
+    browserAuditSharedSecret: browserAudit?.sharedSecret ?? defaultBrowserAuditSecret,
+    ...(browserAudit ? { browserAuditBaseUrl: browserAudit.baseUrl } : {})
+  });
+  const logger: ExecutorLogger = {
+    info: () => {},
+    error: () => {}
+  };
+
+  while (true) {
+    const executionJob = await client.claim({ leaseOwner, leaseDurationMs: 60_000 });
+
+    if (!executionJob) {
+      return;
+    }
+
+    await processExecutionJob({
+      client,
+      handler: async (job, signal) => {
+        if (job.kind === 'network_probe') {
+          await networkHandler(job, signal);
+          return;
+        }
+
+        if (job.kind === 'webhook_delivery') {
+          await webhookHandler(job, signal);
+          return;
+        }
+
+        if (job.kind === 'browser_audit') {
+          await browserAuditHandler(job, signal);
+          return;
+        }
+
+        throw new Error('Unexpected execution kind in network test drain');
+      },
+      executionJob,
+      lease: { leaseOwner, leaseDurationMs: 60_000 },
+      heartbeatIntervalMs: 20_000,
+      maxExecutionMs: 60_000,
+      logger
+    });
+  }
 };
 
 const waitForReport = async (
@@ -1034,21 +1560,21 @@ const createRegionPack = async (baseUrl: string) => {
   return payload.regionPack as { id: string };
 };
 
-const createCheckProfile = async (
-  baseUrl: string,
-  input: {
-    propertyId: string;
-    routeSetId: string;
-    regionPackId: string;
-    monitorType: 'latency' | 'uptime';
-    latencyThresholdMs: number | null;
-    webhookUrl: string;
-    scheduleIntervalMinutes?: number;
-    name?: string;
-    note?: string;
-  }
-) => {
-  const response = await fetch(`${baseUrl}/v1/check-profiles`, {
+type CheckProfileTestInput = {
+  propertyId: string;
+  routeSetId: string;
+  regionPackId: string;
+  monitorType: 'latency' | 'uptime';
+  latencyThresholdMs: number | null;
+  webhookUrl: string;
+  webhookSecret?: string;
+  scheduleIntervalMinutes?: number;
+  name?: string;
+  note?: string;
+};
+
+const postCheckProfile = async (baseUrl: string, input: CheckProfileTestInput) =>
+  fetch(`${baseUrl}/v1/check-profiles`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json'
@@ -1075,7 +1601,11 @@ const createCheckProfile = async (
       },
       alerts: {
         enabled: true,
-        webhookTargets: [{ name: 'Primary', url: input.webhookUrl }],
+        webhookTargets: [{
+          name: 'Primary',
+          url: input.webhookUrl,
+          secret: input.webhookSecret
+        }],
         triggers: {
           onFailure: true,
           onLatencyThresholdBreach: true,
@@ -1085,6 +1615,9 @@ const createCheckProfile = async (
       scheduleIntervalMinutes: input.scheduleIntervalMinutes
     })
   });
+
+const createCheckProfile = async (baseUrl: string, input: CheckProfileTestInput) => {
+  const response = await postCheckProfile(baseUrl, input);
   const payload = await response.json();
   expect(response.ok).toBe(true);
   return payload.profile as { id: string };

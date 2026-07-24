@@ -2,18 +2,69 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-compose_file="$root_dir/infra/docker-compose/docker-compose.yml"
+compose_file="$root_dir/infra/docker-compose/compose.yml"
+dev_compose_file="$root_dir/infra/docker-compose/compose.dev.yml"
+apparmor_compose_file="$root_dir/infra/docker-compose/compose.apparmor.yml"
+compose_project="webperf-smoke-$$"
 profile="${COMPOSE_PROFILE:-default}"
 temp_env="$(mktemp)"
+temp_artifact="$(mktemp)"
+compose_files=(-f "$compose_file" -f "$dev_compose_file")
 
-cleanup() {
-  local extra_args=()
-  if [[ "$profile" == "browser-audit" ]]; then
-    extra_args+=(--profile browser-audit)
+if [[ "$profile" == "browser-audit" ]] && docker info --format '{{range .SecurityOptions}}{{println .}}{{end}}' | grep -qx 'name=apparmor'; then
+  compose_files+=(-f "$apparmor_compose_file")
+fi
+
+compose() {
+  docker compose \
+    --project-name "$compose_project" \
+    --env-file "$temp_env" \
+    "${compose_files[@]}" \
+    "$@"
+}
+
+assert_service_unpublished() {
+  local service="$1"
+  local label="$2"
+  shift 2
+  local -a profile_flags=("$@")
+  local container_id
+  local published_bindings
+
+  container_id="$(compose "${profile_flags[@]}" ps -q "$service")"
+  if [[ -z "$container_id" ]]; then
+    echo "Expected ${label} container to exist" >&2
+    exit 1
   fi
 
-  docker compose --env-file "$temp_env" "${extra_args[@]}" -f "$compose_file" down -v --remove-orphans >/dev/null 2>&1 || true
+  published_bindings="$(
+    docker inspect \
+      --format '{{range $port, $bindings := .HostConfig.PortBindings}}{{if $bindings}}{{$port}}={{json $bindings}} {{end}}{{end}}' \
+      "$container_id"
+  )"
+  if [[ -n "$published_bindings" ]]; then
+    echo "Expected ${label} to stay unpublished, got ${published_bindings}" >&2
+    exit 1
+  fi
+}
+
+host_port_from_mapping() {
+  local mapping="$1"
+  local label="$2"
+  local port="${mapping##*:}"
+
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    echo "Unable to determine ${label} host port from ${mapping:-no mapping}" >&2
+    exit 1
+  fi
+
+  echo "$port"
+}
+
+cleanup() {
+  compose --profile browser-audit --profile debug down -v --remove-orphans >/dev/null 2>&1 || true
   rm -f "$temp_env"
+  rm -f "$temp_artifact"
 }
 
 trap cleanup EXIT
@@ -34,39 +85,100 @@ for raw in env_path.read_text().splitlines():
     key, value = raw.split('=', 1)
     values[key] = value
 
-values['PROBE_SHARED_SECRET'] = 'dev-shared-secret'
+values['SELFHOST_ADMIN_TOKEN'] = 'smoke-admin-token-value'
+values['SELFHOST_INTERNAL_SECRET'] = 'smoke-internal-secret-value'
+values['PROBE_SHARED_SECRET'] = 'smoke-probe-shared-secret'
 values['BROWSER_AUDIT_SHARED_SECRET_NEXT'] = ''
-values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-worker:8080'
+values['BROWSER_AUDIT_SHARED_SECRET'] = 'smoke-browser-audit-shared-secret'
 
 if profile == 'browser-audit':
-    values['BROWSER_AUDIT_SHARED_SECRET'] = 'dev-browser-audit-shared-secret'
+    values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'
 else:
-    values['BROWSER_AUDIT_SHARED_SECRET'] = ''
+    values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = ''
 
 env_path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
 PY
 
-extra_args=()
+profile_args=()
 if [[ "$profile" == "browser-audit" ]]; then
-  extra_args+=(--profile browser-audit)
+  profile_args+=(--profile browser-audit)
 fi
 
-docker compose --env-file "$temp_env" "${extra_args[@]}" -f "$compose_file" up -d --build
+compose "${profile_args[@]}" up -d --build
+console_mapping="$(compose "${profile_args[@]}" port console 3000)"
+console_host_port="$(host_port_from_mapping "$console_mapping" "console")"
+console_url="http://127.0.0.1:${console_host_port}"
 
-for _ in {1..60}; do
-  if curl -fsS http://127.0.0.1:8788/health >/dev/null 2>&1; then
+for _ in {1..90}; do
+  if curl -fsS "${console_url}/" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
 
-curl -fsS http://127.0.0.1:8788/health >/dev/null
-bun run smoke:console
+curl -fsS "${console_url}/" >/dev/null
+
+if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:* ]]; then
+  echo "Expected console to bind on loopback, got ${console_mapping:-no mapping}" >&2
+  exit 1
+fi
+
+assert_service_unpublished api "API" "${profile_args[@]}"
 
 if [[ "$profile" == "browser-audit" ]]; then
-  curl -fsS http://127.0.0.1:8081/healthz >/dev/null
+  assert_service_unpublished browser-audit-lighthouse "Browser Audit runner" "${profile_args[@]}"
+
+  browser_container_id="$(compose "${profile_args[@]}" ps -q browser-audit-lighthouse)"
+  if [[ -z "$browser_container_id" ]]; then
+    echo "Browser Audit runner container was not created" >&2
+    exit 1
+  fi
+  browser_health=""
+  for _ in {1..90}; do
+    browser_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$browser_container_id")"
+    if [[ "$browser_health" == "healthy" ]]; then
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$browser_health" != "healthy" ]]; then
+    docker exec "$browser_container_id" bun -e '
+      const response = await fetch("http://127.0.0.1:8080/healthz", {
+        signal: AbortSignal.timeout(5000)
+      });
+      const body = await response.text();
+      console.error(body.slice(0, 4096));
+    ' >&2 || true
+    compose "${profile_args[@]}" logs --no-color browser-audit-lighthouse >&2
+    echo "Browser Audit runner did not become healthy (status: ${browser_health:-unknown})" >&2
+    exit 1
+  fi
+fi
+
+BASE_URL="$console_url" bun run smoke:console
+
+compose --profile debug up -d --no-deps api-debug
+api_debug_mapping="$(compose --profile debug port api-debug 8789)"
+api_debug_host_port="$(host_port_from_mapping "$api_debug_mapping" "API debug proxy")"
+api_debug_url="http://127.0.0.1:${api_debug_host_port}"
+
+for _ in {1..60}; do
+  if curl -fsS "${api_debug_url}/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+curl -fsS "${api_debug_url}/health" >/dev/null
+if [[ "$api_debug_mapping" != 127.0.0.1:* ]] && [[ "$api_debug_mapping" != \[::1\]:* ]]; then
+  echo "Expected API debug proxy to bind on loopback, got ${api_debug_mapping:-no mapping}" >&2
+  exit 1
+fi
+
+if [[ "$profile" == "browser-audit" ]]; then
   audit_response="$(
-    curl -fsS -X POST http://127.0.0.1:8788/v1/browser-audits \
+    curl -fsS -X POST "${api_debug_url}/v1/browser-audits" \
+      -H 'authorization: Bearer smoke-admin-token-value' \
       -H 'content-type: application/json' \
       -d '{
         "targetUrl": "https://example.com",
@@ -81,10 +193,85 @@ if [[ "$profile" == "browser-audit" ]]; then
 
   bun -e '
     const payload = JSON.parse(process.argv[1]);
+    if (payload.status !== "queued") {
+      throw new Error(`Expected queued browser audit, got ${payload.status}`);
+    }
+  ' "$audit_response"
+
+  audit_id="$(bun -e 'console.log(JSON.parse(process.argv[1]).id)' "$audit_response")"
+  audit_detail="$audit_response"
+  audit_status="queued"
+  for _ in {1..60}; do
+    audit_detail="$(
+      curl -fsS "${api_debug_url}/v1/browser-audits/${audit_id}" \
+        -H 'authorization: Bearer smoke-admin-token-value'
+    )"
+    audit_status="$(bun -e 'console.log(JSON.parse(process.argv[1]).status)' "$audit_detail")"
+    if [[ "$audit_status" == "succeeded" || "$audit_status" == "failed" ]]; then
+      break
+    fi
+    sleep 2
+  done
+
+  if [[ "$audit_status" != "succeeded" && "$audit_status" != "failed" ]]; then
+    echo "Browser Audit ${audit_id} timed out while waiting for a terminal status" >&2
+    exit 1
+  fi
+
+  if [[ "$audit_status" == "failed" ]]; then
+    echo "Browser Audit ${audit_id} failed; bounded API detail follows" >&2
+    bun -e '
+      const payload = JSON.parse(process.argv[1]);
+      console.error(JSON.stringify(payload).slice(0, 4096));
+    ' "$audit_detail" >&2 || true
+    echo "Recent Browser Audit service logs follow" >&2
+    compose "${profile_args[@]}" logs --no-color --tail 120 \
+      browser-audit-lighthouse executor api >&2 || true
+  fi
+
+  bun -e '
+    const payload = JSON.parse(process.argv[1]);
     if (payload.status !== "succeeded") {
       throw new Error(`Expected succeeded browser audit, got ${payload.status}`);
     }
-  ' "$audit_response"
+    if (!payload.result?.artifacts?.length) {
+      throw new Error("Expected the browser audit to persist at least one artifact");
+    }
+  ' "$audit_detail"
+
+  artifact_url="$(bun -e '
+    const artifact = JSON.parse(process.argv[1]).result.artifacts[0];
+    if (!artifact.url.startsWith("/v1/browser-audits/") || !artifact.sha256) {
+      throw new Error("Expected a local artifact reference with a SHA-256 digest");
+    }
+    console.log(artifact.url);
+  ' "$audit_detail")"
+  expected_sha256="$(bun -e '
+    console.log(JSON.parse(process.argv[1]).result.artifacts[0].sha256);
+  ' "$audit_detail")"
+  unauthenticated_status="$(
+    curl -sS -o /dev/null -w '%{http_code}' "${api_debug_url}${artifact_url}"
+  )"
+  if [[ "$unauthenticated_status" != "401" ]]; then
+    echo "Expected unauthenticated artifact download to return 401, got ${unauthenticated_status}" >&2
+    exit 1
+  fi
+  curl -fsS "${api_debug_url}${artifact_url}" \
+    -H 'authorization: Bearer smoke-admin-token-value' \
+    -o "$temp_artifact"
+  if [[ ! -s "$temp_artifact" ]]; then
+    echo "Expected a non-empty Browser Audit artifact download" >&2
+    exit 1
+  fi
+  downloaded_sha256="$(bun -e '
+    const { createHash } = await import("node:crypto");
+    const { readFile } = await import("node:fs/promises");
+    console.log(createHash("sha256").update(await readFile(process.argv[1])).digest("hex"));
+  ' "$temp_artifact")"
+  if [[ "$downloaded_sha256" != "$expected_sha256" ]]; then
+    echo "Artifact SHA-256 mismatch: expected ${expected_sha256}, got ${downloaded_sha256}" >&2
+    exit 1
+  fi
 fi
 
 echo "{\"ok\":true,\"profile\":\"$profile\"}"

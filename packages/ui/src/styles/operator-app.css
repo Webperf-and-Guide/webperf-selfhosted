@@ -563,10 +563,6 @@
     @apply min-h-[220px] place-items-center border-dashed bg-white/[0.025] text-center;
   }
 
-  .turnstile-shell {
-    @apply overflow-auto;
-  }
-
   @media (max-width: 940px) {
     .workspace-map,
     .hero,

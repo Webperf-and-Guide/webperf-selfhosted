@@ -6,6 +6,16 @@ import {
   emptyStringToUndefined
 } from './shared';
 
+export const defaultSelfhostMaxArtifactBytes = 25_000_000;
+export const maximumSelfhostMaxArtifactBytes = 250_000_000;
+
+const normalizedBoolean = (defaultValue: 'true' | 'false') => z.preprocess(
+  (value) => typeof value === 'string'
+    ? value.trim().toLowerCase()
+    : value ?? defaultValue,
+  z.enum(['true', 'false']).transform((value) => value === 'true')
+);
+
 export const selfhostApiEnvSchema = z.object({
   SELFHOST_API_HOST: z.string().min(1).default('0.0.0.0'),
   SELFHOST_API_PORT: z.preprocess(
@@ -13,22 +23,52 @@ export const selfhostApiEnvSchema = z.object({
     z.coerce.number().int().positive()
   ),
   SELFHOST_DATABASE_PATH: z.string().min(1).default('./data/webperf.sqlite'),
+  SELFHOST_ARTIFACTS_PATH: z.string().trim().min(1).default('./data/artifacts'),
+  SELFHOST_ARTIFACT_UPLOAD_BASE_URL: emptyStringToUndefined(z.string().url()),
+  SELFHOST_MAX_ARTIFACT_BYTES: z.preprocess(
+    (value) => value ?? String(defaultSelfhostMaxArtifactBytes),
+    z.coerce.number().int().positive().max(maximumSelfhostMaxArtifactBytes)
+  ),
+  SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS: z.preprocess(
+    (value) => value ?? '900',
+    z.coerce.number().int().min(60).max(3_600)
+  ),
   SELFHOST_RETENTION_DAYS: z.preprocess(
     (value) => value ?? '30',
     z.coerce.number().int().positive()
   ),
-  PROBE_SHARED_SECRET: emptyStringToUndefined(z.string().min(8)).default('dev-shared-secret'),
-  PROBE_SHARED_SECRET_NEXT: emptyStringToUndefined(z.string().min(8)),
-  BROWSER_AUDIT_SHARED_SECRET: emptyStringToUndefined(z.string().min(8)),
-  BROWSER_AUDIT_SHARED_SECRET_NEXT: emptyStringToUndefined(z.string().min(8)),
+  SELFHOST_MIGRATION_BACKUP: normalizedBoolean('false'),
+  SELFHOST_ADMIN_TOKEN: z.string().trim().min(16),
+  SELFHOST_ADMIN_TOKEN_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
+  SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
+  SELFHOST_INTERNAL_SECRET_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
   SELFHOST_ACTIVE_REGION_CODES_JSON: z.string().default(defaultSelfhostRegionCodesJson),
   SELFHOST_REGION_IDS_JSON: z.string().default(defaultRegionIdsJson),
   SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
-  SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()).default('http://127.0.0.1:8081'),
+  SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
   SELFHOST_MAX_TARGET_ATTEMPTS: z.preprocess(
-    (value) => value ?? '1',
-    z.coerce.number().int().positive()
+    (value) => value ?? '3',
+    z.coerce.number().int().positive().max(20)
   )
+}).superRefine((config, context) => {
+  if (config.SELFHOST_ARTIFACT_UPLOAD_BASE_URL) {
+    const url = new URL(config.SELFHOST_ARTIFACT_UPLOAD_BASE_URL);
+
+    if (
+      !['http:', 'https:'].includes(url.protocol)
+      || url.username
+      || url.password
+      || url.pathname !== '/'
+      || url.search
+      || url.hash
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Artifact upload base URL must be an HTTP(S) origin without path, credentials, query, or fragment',
+        path: ['SELFHOST_ARTIFACT_UPLOAD_BASE_URL']
+      });
+    }
+  }
 });
 
 export const parseSelfhostApiVars = (
@@ -38,11 +78,16 @@ export const parseSelfhostApiVars = (
     SELFHOST_API_HOST: input.SELFHOST_API_HOST,
     SELFHOST_API_PORT: input.SELFHOST_API_PORT,
     SELFHOST_DATABASE_PATH: input.SELFHOST_DATABASE_PATH,
+    SELFHOST_ARTIFACTS_PATH: input.SELFHOST_ARTIFACTS_PATH,
+    SELFHOST_ARTIFACT_UPLOAD_BASE_URL: input.SELFHOST_ARTIFACT_UPLOAD_BASE_URL,
+    SELFHOST_MAX_ARTIFACT_BYTES: input.SELFHOST_MAX_ARTIFACT_BYTES,
+    SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS: input.SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS,
     SELFHOST_RETENTION_DAYS: input.SELFHOST_RETENTION_DAYS,
-    PROBE_SHARED_SECRET: input.PROBE_SHARED_SECRET,
-    PROBE_SHARED_SECRET_NEXT: input.PROBE_SHARED_SECRET_NEXT,
-    BROWSER_AUDIT_SHARED_SECRET: input.BROWSER_AUDIT_SHARED_SECRET,
-    BROWSER_AUDIT_SHARED_SECRET_NEXT: input.BROWSER_AUDIT_SHARED_SECRET_NEXT,
+    SELFHOST_MIGRATION_BACKUP: input.SELFHOST_MIGRATION_BACKUP,
+    SELFHOST_ADMIN_TOKEN: input.SELFHOST_ADMIN_TOKEN,
+    SELFHOST_ADMIN_TOKEN_NEXT: input.SELFHOST_ADMIN_TOKEN_NEXT,
+    SELFHOST_INTERNAL_SECRET: input.SELFHOST_INTERNAL_SECRET,
+    SELFHOST_INTERNAL_SECRET_NEXT: input.SELFHOST_INTERNAL_SECRET_NEXT,
     SELFHOST_ACTIVE_REGION_CODES_JSON: input.SELFHOST_ACTIVE_REGION_CODES_JSON,
     SELFHOST_REGION_IDS_JSON: input.SELFHOST_REGION_IDS_JSON,
     SELFHOST_PROBE_BASE_URLS_JSON: input.SELFHOST_PROBE_BASE_URLS_JSON,

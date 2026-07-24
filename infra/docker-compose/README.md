@@ -1,69 +1,108 @@
 # Compose Bundle
 
-This folder contains the local Compose bundle for the self-hosted stack.
+This directory contains two Compose layers:
 
-## What It Runs
+- `compose.yml` is the repository production source and consumes one versioned
+  GHCR tag across every WebPerf service. Tagged release downloads rewrite
+  those references to immutable OCI digests.
+- `compose.dev.yml` overrides those images with builds from the current source
+  checkout.
 
-- `console`: SvelteKit console built with the Node adapter
-- `probe`: the Rust probe runtime
-- `api`: the Bun-based API service with SQLite persistence
-- `scheduler`: the Bun polling worker for scheduled checks
-- `browser-audit-worker`: optional Bun browser-audit runtime behind the `browser-audit` profile
+The default stack runs `console`, `api`, `scheduler`, `executor`, and `probe`.
+Only the console is published, on `127.0.0.1:5173`. API, probe, scheduler, and
+executor traffic stays on segmented Compose networks.
 
-## Start With Docker Compose
+## Production Start
 
-```sh
-docker compose -f infra/docker-compose/docker-compose.yml up --build
-```
-
-To customize ports, secrets, or active regions:
-
-```sh
-cp infra/docker-compose/.env.example infra/docker-compose/.env
-docker compose --env-file infra/docker-compose/.env -f infra/docker-compose/docker-compose.yml up --build
-```
-
-The probe stays on the internal Compose network by default.
-Only the console and API are published to the host unless you add an explicit probe port mapping.
-The browser-audit worker is excluded by default and only starts when you enable the `browser-audit` profile.
-
-Console:
+Generate random credentials, confirm `WEBPERF_VERSION`, then start the tagged
+images:
 
 ```sh
-open http://localhost:5173
+bun run selfhost:init
+docker compose \
+  --env-file infra/docker-compose/.env \
+  -f infra/docker-compose/compose.yml \
+  up -d
 ```
 
-API health:
+Open `http://localhost:5173`. The persistent volume `webperf-data` owns both
+the SQLite database and Browser Audit artifacts below `/data`.
 
-```sh
-curl http://127.0.0.1:8788/health
-```
+For an operator install, prefer the `compose.yml` and `.env.example` from a
+GitHub Release bundle. That Compose file is digest-pinned and does not require
+`WEBPERF_VERSION`.
 
-## Optional Browser Audit Runtime
+## Source-Build Start
 
-To start the optional worker:
+Use both files when validating local changes:
 
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
-  --profile browser-audit \
-  -f infra/docker-compose/docker-compose.yml \
-  up --build
+  -f infra/docker-compose/compose.yml \
+  -f infra/docker-compose/compose.dev.yml \
+  up -d --build
 ```
 
-This publishes the worker on `http://127.0.0.1:${BROWSER_AUDIT_PUBLIC_PORT:-8081}`.
-The Compose profile adds `SYS_ADMIN` so Chrome can keep its sandbox enabled during local Docker runs.
+## Optional Browser Audit
 
-## Persistence
+Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080`, then
+enable the optional profile. On AppArmor 4 hosts such as Ubuntu 24.04, first
+load the checked-in profile and include the host-specific overlay:
 
-The API service stores job history in SQLite at `/data/webperf.sqlite` inside the container.
-The named volume `webperf-data` keeps that file across restarts.
+```sh
+sudo apparmor_parser -r -W infra/docker-compose/browser-audit.apparmor
 
-## Worker Environment
+docker compose \
+  --env-file infra/docker-compose/.env \
+  --profile browser-audit \
+  -f infra/docker-compose/compose.yml \
+  -f infra/docker-compose/compose.apparmor.yml \
+  up -d
+```
 
-- `BROWSER_AUDIT_SHARED_SECRET`: current signing key for `POST /audit`
-- `BROWSER_AUDIT_SHARED_SECRET_NEXT`: optional rollover key
-- `BROWSER_AUDIT_ALLOW_NO_SANDBOX`: explicit opt-in for degraded local runtimes
-- `BROWSER_AUDIT_PUBLIC_PORT`: host port exposed when the optional profile is enabled
+Omit `compose.apparmor.yml` on hosts without AppArmor user-namespace
+restrictions.
 
-See [docs/quickstart/local-compose.md](../../docs/quickstart/local-compose.md) for the current install path and scheduling notes.
+The Lighthouse reference runner stays off the host network, runs one audit at
+a time, uses a 1 GiB shared-memory allocation, and keeps the Chrome sandbox
+enabled without adding `SYS_ADMIN`. Compose drops all capabilities and restores
+only `SYS_CHROOT`, which Chromium needs to enter its sandbox root. It also
+applies the checked-in `browser-audit-seccomp.json`, which is based on Moby's
+`seccomp/v0.2.1` default profile and adds only the `clone`, `setns`, and
+`unshare` permissions recommended for a non-root Chromium user-namespace
+sandbox. The vendored Apache-2.0 source is Moby `default.json` blob
+`ea5a494afb8d64898fa0f4f47ae0c4f5ba9cbbc9`. Following Chromium's AppArmor 4
+guidance, the host overlay selects an unconfined profile with the explicit
+`userns` permission only for this service. It does not disable AppArmor
+globally; runtime confinement remains enforced by the default-deny seccomp
+profile, non-root UID, minimal capability set, no-new-privileges, read-only
+filesystem, private network, and Chromium's own sandbox.
+
+## Loopback Debug Profile
+
+Start only the API debug proxy when direct API access is necessary:
+
+```sh
+docker compose \
+  --env-file infra/docker-compose/.env \
+  --profile debug \
+  -f infra/docker-compose/compose.yml \
+  up -d api-debug
+```
+
+This temporarily publishes the API at `127.0.0.1:8788`. To inspect the optional
+runner, first start its `browser-audit` profile and then start
+`browser-audit-debug`; that proxy binds `127.0.0.1:8081`. Neither debug proxy
+binds a non-loopback interface. Debug proxy requests have an 8 MiB body limit;
+oversized requests receive `413` before any upstream call.
+
+All production services have health checks, restart and stop policies, log
+rotation, non-root users, and configurable CPU/memory ceilings. Services are
+read-only except for explicit tmpfs mounts and the API's `/data` volume.
+`bun run compose:config` also requires non-zero numeric UID and GID values and
+the exact same service/security surface in the development override.
+
+See [Docker Compose install](../../docs/quickstart/local-compose.md),
+[authentication and secrets](../../docs/security/auth-and-secrets.md), and
+[Browser Audit sandboxing](../../docs/self-hosting/browser-audit-lighthouse.md).

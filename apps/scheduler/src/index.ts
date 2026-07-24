@@ -1,64 +1,90 @@
+import { randomUUID } from 'node:crypto';
 import { parseSelfhostSchedulerVars } from '@webperf/config/selfhost-scheduler';
+import { startProcessHeartbeat } from '@webperf/config/selfhost-process-heartbeat';
+import {
+  describeSchedulerError,
+  dispatchScheduledChecks,
+  runScheduler,
+  type SchedulerLogger
+} from './scheduler';
 
-const runtime = parseSelfhostSchedulerVars({
-  SELFHOST_SCHEDULER_API_BASE_URL: process.env.SELFHOST_SCHEDULER_API_BASE_URL,
-  SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: process.env.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
-});
-const pollIntervalMs = runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS * 1000;
+const defaultProcessHeartbeatPath = '/tmp/webperf-scheduler-heartbeat';
 
-let shuttingDown = false;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function dispatchScheduledChecks() {
-  const dispatchUrl = new URL('/v1/scheduler/dispatch', runtime.SELFHOST_SCHEDULER_API_BASE_URL);
-  const startedAt = new Date().toISOString();
-  const response = await fetch(dispatchUrl, { method: 'POST' });
-  const bodyText = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`scheduler dispatch failed (${response.status}): ${bodyText}`);
-  }
-
-  const payload = bodyText.length > 0 ? JSON.parse(bodyText) : {};
-  const triggeredProfiles = Array.isArray(payload.triggeredProfiles) ? payload.triggeredProfiles : [];
-  const createdJobs = triggeredProfiles.reduce(
-    (count: number, profile: { jobIds?: unknown }) =>
-      count + (Array.isArray(profile.jobIds) ? profile.jobIds.length : 0),
-    0
-  );
-  console.log(
-    `[scheduler] ${startedAt} dispatched ${payload.triggeredCount ?? 0} profile(s), created ${createdJobs} job(s)`
-  );
-}
-
-async function main() {
-  console.log(
-    `[scheduler] polling ${runtime.SELFHOST_SCHEDULER_API_BASE_URL} every ${runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS}s`
-  );
-
-  while (!shuttingDown) {
-    try {
-      await dispatchScheduledChecks();
-    } catch (error) {
-      console.error(
-        `[scheduler] dispatch failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
-
-    if (shuttingDown) {
-      break;
-    }
-
-    await sleep(pollIntervalMs);
-  }
-}
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    shuttingDown = true;
-    console.log(`[scheduler] received ${signal}, stopping after current cycle`);
+const main = async () => {
+  const runtime = parseSelfhostSchedulerVars({
+    SELFHOST_SCHEDULER_API_BASE_URL: process.env.SELFHOST_SCHEDULER_API_BASE_URL,
+    SELFHOST_INTERNAL_SECRET: process.env.SELFHOST_INTERNAL_SECRET,
+    SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:
+      process.env.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   });
-}
+  const shutdownController = new AbortController();
+  const requestShutdown = (signal: NodeJS.Signals) => {
+    if (!shutdownController.signal.aborted) {
+      console.log(JSON.stringify({
+        service: 'webperf-scheduler',
+        event: 'shutdown_requested',
+        signal
+      }));
+      shutdownController.abort(new Error('Scheduler shutdown requested'));
+    }
+  };
+  const onSigint = () => requestShutdown('SIGINT');
+  const onSigterm = () => requestShutdown('SIGTERM');
+  process.once('SIGINT', onSigint);
+  process.once('SIGTERM', onSigterm);
 
-await main();
+  const logger: SchedulerLogger = {
+    info: (event) => console.log(JSON.stringify({
+      service: 'webperf-scheduler',
+      level: 'info',
+      ...event
+    })),
+    error: (event) => console.error(JSON.stringify({
+      service: 'webperf-scheduler',
+      level: 'error',
+      ...event
+    }))
+  };
+
+  logger.info({
+    event: 'started',
+    apiBaseUrl: runtime.SELFHOST_SCHEDULER_API_BASE_URL,
+    pollIntervalSeconds: runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
+  });
+  const stopProcessHeartbeat = await startProcessHeartbeat({
+    heartbeatPath:
+      process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || defaultProcessHeartbeatPath,
+    onWriteFailure: () => logger.error({ event: 'process_heartbeat_write_failed' })
+  });
+
+  try {
+    await runScheduler({
+      dispatch: (signal) => dispatchScheduledChecks({
+        apiBaseUrl: runtime.SELFHOST_SCHEDULER_API_BASE_URL,
+        internalSecret: runtime.SELFHOST_INTERNAL_SECRET,
+        signal
+      }),
+      pollIntervalMs: runtime.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS * 1_000,
+      signal: shutdownController.signal,
+      logger
+    });
+  } finally {
+    stopProcessHeartbeat();
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+  }
+
+  logger.info({ event: 'stopped' });
+};
+
+try {
+  await main();
+} catch (error) {
+  console.error(JSON.stringify({
+    service: 'webperf-scheduler',
+    event: 'fatal_error',
+    incidentId: randomUUID(),
+    ...describeSchedulerError(error)
+  }));
+  process.exitCode = 1;
+}

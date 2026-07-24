@@ -32,7 +32,8 @@ const requiredPublicPaths = [
   '/v1/analyses',
   '/v1/analyses/{analysisId}',
   '/v1/browser-audits',
-  '/v1/browser-audits/{auditId}'
+  '/v1/browser-audits/{auditId}',
+  '/v1/browser-audits/{auditId}/artifacts/{artifactId}'
 ] as const;
 
 const requiredControlPaths = [
@@ -53,6 +54,32 @@ const requiredControlPaths = [
 
 assertPaths('public', publicDoc.paths, requiredPublicPaths);
 assertPaths('control', controlDoc.paths, requiredControlPaths);
+
+if (!publicDoc.components?.securitySchemes.selfhostAdminToken) {
+  throw new Error('public OpenAPI document is missing the self-host admin bearer scheme');
+}
+
+for (const [path, methods] of Object.entries(publicDoc.paths)) {
+  for (const operation of Object.values(methods)) {
+    const shouldBePublic = path === '/v1/capabilities';
+
+    if (shouldBePublic && operation.security) {
+      throw new Error(`public path ${path} must remain unauthenticated in OpenAPI`);
+    }
+
+    if (!shouldBePublic && !operation.security) {
+      throw new Error(`protected path ${path} must declare bearer authentication`);
+    }
+  }
+}
+
+for (const [path, methods] of Object.entries(controlDoc.paths)) {
+  for (const operation of Object.values(methods)) {
+    if (!operation.security) {
+      throw new Error(`compatibility path ${path} must declare bearer authentication`);
+    }
+  }
+}
 
 console.log(
   JSON.stringify(

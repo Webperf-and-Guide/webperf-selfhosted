@@ -1,5 +1,9 @@
 <script lang="ts">
-  import type { BrowserAuditResource } from '@webperf/contracts';
+  import type {
+    BrowserAuditExtendedMetric,
+    BrowserAuditResource,
+    BrowserAuditToolchainComponent
+  } from '@webperf/contracts';
   import { InlineStatusNotice } from '@webperf/ui/components/operator/inline-status-notice';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
   import { OperatorEmptyState } from '@webperf/ui/components/operator/operator-empty-state';
@@ -51,6 +55,15 @@
     }
   };
 
+  const formatExtendedMetric = (metric: BrowserAuditExtendedMetric) => {
+    if (metric.value == null) {
+      return 'n/a';
+    }
+
+    const value = String(metric.value);
+    return metric.unit ? `${value} ${metric.unit}` : value;
+  };
+
   const summaryRows = $derived.by(() =>
     selectedAudit
       ? [
@@ -67,16 +80,22 @@
   const metricRows = $derived.by(() =>
     selectedAudit?.result
       ? [
-          { label: 'Performance', value: formatPercentScore(selectedAudit.result.summary.performanceScore) },
-          { label: 'Accessibility', value: formatPercentScore(selectedAudit.result.summary.accessibilityScore) },
-          { label: 'Best practices', value: formatPercentScore(selectedAudit.result.summary.bestPracticesScore) },
-          { label: 'SEO', value: formatPercentScore(selectedAudit.result.summary.seoScore) },
-          { label: 'FCP', value: formatTiming(selectedAudit.result.summary.fcpMs) },
-          { label: 'LCP', value: formatTiming(selectedAudit.result.summary.lcpMs) },
-          { label: 'CLS', value: formatText(selectedAudit.result.summary.cls?.toString()) },
-          { label: 'INP', value: formatTiming(selectedAudit.result.summary.inpMs) },
-          { label: 'TBT', value: formatTiming(selectedAudit.result.summary.tbtMs) },
-          { label: 'Speed index', value: formatTiming(selectedAudit.result.summary.speedIndexMs) }
+          { label: 'Performance', value: formatPercentScore(selectedAudit.result.scores.performance) },
+          { label: 'Accessibility', value: formatPercentScore(selectedAudit.result.scores.accessibility) },
+          { label: 'Best practices', value: formatPercentScore(selectedAudit.result.scores.bestPractices) },
+          { label: 'SEO', value: formatPercentScore(selectedAudit.result.scores.seo) },
+          { label: 'FCP', value: formatTiming(selectedAudit.result.coreMetrics.fcpMs) },
+          { label: 'LCP', value: formatTiming(selectedAudit.result.coreMetrics.lcpMs) },
+          { label: 'CLS', value: formatText(selectedAudit.result.coreMetrics.cls?.toString()) },
+          { label: 'INP', value: formatTiming(selectedAudit.result.coreMetrics.inpMs) },
+          { label: 'TBT', value: formatTiming(selectedAudit.result.coreMetrics.tbtMs) },
+          { label: 'Speed index', value: formatTiming(selectedAudit.result.coreMetrics.speedIndexMs) },
+          ...selectedAudit.result.extendedMetrics.map(
+            (metric: BrowserAuditExtendedMetric) => ({
+              label: metric.label ?? metric.id,
+              value: formatExtendedMetric(metric)
+            })
+          )
         ]
       : []
   );
@@ -117,10 +136,28 @@
   const toolchainRows = $derived.by(() =>
     selectedAudit?.result
       ? [
-          { label: 'Bun', value: selectedAudit.result.toolchain.bunVersion },
-          { label: 'Chrome', value: selectedAudit.result.toolchain.chromeVersion },
-          { label: 'Puppeteer', value: selectedAudit.result.toolchain.puppeteerVersion },
-          { label: 'Lighthouse', value: selectedAudit.result.toolchain.lighthouseVersion }
+          {
+            label: 'Engine',
+            value: `${selectedAudit.result.toolchain.engine.id} ${selectedAudit.result.toolchain.engine.version}`
+          },
+          {
+            label: 'Browser',
+            value: `${selectedAudit.result.toolchain.browser.name} ${selectedAudit.result.toolchain.browser.version}`
+          },
+          {
+            label: 'Runtime',
+            value: `${selectedAudit.result.toolchain.runtime.name} ${selectedAudit.result.toolchain.runtime.version}`
+          },
+          {
+            label: 'Components',
+            value:
+              selectedAudit.result.toolchain.components
+                .map(
+                  (component: BrowserAuditToolchainComponent) =>
+                    `${component.name} ${component.version}`
+                )
+                .join(', ') || 'none'
+          }
         ]
       : []
   );
@@ -172,8 +209,8 @@
       id: checkpoint.id,
       mode: checkpoint.mode,
       label: checkpoint.label ?? 'Untitled checkpoint',
-      performance: formatPercentScore(checkpoint.summary.performanceScore),
-      lcp: formatTiming(checkpoint.summary.lcpMs)
+      performance: formatPercentScore(checkpoint.scores.performance),
+      lcp: formatTiming(checkpoint.coreMetrics.lcpMs)
     })) ?? []
   );
 
@@ -259,7 +296,7 @@
 
 {#if audits.length === 0}
   <OperatorEmptyState
-    detail="Start a direct-run browser audit to persist the summary, artifact metadata, and failure reason here."
+    detail="Queue a browser audit to persist the summary, artifact metadata, and failure reason here."
     title="No browser audits yet."
   />
 {:else}
@@ -287,7 +324,7 @@
                   {formatText(audit.region)} · {formatDateTime(audit.completedAt ?? audit.requestedAt)}
                 </p>
                 <p class="text-xs text-muted">
-                  {audit.policy.preset} · Perf {formatPercentScore(audit.result?.summary.performanceScore)}
+                  {audit.policy.preset} · Perf {formatPercentScore(audit.result?.scores.performance)}
                 </p>
                 <p class={audit.error ? 'truncate text-[0.72rem] text-danger/85' : 'truncate text-[0.72rem] text-muted'}>
                   {summarizeRecentAudit(audit)}
@@ -448,7 +485,7 @@
           <div class="flex items-center justify-between gap-2">
             <div>
               <p class="text-[0.72rem] uppercase tracking-[0.18em] text-muted">Artifacts</p>
-              <p class="text-sm text-muted">Binary download stays runtime-specific, but the metadata and pointers are persisted here.</p>
+              <p class="text-sm text-muted">Saved files are downloaded through the authenticated self-host console.</p>
             </div>
             <Badge tone="muted">{selectedAudit.result?.artifacts.length ?? 0} refs</Badge>
           </div>
@@ -460,7 +497,7 @@
                 <TableHead>Content type</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead class="text-right">Pointer</TableHead>
+                <TableHead class="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -475,6 +512,14 @@
                       <div class="flex items-center justify-end gap-2">
                         <span class="max-w-[16rem] truncate text-xs text-muted">{formatPointerLabel(artifact.url)}</span>
                         <CopyButton text={artifact.url}>Copy pointer</CopyButton>
+                        <Button
+                          download={artifact.filename ?? true}
+                          href={`/api/control/browser-audits/${encodeURIComponent(selectedAudit.id)}/artifacts/${encodeURIComponent(artifact.id)}`}
+                          size="xs"
+                          variant="outline"
+                        >
+                          Download
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

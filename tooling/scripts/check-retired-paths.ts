@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
+import { retiredReleasePaths } from './retired-release-paths';
 
 const root = process.cwd();
 const ignoredDirectories = new Set([
@@ -32,7 +33,9 @@ const allowedExtensions = new Set([
 const ignoredFiles = new Set([
   'bun.lock',
   'tooling/scripts/check-boundaries.ts',
-  'tooling/scripts/check-retired-paths.ts'
+  'tooling/scripts/check-release.ts',
+  'tooling/scripts/check-retired-paths.ts',
+  'tooling/scripts/retired-release-paths.ts'
 ]);
 
 const banned = [
@@ -48,10 +51,15 @@ const banned = [
   {
     pattern: 'infra/compose',
     message: 'use infra/docker-compose instead of the retired infra/compose path'
-  }
+  },
+  {
+    pattern: 'apps/browser-audit-worker',
+    message: 'use apps/browser-audit-lighthouse for the reference runner'
+  },
+  ...retiredReleasePaths.map(({ path, message }) => ({ pattern: path, message }))
 ];
 
-const targets = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'package.json', 'apps', 'packages', 'docs', 'infra', 'tooling'];
+const targets = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'package.json', '.github', 'apps', 'packages', 'docs', 'infra', 'tooling'];
 
 const collectFiles = (target: string): string[] => {
   const absoluteTarget = join(root, target);

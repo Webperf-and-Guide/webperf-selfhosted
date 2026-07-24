@@ -1,19 +1,27 @@
-# Docker notes
+# Docker image sources
 
-The runtime images in this repo are:
+The Dockerfiles in this repository build the six self-host runtime images:
 
-- `ghcr.io/webperf-and-guide/webperf-probe`
-- `ghcr.io/webperf-and-guide/webperf-browser-audit-worker`
+- console
+- API
+- scheduler
+- executor
+- Rust probe
+- optional Lighthouse reference runner
 
-Recommended builds:
+All release images target `linux/amd64`. The production Compose source uses a
+single version placeholder, while each downloadable release bundle rewrites
+all image references to the OCI digests produced for that tagged commit.
 
-- `docker buildx build --platform linux/amd64 -f apps/probe-rs/Dockerfile .`
-- `docker buildx build --platform linux/amd64 -f apps/browser-audit-worker/Dockerfile .`
+The [CI workflow](../../.github/workflows/ci.yml) publishes the `main` and
+source-SHA development channels only after required checks pass. The
+[release workflow](../../.github/workflows/release.yml) publishes versioned
+images, SBOMs, provenance, and digest-bearing runtime metadata.
 
-Ownership rules:
+The managed product consumes `runtime-metadata.json` from a specific GitHub
+Release. Managed orchestration stays in the cloud repository; reusable runtime
+sources and Dockerfiles stay here.
 
-- this repo is the source of truth for both runtime images
-- `webperf.and.guide` consumes those images through `BUNNY_PROBE_IMAGE` and `BUNNY_BROWSER_AUDIT_IMAGE`
-- `webperf.and.guide` also reads `infra/docker/metadata/*.json` as the canonical checked-in image refs for Cloudflare/Bunny config rendering
-- managed orchestration stays in the cloud repo, but the reusable runtime sources and Dockerfiles stay here
-- Bunny Magic Containers only supports `linux/amd64`, so both published runtime metadata records should stay pinned to that platform even if local dev builds support more than one architecture
+For installation and local-build commands, see
+[runtime images and releases](../../docs/quickstart/runtime-images.md) and the
+[Compose bundle](../docker-compose/README.md).

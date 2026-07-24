@@ -10,8 +10,8 @@
 **/*.sqlite
 node_modules
 **/node_modules
-**/.svelte-kit
 **/.wrangler
+**/.svelte-kit
 apps/probe-rs/target
 apps/api/data
 infra/docker-compose/.env

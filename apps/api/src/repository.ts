@@ -1,10 +1,16 @@
-import { Database } from 'bun:sqlite';
 import type {
   AnalysisResource,
+  BrowserAuditArtifactKind,
+  BrowserAuditArtifactRef,
   BrowserAuditResource,
   CheckProfile,
+  CheckProfileAlertDelivery,
   CheckProfileRun,
   ComparisonResource,
+  EnqueueExecutionJob,
+  ExecutionJob,
+  ExecutionJobError,
+  ExecutionResourceResult,
   ExportResource,
   LatencyJob,
   LatencyJobDetail,
@@ -14,18 +20,87 @@ import type {
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
+  browserAuditArtifactContentTypesForKind,
+  browserAuditArtifactLimit,
+  browserAuditArtifactLocatorSchema,
+  browserAuditArtifactRefSchema,
+  browserAuditArtifactRegistryVersion,
   browserAuditResourceSchema,
   checkProfileSchema,
   checkProfileRunSchema,
   comparisonResourceSchema,
+  defaultExecutionRetryDelayMs,
+  enqueueExecutionJobSchema,
+  executionAvailabilityMaxDelayDays,
+  executionAvailabilityMaxDelayMs,
+  executionJobErrorSchema,
+  executionJobSchema,
+  executionLeaseDurationMaxMs,
+  executionLeaseDurationMinMs,
+  executionLeaseOwnerMaxLength,
+  executionRetryDelayMaxMs,
   exportResourceSchema,
   latencyJobDetailSchema,
   propertySchema,
   regionPackSchema,
   routeSetSchema
 } from '@webperf/contracts';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import type { Database } from 'bun:sqlite';
+import { existsSync, statSync } from 'node:fs';
+import {
+  createStorageCrypto,
+  InvalidEncryptedPayloadEnvelopeError,
+  UnencryptedPersistedPayloadError
+} from './storage-crypto';
+import { redactUrlQuery } from './redaction';
+import {
+  cleanupSqliteRetention,
+  createSqliteBackupFromConnection,
+  defaultSqliteBackupPath,
+  type SqliteRetentionResult
+} from './database/operations';
+import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
+import { browserAuditArtifactLimitTriggerName } from './database/migrations/20260722_003_browser_audit_artifacts';
+
+// Must stay in sync with the immutable trigger threshold in migration
+// 20260722_003_browser_audit_artifacts.
+const maximumBrowserAuditArtifactsPerAudit = browserAuditArtifactLimit;
+const browserAuditArtifactLimitConstraintMarker = 'browser_audit_artifact_limit';
+export const executionExhaustionFinalizationBatchSize = 50;
+
+const assertBrowserAuditArtifactLimitTrigger = (database: Database) => {
+  const definition = database.query<{ sql: string | null }, [string]>(`
+    SELECT sql
+    FROM sqlite_master
+    WHERE type = 'trigger' AND name = ?
+    LIMIT 1
+  `).get(browserAuditArtifactLimitTriggerName)?.sql;
+  const triggerSql = definition ?? '';
+  const threshold = triggerSql.match(
+    /where\s+audit_id\s*=\s*new\.audit_id\s*\)\s*>=\s*(\d+)/i
+  )?.[1];
+  const valid = /before\s+insert\s+on\s+browser_audit_artifacts/i.test(triggerSql)
+    && new RegExp(
+      `raise\\s*\\(\\s*abort\\s*,\\s*['"]${browserAuditArtifactLimitConstraintMarker}['"]\\s*\\)`,
+      'i'
+    ).test(triggerSql)
+    && Number(threshold) === maximumBrowserAuditArtifactsPerAudit;
+
+  if (!valid) {
+    throw new Error(
+      'Browser Audit artifact limit trigger must enforce exactly '
+      + `${maximumBrowserAuditArtifactsPerAudit} artifacts per audit`
+    );
+  }
+};
+
+export const isBrowserAuditArtifactLimitConstraint = (error: unknown) => {
+  const candidate = error as { code?: unknown; message?: unknown } | null;
+  return typeof candidate?.code === 'string'
+    && candidate.code.startsWith('SQLITE_CONSTRAINT')
+    && typeof candidate.message === 'string'
+    && candidate.message.includes(browserAuditArtifactLimitConstraintMarker);
+};
 
 type JobRow = {
   id: string;
@@ -37,6 +112,7 @@ export type JobRepository = {
   listJobs(): LatencyJob[];
   saveJob(job: LatencyJobDetail): void;
   pruneJobsOlderThan(retentionDays: number, now?: Date): number;
+  pruneRetainedData(retentionDays: number, now?: Date): SqliteRetentionResult;
   countJobs(): number;
   getProperty(id: string): Property | null;
   listProperties(): Property[];
@@ -69,7 +145,60 @@ export type JobRepository = {
   getBrowserAudit(id: string): BrowserAuditResource | null;
   listBrowserAudits(): BrowserAuditResource[];
   saveBrowserAudit(browserAudit: BrowserAuditResource): void;
+  saveBrowserAuditArtifact(artifact: BrowserAuditArtifactRecord): boolean;
+  getBrowserAuditArtifact(auditId: string, artifactId: string): BrowserAuditArtifactRecord | null;
+  listBrowserAuditArtifacts(auditId: string): BrowserAuditArtifactRecord[];
+  listBrowserAuditArtifactStorageKeys(): string[];
+  createExecutionResource(input: {
+    executionJob: EnqueueExecutionJob;
+    result: ExecutionResourceResult;
+  }, now?: Date): ExecutionJob;
+  saveExecutionResourceResult(input: {
+    executionJobId: string;
+    leaseOwner: string;
+    result: ExecutionResourceResult;
+  }, now?: Date): boolean;
+  enqueueExecutionJob(input: EnqueueExecutionJob, now?: Date): ExecutionJob;
+  enqueueExecutionJobs(input: {
+    executionJobId: string;
+    leaseOwner: string;
+    jobs: EnqueueExecutionJob[];
+  }, now?: Date): ExecutionJob[] | null;
+  getExecutionJob(id: string): ExecutionJob | null;
+  listExecutionJobs(): ExecutionJob[];
+  claimExecutionJob(input: ExecutionJobLeaseInput, now?: Date): ExecutionJob | null;
+  markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
+  renewExecutionJobLease(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
+  completeExecutionJob(input: ExecutionJobOwnerInput, now?: Date): ExecutionJob | null;
+  failExecutionJob(input: ExecutionJobOwnerInput & {
+    error: ExecutionJobError;
+    retryDelayMs?: number;
+  }, now?: Date): ExecutionJob | null;
+  cancelExecutionJob(id: string, now?: Date): ExecutionJob | null;
   close(): void;
+};
+
+export type ExecutionJobLeaseInput = {
+  leaseOwner: string;
+  leaseDurationMs: number;
+};
+
+export type ExecutionJobOwnerInput = {
+  id: string;
+  leaseOwner: string;
+};
+
+export type BrowserAuditArtifactRecord = {
+  id: string;
+  auditId: string;
+  registryVersion: BrowserAuditArtifactRef['registryVersion'];
+  kind: BrowserAuditArtifactKind;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  storageKey: string;
+  createdAt: string;
 };
 
 type EntityKind =
@@ -90,59 +219,155 @@ type CheckProfileRunRow = {
   payload_json: string;
 };
 
+type ExecutionJobRow = {
+  id: string;
+  kind: string;
+  resource_id: string;
+  status: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  available_at: string;
+  payload_json: string;
+  error_json: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+type BrowserAuditArtifactRow = {
+  id: string;
+  audit_id: string;
+  registry_version: string;
+  kind: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  storage_key: string;
+  created_at: string;
+};
+
+type BrowserAuditArtifactCandidate = {
+  id: unknown;
+  auditId: unknown;
+  registryVersion: unknown;
+  kind: unknown;
+  filename: unknown;
+  contentType: unknown;
+  byteSize: unknown;
+  sha256: unknown;
+  storageKey: unknown;
+  createdAt: unknown;
+};
+
+const browserAuditArtifactMetadataSchema = browserAuditArtifactRefSchema.omit({ url: true });
+
+const normalizeBrowserAuditArtifactRecord = (
+  artifact: BrowserAuditArtifactCandidate
+): BrowserAuditArtifactRecord | null => {
+  const locator = browserAuditArtifactLocatorSchema.safeParse({
+    auditId: artifact.auditId,
+    artifactId: artifact.id
+  });
+  const reference = browserAuditArtifactMetadataSchema.safeParse({
+    id: artifact.id,
+    registryVersion: artifact.registryVersion,
+    kind: artifact.kind,
+    filename: artifact.filename,
+    contentType: artifact.contentType,
+    byteSize: artifact.byteSize,
+    sha256: artifact.sha256,
+    createdAt: artifact.createdAt
+  });
+
+  if (
+    !locator.success
+    || !reference.success
+    || artifact.registryVersion !== browserAuditArtifactRegistryVersion
+    || reference.data.filename === null
+    || reference.data.byteSize === null
+    || reference.data.sha256 === null
+    || typeof artifact.storageKey !== 'string'
+    || artifact.storageKey !== `${locator.data.auditId}/${locator.data.artifactId}`
+    || !browserAuditArtifactContentTypesForKind(reference.data.kind)
+      .includes(reference.data.contentType)
+  ) {
+    return null;
+  }
+
+  return {
+    id: locator.data.artifactId,
+    auditId: locator.data.auditId,
+    registryVersion: reference.data.registryVersion,
+    kind: reference.data.kind,
+    filename: reference.data.filename,
+    contentType: reference.data.contentType,
+    byteSize: reference.data.byteSize,
+    sha256: reference.data.sha256,
+    storageKey: artifact.storageKey,
+    createdAt: reference.data.createdAt
+  };
+};
+
 type JsonSchema<T> = {
   parse(value: unknown): T;
 };
 
 export const createSqliteJobRepository = ({
-  databasePath
+  databasePath,
+  encryptionSecret,
+  encryptionSecretNext,
+  backupBeforeMigrations = false
 }: {
   databasePath: string;
+  encryptionSecret: string;
+  encryptionSecretNext?: string;
+  backupBeforeMigrations?: boolean;
 }): JobRepository => {
-  if (databasePath !== ':memory:') {
-    mkdirSync(dirname(databasePath), { recursive: true });
+  const shouldBackupBeforeMigrations = backupBeforeMigrations
+    && databasePath !== ':memory:'
+    && existsSync(databasePath)
+    && statSync(databasePath).size > 0;
+  const db = openSqliteDatabase(databasePath);
+  const storageCrypto = createStorageCrypto({
+    currentSecret: encryptionSecret,
+    nextSecret: encryptionSecretNext
+  });
+  let migrationResult: ReturnType<typeof applySqliteMigrations>;
+
+  try {
+    migrationResult = applySqliteMigrations(
+      db,
+      { storageCrypto },
+      shouldBackupBeforeMigrations
+        ? {
+            beforeMigrate() {
+              const backupPath = defaultSqliteBackupPath(databasePath);
+              createSqliteBackupFromConnection(db, backupPath);
+              console.log(JSON.stringify({
+                service: 'webperf-api',
+                event: 'sqlite.pre_migration_backup.created',
+                backupPath
+              }));
+            }
+          }
+        : undefined
+    );
+    assertBrowserAuditArtifactLimitTrigger(db);
+  } catch (error) {
+    db.close();
+    throw error;
   }
 
-  const db = new Database(databasePath, {
-    create: true,
-    strict: true
-  });
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      url TEXT NOT NULL,
-      status TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS jobs_requested_at_idx
-      ON jobs (requested_at DESC);
-
-    CREATE TABLE IF NOT EXISTS saved_entities (
-      kind TEXT NOT NULL,
-      id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (kind, id)
-    );
-
-    CREATE INDEX IF NOT EXISTS saved_entities_kind_updated_at_idx
-      ON saved_entities (kind, updated_at DESC);
-
-    CREATE TABLE IF NOT EXISTS check_profile_runs (
-      id TEXT PRIMARY KEY,
-      profile_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS check_profile_runs_profile_created_at_idx
-      ON check_profile_runs (profile_id, created_at DESC);
-  `);
+  if (migrationResult.appliedNow.length > 0) {
+    console.log(JSON.stringify({
+      service: 'webperf-api',
+      event: 'sqlite.migrations.applied',
+      migrationIds: migrationResult.appliedNow
+    }));
+  }
 
   const saveStatement = db.query(`
     INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
@@ -168,6 +393,7 @@ export const createSqliteJobRepository = ({
   const pruneStatement = db.query(`
     DELETE FROM jobs
     WHERE requested_at < ?
+      AND status IN ('succeeded', 'failed', 'partial')
   `);
   const countStatement = db.query<{ count: number }, []>(`
     SELECT COUNT(*) as count
@@ -223,17 +449,193 @@ export const createSqliteJobRepository = ({
     DELETE FROM check_profile_runs
     WHERE profile_id = ?
   `);
+  const saveBrowserAuditArtifactStatement = db.query(`
+    INSERT INTO browser_audit_artifacts (
+      id, audit_id, registry_version, kind, filename, content_type,
+      byte_size, sha256, storage_key, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (id) DO NOTHING
+  `);
+  const countBrowserAuditArtifactsStatement = db.query<{ count: number }, [string]>(`
+    SELECT COUNT(*) AS count
+    FROM browser_audit_artifacts
+    WHERE audit_id = ?
+  `);
+  const getBrowserAuditArtifactStatement = db.query<BrowserAuditArtifactRow, [string, string]>(`
+    SELECT *
+    FROM browser_audit_artifacts
+    WHERE audit_id = ? AND id = ?
+    LIMIT 1
+  `);
+  const listBrowserAuditArtifactsStatement = db.query<BrowserAuditArtifactRow, [string]>(`
+    SELECT *
+    FROM browser_audit_artifacts
+    WHERE audit_id = ?
+    ORDER BY created_at, id
+  `);
+  const listBrowserAuditArtifactStorageKeysStatement = db.query<{ storage_key: string }, []>(`
+    SELECT storage_key
+    FROM browser_audit_artifacts
+    ORDER BY storage_key
+  `);
+  const enqueueExecutionJobStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    number,
+    string,
+    string,
+    string,
+    string
+  ]>(`
+    INSERT INTO execution_jobs (
+      id, kind, resource_id, status, lease_owner, lease_expires_at,
+      attempt_count, max_attempts, available_at, payload_json, error_json,
+      created_at, updated_at, completed_at
+    )
+    VALUES (?, ?, ?, 'queued', NULL, NULL, 0, ?, ?, ?, NULL, ?, ?, NULL)
+    ON CONFLICT(id) DO NOTHING
+    RETURNING *
+  `);
+  const getExecutionJobStatement = db.query<ExecutionJobRow, [string]>(`
+    SELECT *
+    FROM execution_jobs
+    WHERE id = ?
+    LIMIT 1
+  `);
+  const listExecutionJobsStatement = db.query<ExecutionJobRow, []>(`
+    SELECT *
+    FROM execution_jobs
+    ORDER BY created_at DESC, id DESC
+  `);
+  const finalizeExhaustedExecutionJobsStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    string,
+    string,
+    number
+  ]>(`
+    UPDATE execution_jobs
+    SET status = 'failed',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        error_json = ?,
+        updated_at = ?,
+        completed_at = ?
+    WHERE id IN (
+      SELECT id
+      FROM execution_jobs
+      WHERE attempt_count >= max_attempts
+        AND (
+          (status = 'queued' AND available_at <= ?)
+          OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
+        )
+      ORDER BY available_at ASC, created_at ASC, id ASC
+      LIMIT ?
+      )
+    RETURNING *
+  `);
+  const claimExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'leased',
+        lease_owner = ?,
+        lease_expires_at = ?,
+        attempt_count = attempt_count + 1,
+        updated_at = ?,
+        completed_at = NULL
+    WHERE id = (
+      SELECT id
+      FROM execution_jobs
+      WHERE attempt_count < max_attempts
+        AND (
+          (status = 'queued' AND available_at <= ?)
+          OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
+        )
+      ORDER BY available_at ASC, created_at ASC, id ASC
+      LIMIT 1
+    )
+    RETURNING *
+  `);
+  const markExecutionJobRunningStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'running', lease_expires_at = ?, updated_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const renewExecutionJobLeaseStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET lease_expires_at = ?, updated_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const completeExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'succeeded',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        error_json = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const updateFailedExecutionJobStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    string | null,
+    string,
+    string,
+    string,
+    string
+  ]>(`
+    UPDATE execution_jobs
+    SET status = ?,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        available_at = ?,
+        error_json = ?,
+        completed_at = ?,
+        updated_at = ?
+    WHERE id = ?
+      AND lease_owner = ?
+      AND status IN ('leased', 'running')
+      AND lease_expires_at > ?
+    RETURNING *
+  `);
+  const cancelExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'cancelled',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE id = ?
+      AND status NOT IN ('succeeded', 'failed', 'cancelled')
+    RETURNING *
+  `);
 
   const parseJob = (row: JobRow) => {
     try {
-      return latencyJobDetailSchema.parse(JSON.parse(row.payload_json));
+      return latencyJobDetailSchema.parse(storageCrypto.parse(row.payload_json));
     } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'job_row_invalid',
           jobId: row.id,
-          error: error instanceof Error ? error.message : 'Invalid job payload'
+          error: 'Persisted job payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
@@ -242,14 +644,15 @@ export const createSqliteJobRepository = ({
 
   const parseEntity = <T>(kind: EntityKind, row: SavedEntityRow, schema: JsonSchema<T>) => {
     try {
-      return schema.parse(JSON.parse(row.payload_json));
+      return schema.parse(storageCrypto.parse(row.payload_json));
     } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'saved_entity_invalid',
           kind,
-          error: error instanceof Error ? error.message : 'Invalid saved entity payload'
+          error: 'Persisted entity payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
@@ -258,17 +661,80 @@ export const createSqliteJobRepository = ({
 
   const parseCheckProfileRun = (row: CheckProfileRunRow) => {
     try {
-      return checkProfileRunSchema.parse(JSON.parse(row.payload_json));
+      return checkProfileRunSchema.parse(storageCrypto.parse(row.payload_json));
     } catch (error) {
       console.warn(
         JSON.stringify({
           service: 'webperf-api',
           warning: 'check_profile_run_invalid',
-          error: error instanceof Error ? error.message : 'Invalid check profile run payload'
+          error: 'Persisted check run payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
         })
       );
       return null;
     }
+  };
+
+  const parseExecutionJob = (row: ExecutionJobRow): ExecutionJob | null => {
+    try {
+      return executionJobSchema.parse({
+        id: row.id,
+        kind: row.kind,
+        resourceId: row.resource_id,
+        status: row.status,
+        leaseOwner: row.lease_owner,
+        leaseExpiresAt: row.lease_expires_at,
+        attemptCount: row.attempt_count,
+        maxAttempts: row.max_attempts,
+        availableAt: row.available_at,
+        payload: storageCrypto.parse(row.payload_json),
+        error: row.error_json
+          ? executionJobErrorSchema.parse(storageCrypto.parse(row.error_json))
+          : null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        completedAt: row.completed_at
+      });
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          service: 'webperf-api',
+          warning: 'execution_job_invalid',
+          executionJobId: row.id,
+          error: 'Persisted execution job payload could not be decoded',
+          diagnostic: describePersistedPayloadError(error)
+        })
+      );
+      return null;
+    }
+  };
+
+  const parseBrowserAuditArtifact = (
+    row: BrowserAuditArtifactRow
+  ): BrowserAuditArtifactRecord | null => {
+    const artifact = normalizeBrowserAuditArtifactRecord({
+      id: row.id,
+      auditId: row.audit_id,
+      registryVersion: row.registry_version,
+      kind: row.kind,
+      filename: row.filename,
+      contentType: row.content_type,
+      byteSize: row.byte_size,
+      sha256: row.sha256,
+      storageKey: row.storage_key,
+      createdAt: row.created_at
+    });
+
+    if (!artifact) {
+      console.warn(JSON.stringify({
+        service: 'webperf-api',
+        warning: 'browser_audit_artifact_row_invalid',
+        artifactId: row.id
+      }));
+      return null;
+    }
+
+    return artifact;
   };
 
   const getEntity = <T>(kind: EntityKind, id: string, schema: JsonSchema<T>) => {
@@ -295,7 +761,7 @@ export const createSqliteJobRepository = ({
       entity.id,
       entity.createdAt,
       entity.updatedAt,
-      JSON.stringify(entity)
+      storageCrypto.stringify(entity)
     );
   };
 
@@ -303,6 +769,171 @@ export const createSqliteJobRepository = ({
     const result = deleteEntityStatement.run(kind, id) as { changes?: number };
     return (result.changes ?? 0) > 0;
   };
+
+  const persistJob = (job: LatencyJobDetail) => {
+    saveStatement.run(
+      job.id,
+      // This plaintext column is a query-free diagnostic index. The encrypted
+      // payload remains the canonical record and is the only source used on read.
+      redactUrlQuery(job.url),
+      job.status,
+      job.requestedAt,
+      new Date().toISOString(),
+      storageCrypto.stringify(job)
+    );
+  };
+
+  const persistCheckProfileRun = (run: CheckProfileRun) => {
+    saveCheckProfileRunStatement.run(
+      run.id,
+      run.profileId,
+      run.createdAt,
+      storageCrypto.stringify(run)
+    );
+  };
+
+  const appendCheckProfileAlertDelivery = (
+    runId: string,
+    delivery: CheckProfileAlertDelivery
+  ) => {
+    const row = getCheckProfileRunStatement.get(runId);
+    const run = row ? parseCheckProfileRun(row) : null;
+
+    if (!run) {
+      throw new Error('Webhook execution references a missing run');
+    }
+
+    if (run.alertDeliveries.some((item) => item.targetId === delivery.targetId)) {
+      return;
+    }
+
+    persistCheckProfileRun({
+      ...run,
+      alertDeliveries: [...run.alertDeliveries, delivery]
+    });
+  };
+
+  const persistBrowserAudit = (browserAudit: BrowserAuditResource) => {
+    saveEntity('browser_audit', {
+      ...browserAudit,
+      createdAt: browserAudit.requestedAt,
+      updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
+    });
+  };
+
+  const syncTerminalExecutionResource = (
+    executionJob: ExecutionJob,
+    nowIso: string
+  ) => {
+    if (executionJob.kind !== 'browser_audit') {
+      return;
+    }
+
+    const audit = getEntity('browser_audit', executionJob.resourceId, browserAuditResourceSchema);
+
+    if (!audit || ['succeeded', 'failed', 'cancelled'].includes(audit.status)) {
+      return;
+    }
+
+    const cancelled = executionJob.status === 'cancelled';
+    try {
+      persistBrowserAudit({
+        ...audit,
+        status: cancelled ? 'cancelled' : 'failed',
+        startedAt: cancelled ? audit.startedAt : audit.startedAt ?? nowIso,
+        completedAt: nowIso,
+        result: null,
+        error: cancelled ? null : 'Browser Audit execution stopped before producing a result'
+      });
+    } catch {
+      console.warn(JSON.stringify({
+        service: 'webperf-api',
+        warning: 'browser_audit_terminal_sync_failed',
+        executionJobId: executionJob.id,
+        resourceId: executionJob.resourceId
+      }));
+    }
+  };
+
+  const enqueueExecution = (input: EnqueueExecutionJob, now: Date) => {
+    const parsed = enqueueExecutionJobSchema.parse(input);
+    const nowIso = now.toISOString();
+    const availableAtDate = parsed.availableAt ? new Date(parsed.availableAt) : now;
+    if (availableAtDate.getTime() - now.getTime() > executionAvailabilityMaxDelayMs) {
+      throw new Error(
+        'Execution availability must not be more than '
+        + `${executionAvailabilityMaxDelayDays} days in the future`
+      );
+    }
+    const availableAt = availableAtDate.toISOString();
+    const row = enqueueExecutionJobStatement.get(
+      parsed.id,
+      parsed.kind,
+      parsed.resourceId,
+      parsed.maxAttempts,
+      availableAt,
+      storageCrypto.stringify(parsed.payload),
+      nowIso,
+      nowIso
+    );
+    const persisted = row ?? getExecutionJobStatement.get(parsed.id);
+
+    if (!persisted) {
+      throw new Error('Execution job could not be persisted');
+    }
+
+    const executionJob = parseExecutionJob(persisted);
+
+    if (!executionJob) {
+      throw new Error('Persisted execution job could not be decoded');
+    }
+
+    if (executionJob.kind !== parsed.kind || executionJob.resourceId !== parsed.resourceId) {
+      throw new Error('Execution job id already belongs to a different resource');
+    }
+
+    return executionJob;
+  };
+
+  const ownsRunningExecutionLease = (
+    executionJobId: string,
+    leaseOwner: string,
+    nowIso: string
+  ) => {
+    const row = getExecutionJobStatement.get(executionJobId);
+    const executionJob = row ? parseExecutionJob(row) : null;
+    return Boolean(
+      executionJob
+      && executionJob.status === 'running'
+      && executionJob.leaseOwner === leaseOwner
+      && executionJob.leaseExpiresAt
+      && executionJob.leaseExpiresAt > nowIso
+    );
+  };
+
+  const persistExecutionResource = (result: ExecutionResourceResult) => {
+    switch (result.kind) {
+      case 'network_probe':
+        for (const job of result.jobs) {
+          persistJob(job);
+        }
+
+        if (result.run) {
+          persistCheckProfileRun(result.run);
+        }
+        break;
+      case 'browser_audit':
+        persistBrowserAudit(result.audit);
+        break;
+      case 'webhook_delivery':
+        appendCheckProfileAlertDelivery(result.runId, result.delivery);
+        break;
+      default:
+        assertNever(result);
+    }
+  };
+
+  let closed = false;
 
   return {
     getJob(id) {
@@ -327,20 +958,16 @@ export const createSqliteJobRepository = ({
         }));
     },
     saveJob(job) {
-      saveStatement.run(
-        job.id,
-        job.url,
-        job.status,
-        job.requestedAt,
-        new Date().toISOString(),
-        JSON.stringify(job)
-      );
+      persistJob(job);
     },
     pruneJobsOlderThan(retentionDays, now = new Date()) {
       const cutoff = new Date(now);
       cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
       const result = pruneStatement.run(cutoff.toISOString()) as { changes?: number };
       return result.changes ?? 0;
+    },
+    pruneRetainedData(retentionDays, now = new Date()) {
+      return cleanupSqliteRetention(db, retentionDays, now);
     },
     countJobs() {
       return countStatement.get()?.count ?? 0;
@@ -410,12 +1037,7 @@ export const createSqliteJobRepository = ({
         .filter((run): run is CheckProfileRun => run !== null);
     },
     saveCheckProfileRun(run) {
-      saveCheckProfileRunStatement.run(
-        run.id,
-        run.profileId,
-        run.createdAt,
-        JSON.stringify(run)
-      );
+      persistCheckProfileRun(run);
     },
     getComparison(id) {
       return getEntity('comparison', id, comparisonResourceSchema);
@@ -460,14 +1082,383 @@ export const createSqliteJobRepository = ({
       return listEntities('browser_audit', browserAuditResourceSchema);
     },
     saveBrowserAudit(browserAudit) {
-      saveEntity('browser_audit', {
-        ...browserAudit,
-        createdAt: browserAudit.requestedAt,
-        updatedAt: browserAudit.completedAt ?? browserAudit.startedAt ?? browserAudit.requestedAt
+      persistBrowserAudit(browserAudit);
+    },
+    saveBrowserAuditArtifact(artifact) {
+      // Writes and reads share this public-contract normalizer so malformed
+      // internal metadata can never become a persistently unreadable row.
+      const validatedArtifact = normalizeBrowserAuditArtifactRecord(artifact);
+      if (!validatedArtifact) {
+        throw new TypeError('Browser Audit artifact metadata is invalid');
+      }
+
+      const save = db.transaction(() => {
+        const existing = getBrowserAuditArtifactStatement.get(
+          validatedArtifact.auditId,
+          validatedArtifact.id
+        );
+        if (existing) {
+          return false;
+        }
+
+        const count = countBrowserAuditArtifactsStatement.get(validatedArtifact.auditId)?.count ?? 0;
+        if (count >= maximumBrowserAuditArtifactsPerAudit) {
+          return false;
+        }
+
+        const result = saveBrowserAuditArtifactStatement.run(
+          validatedArtifact.id,
+          validatedArtifact.auditId,
+          validatedArtifact.registryVersion,
+          validatedArtifact.kind,
+          validatedArtifact.filename,
+          validatedArtifact.contentType,
+          validatedArtifact.byteSize,
+          validatedArtifact.sha256,
+          validatedArtifact.storageKey,
+          validatedArtifact.createdAt
+        ) as { changes?: number };
+        return (result.changes ?? 0) === 1;
       });
+
+      try {
+        return save();
+      } catch (error) {
+        // The trigger remains a cross-process backstop if another API connection
+        // wins the race after this transaction's explicit count check.
+        if (isBrowserAuditArtifactLimitConstraint(error)) {
+          return false;
+        }
+
+        throw error;
+      }
+    },
+    getBrowserAuditArtifact(auditId, artifactId) {
+      const row = getBrowserAuditArtifactStatement.get(auditId, artifactId);
+      return row ? parseBrowserAuditArtifact(row) : null;
+    },
+    listBrowserAuditArtifacts(auditId) {
+      return listBrowserAuditArtifactsStatement
+        .all(auditId)
+        .map(parseBrowserAuditArtifact)
+        .filter((artifact): artifact is BrowserAuditArtifactRecord => artifact !== null);
+    },
+    listBrowserAuditArtifactStorageKeys() {
+      return listBrowserAuditArtifactStorageKeysStatement
+        .all()
+        .map((row) => row.storage_key);
+    },
+    createExecutionResource(input, now = new Date()) {
+      if (input.executionJob.kind !== input.result.kind) {
+        throw new Error('Execution resource kind does not match its queue job');
+      }
+
+      const create = db.transaction(() => {
+        persistExecutionResource(input.result);
+        return enqueueExecution(input.executionJob, now);
+      });
+      return create();
+    },
+    saveExecutionResourceResult(input, now = new Date()) {
+      // Persistence intentionally precedes completion because network executions may
+      // still enqueue follow-ups. Every resource write is idempotent/upserted, so a
+      // crash in that window is handled by the queue's at-least-once retry contract.
+      const save = db.transaction(() => {
+        if (!ownsRunningExecutionLease(input.executionJobId, input.leaseOwner, now.toISOString())) {
+          return false;
+        }
+
+        persistExecutionResource(input.result);
+
+        return true;
+      });
+      return save();
+    },
+    enqueueExecutionJob(input, now = new Date()) {
+      return enqueueExecution(input, now);
+    },
+    enqueueExecutionJobs(input, now = new Date()) {
+      const enqueue = db.transaction(() => {
+        if (!ownsRunningExecutionLease(input.executionJobId, input.leaseOwner, now.toISOString())) {
+          return null;
+        }
+
+        return input.jobs.map((job) => enqueueExecution(job, now));
+      });
+      return enqueue();
+    },
+    getExecutionJob(id) {
+      const row = getExecutionJobStatement.get(id);
+      return row ? parseExecutionJob(row) : null;
+    },
+    listExecutionJobs() {
+      return listExecutionJobsStatement
+        .all()
+        .map(parseExecutionJob)
+        .filter((job): job is ExecutionJob => job !== null);
+    },
+    claimExecutionJob(input, now = new Date()) {
+      const leaseExpiresAt = getLeaseExpiresAt(input, now);
+      const nowIso = now.toISOString();
+      const exhaustedError = storageCrypto.stringify({
+        code: 'lease_attempts_exhausted',
+        message: 'Execution stopped after the maximum number of lease attempts',
+        retryable: false
+      } satisfies ExecutionJobError);
+
+      const claim = db.transaction(() => {
+        const exhaustedRows = finalizeExhaustedExecutionJobsStatement.all(
+          exhaustedError,
+          nowIso,
+          nowIso,
+          nowIso,
+          nowIso,
+          executionExhaustionFinalizationBatchSize
+        );
+        for (const row of exhaustedRows) {
+          const executionJob = parseExecutionJob(row);
+
+          if (executionJob) {
+            syncTerminalExecutionResource(executionJob, nowIso);
+          }
+        }
+
+        return claimExecutionJobStatement.get(
+          input.leaseOwner,
+          leaseExpiresAt,
+          nowIso,
+          nowIso,
+          nowIso
+        );
+      });
+      const row = claim();
+      return row ? parseExecutionJob(row) : null;
+    },
+    markExecutionJobRunning(input, now = new Date()) {
+      const leaseExpiresAt = getLeaseExpiresAt(input, now);
+      const nowIso = now.toISOString();
+      const row = markExecutionJobRunningStatement.get(
+        leaseExpiresAt,
+        nowIso,
+        input.id,
+        input.leaseOwner,
+        nowIso
+      );
+      return row ? parseExecutionJob(row) : null;
+    },
+    renewExecutionJobLease(input, now = new Date()) {
+      const leaseExpiresAt = getLeaseExpiresAt(input, now);
+      const nowIso = now.toISOString();
+      const row = renewExecutionJobLeaseStatement.get(
+        leaseExpiresAt,
+        nowIso,
+        input.id,
+        input.leaseOwner,
+        nowIso
+      );
+      return row ? parseExecutionJob(row) : null;
+    },
+    completeExecutionJob(input, now = new Date()) {
+      assertLeaseOwner(input.leaseOwner);
+      const nowIso = now.toISOString();
+      const row = completeExecutionJobStatement.get(
+        nowIso,
+        nowIso,
+        input.id,
+        input.leaseOwner,
+        nowIso
+      );
+
+      if (row) {
+        return parseExecutionJob(row);
+      }
+
+      const existing = getExecutionJobStatement.get(input.id);
+      const executionJob = existing ? parseExecutionJob(existing) : null;
+      return executionJob?.status === 'succeeded' ? executionJob : null;
+    },
+    failExecutionJob(input, now = new Date()) {
+      assertLeaseOwner(input.leaseOwner);
+      const error = executionJobErrorSchema.parse(input.error);
+      const retryDelayMs = input.retryDelayMs ?? defaultExecutionRetryDelayMs;
+
+      if (
+        !Number.isSafeInteger(retryDelayMs)
+        || retryDelayMs < 0
+        || retryDelayMs > executionRetryDelayMaxMs
+      ) {
+        throw new Error(
+          `Execution retry delay must be an integer between 0 and ${executionRetryDelayMaxMs}ms`
+        );
+      }
+
+      const fail = db.transaction(() => {
+        const persisted = getExecutionJobStatement.get(input.id);
+
+        if (!persisted) {
+          return null;
+        }
+
+        const executionJob = parseExecutionJob(persisted);
+
+        if (!executionJob) {
+          return null;
+        }
+
+        if (['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
+          if (executionJob.status === 'failed') {
+            syncTerminalExecutionResource(
+              executionJob,
+              executionJob.completedAt ?? now.toISOString()
+            );
+          }
+          return executionJob;
+        }
+
+        const nowIso = now.toISOString();
+
+        if (
+          executionJob.leaseOwner !== input.leaseOwner
+          || !executionJob.leaseExpiresAt
+          || executionJob.leaseExpiresAt <= nowIso
+        ) {
+          return null;
+        }
+
+        const terminal = !error.retryable || executionJob.attemptCount >= executionJob.maxAttempts;
+        const availableAt = terminal
+          ? executionJob.availableAt
+          : new Date(now.getTime() + retryDelayMs).toISOString();
+        const row = updateFailedExecutionJobStatement.get(
+          terminal ? 'failed' : 'queued',
+          availableAt,
+          storageCrypto.stringify(error),
+          terminal ? nowIso : null,
+          nowIso,
+          input.id,
+          input.leaseOwner,
+          nowIso
+        );
+        const failedExecutionJob = row ? parseExecutionJob(row) : null;
+
+        if (failedExecutionJob?.status === 'failed') {
+          syncTerminalExecutionResource(failedExecutionJob, nowIso);
+        }
+
+        return failedExecutionJob;
+      });
+
+      return fail();
+    },
+    cancelExecutionJob(id, now = new Date()) {
+      const cancel = db.transaction(() => {
+        const nowIso = now.toISOString();
+        const row = cancelExecutionJobStatement.get(nowIso, nowIso, id);
+
+        if (row) {
+          const executionJob = parseExecutionJob(row);
+
+          if (executionJob) {
+            syncTerminalExecutionResource(executionJob, nowIso);
+          }
+
+          return executionJob;
+        }
+
+        const existing = getExecutionJobStatement.get(id);
+        const executionJob = existing ? parseExecutionJob(existing) : null;
+
+        if (executionJob?.status === 'cancelled') {
+          // A previous cancellation can commit the queue transition before a
+          // resource-sync failure. Repeating the idempotent sync repairs that split.
+          syncTerminalExecutionResource(
+            executionJob,
+            executionJob.completedAt ?? nowIso
+          );
+          return executionJob;
+        }
+
+        return null;
+      });
+
+      return cancel();
     },
     close() {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
       db.close();
     }
   };
+};
+
+const assertNever = (value: never): never => {
+  void value;
+  throw new Error('Unsupported execution resource result kind');
+};
+
+const assertLeaseOwner = (leaseOwner: string) => {
+  if (leaseOwner.length < 1 || leaseOwner.length > executionLeaseOwnerMaxLength) {
+    throw new Error(
+      `Execution lease owner must contain between 1 and ${executionLeaseOwnerMaxLength} characters`
+    );
+  }
+};
+
+const getLeaseExpiresAt = (input: ExecutionJobLeaseInput, now: Date) => {
+  assertLeaseOwner(input.leaseOwner);
+
+  if (
+    !Number.isSafeInteger(input.leaseDurationMs)
+    || input.leaseDurationMs < executionLeaseDurationMinMs
+    || input.leaseDurationMs > executionLeaseDurationMaxMs
+  ) {
+    throw new Error(
+      'Execution lease duration must be an integer between '
+      + `${executionLeaseDurationMinMs} and ${executionLeaseDurationMaxMs}ms`
+    );
+  }
+
+  return new Date(now.getTime() + input.leaseDurationMs).toISOString();
+};
+
+const describePersistedPayloadError = (error: unknown) => {
+  if (error instanceof AggregateError) {
+    return { type: 'decryption_failed', attempts: error.errors.length };
+  }
+
+  if (error instanceof SyntaxError) {
+    return { type: 'invalid_json' };
+  }
+
+  if (error instanceof UnencryptedPersistedPayloadError) {
+    return { type: 'unencrypted_payload' };
+  }
+
+  if (error instanceof InvalidEncryptedPayloadEnvelopeError) {
+    return { type: 'invalid_envelope' };
+  }
+
+  const issues = (error as { issues?: unknown } | null)?.issues;
+
+  if (Array.isArray(issues)) {
+    return {
+      type: 'schema_validation',
+      issues: issues.slice(0, 20).map((issue) => {
+        const candidate = issue as { code?: unknown; path?: unknown };
+        return {
+          code: typeof candidate.code === 'string' ? candidate.code : 'unknown',
+          path: Array.isArray(candidate.path)
+            ? candidate.path.filter((part): part is string | number =>
+                typeof part === 'string' || typeof part === 'number'
+              )
+            : []
+        };
+      })
+    };
+  }
+
+  return { type: 'payload_decode_failed' };
 };

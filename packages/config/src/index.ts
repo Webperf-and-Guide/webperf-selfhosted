@@ -1,4 +1,5 @@
 export * from './public';
-export * from './cloud';
 export * from './selfhost';
+export * from './selfhost-console';
 export * from './selfhost-scheduler';
+export * from './selfhost-executor';

@@ -1,12 +1,10 @@
 import type {
   AnalysisResource,
   AnalysisListResponse,
+  BrowserAuditArtifactRef,
   BrowserAuditCapabilities,
   BrowserAuditListResponse,
   BrowserAuditResource,
-  BrowserAuditWorkerRequest,
-  BrowserAuditWorkerResponse,
-  CheckProfileAlertDelivery,
   CheckProfileBaselineResponse,
   CheckProfileComparisonResponse,
   CheckProfile,
@@ -36,18 +34,18 @@ import type {
   ListQuery,
   Property,
   PropertyListResponse,
-  ProbeMeasurementResponse,
   RegionCode,
   RegionPack,
   RegionPackListResponse,
   ReportExportFormat,
   ExportResource,
   ExportListResponse,
+  ExecutionResourceContext,
+  ExecutionResourceResult,
   RouteSet,
   RouteSetListResponse,
   SchedulerDispatchResponse,
   SetCheckProfileBaselineInput,
-  SignedProbeMeasurementRequest,
   UpdateCheckProfileInput,
   UpdatePropertyInput,
   UpdateRegionPackInput,
@@ -58,10 +56,15 @@ import {
   analysisResourceSchema,
   appContract,
   browserAuditCapabilitiesSchema,
+  browserAuditArtifactUploadGrantRequestSchema,
+  browserAuditArtifactUploadGrantSchema,
+  browserAuditArtifactKindSchema,
+  browserAuditArtifactContentTypesForKind,
+  browserAuditArtifactLimit,
+  browserAuditArtifactRefSchema,
+  browserAuditArtifactRegistryVersion,
   browserAuditListResponseSchema,
   browserAuditResourceSchema,
-  browserAuditWorkerRequestSchema,
-  browserAuditWorkerResponseSchema,
   checkProfileListResponseSchema,
   checkProfileRunListResponseSchema,
   comparisonListResponseSchema,
@@ -77,16 +80,28 @@ import {
   createRouteSetSchema,
   exportListResponseSchema,
   exportResourceSchema,
+  executionJobFailRequestSchema,
+  executionJobIdSchema,
+  executionJobLeaseRequestSchema,
+  executionJobOwnerRequestSchema,
+  executionPayloadMaxBytes,
+  executionFollowupsRequestSchema,
+  executionFollowupsResponseSchema,
+  executionResourceContextRequestSchema,
+  executionResourceContextSchema,
+  executionResourceResultRequestSchema,
+  defaultBrowserAuditArtifactContentTypes,
+  browserAuditExecutionPayloadSchema,
+  networkProbeExecutionPayloadSchema,
+  webhookDeliveryExecutionPayloadSchema,
   jobListResponseSchema,
   listQuerySchema,
   propertyListResponseSchema,
   comparisonResourceSchema,
-  probeMeasurementResponseSchema,
   regionPackListResponseSchema,
   reportExportFormatSchema,
   routeSetListResponseSchema,
   setCheckProfileBaselineSchema,
-  signedProbeMeasurementRequestSchema,
   opsContract,
   publicContract,
   updateCheckProfileSchema,
@@ -96,13 +111,17 @@ import {
 } from '@webperf/contracts';
 import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi';
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
+import {
+  JsonBodyEmptyError,
+  JsonBodyTooLargeError,
+  readBoundedJson
+} from './json-body';
 import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
+import { isDeepStrictEqual } from 'node:util';
 import {
   applyListQuery,
   buildRegionAvailabilityList,
-  createBrowserAuditSignature,
-  createProbeSignature,
   dedupeRegions,
   parseListQueryFromSearchParams,
   resolveRequestedRegions,
@@ -112,22 +131,42 @@ import { parseSelfhostApiVars } from '@webperf/config/selfhost';
 import {
   buildCheckProfileComparison,
   buildCheckProfileReportCsv,
-  deriveJobStatus,
-  evaluateMonitorTargets,
   summarizeCheckProfileRunReport,
   summarizeTargets
 } from '@webperf/report-core';
 import { createSqliteJobRepository } from './repository';
+import {
+  ArtifactStoreValidationError,
+  LocalBrowserAuditArtifactStore,
+  normalizeArtifactFilename
+} from './browser-audit-artifact-store';
+import {
+  issueBrowserAuditUploadToken,
+  verifyBrowserAuditUploadToken
+} from './browser-audit-upload-token';
+import { authorizeApiRequest } from './auth';
+import { describeSafeError } from './diagnostics';
+import {
+  isSensitiveHeaderName,
+  redactJsonResponse,
+  redactSensitiveData,
+  redactedValue
+} from './redaction';
 
 type SelfhostRuntime = {
   host: string;
   port: number;
   databasePath: string;
+  artifactsPath: string;
+  artifactUploadBaseUrl?: string;
+  maxArtifactBytes: number;
+  artifactUploadTtlSeconds: number;
   retentionDays: number;
-  probeSharedSecret?: string;
-  probeSharedSecretNext?: string;
-  browserAuditSharedSecret?: string;
-  browserAuditSharedSecretNext?: string;
+  migrationBackup: boolean;
+  adminToken: string;
+  adminTokenNext?: string;
+  internalSecret: string;
+  internalSecretNext?: string;
   browserAuditBaseUrl?: string;
   activeRegionCodes: RegionCode[];
   regionIds: Partial<Record<RegionCode, string>>;
@@ -137,6 +176,20 @@ type SelfhostRuntime = {
 
 type MutableTarget = LatencyJobTarget;
 type MutableJob = LatencyJobDetail;
+type ExecutionJobMutationAction = 'start' | 'renew' | 'complete' | 'fail';
+type ExecutionJobResourceAction =
+  | 'context'
+  | 'artifact-upload-grant'
+  | 'result'
+  | 'followups';
+const executionJobMutationPathPattern =
+  /^\/internal\/execution-jobs\/([^/]+)\/(start|renew|complete|fail)$/;
+const executionJobResourcePathPattern =
+  /^\/internal\/execution-jobs\/([^/]+)\/(context|artifact-upload-grant|result|followups)$/;
+const browserAuditArtifactUploadPathPattern =
+  /^\/internal\/browser-audits\/([^/]+)\/artifacts$/;
+const browserAuditArtifactDownloadPathPattern =
+  /^\/v1\/browser-audits\/([^/]+)\/artifacts\/([^/]+)$/;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -190,10 +243,15 @@ const regionCodeSet = new Set<string>([
 
 export const runtime = parseRuntime(process.env);
 export const repository = createSqliteJobRepository({
-  databasePath: runtime.databasePath
+  databasePath: runtime.databasePath,
+  encryptionSecret: runtime.internalSecret,
+  encryptionSecretNext: runtime.internalSecretNext,
+  backupBeforeMigrations: runtime.migrationBackup
 });
+export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
-repository.pruneJobsOlderThan(runtime.retentionDays);
+repository.pruneRetainedData(runtime.retentionDays);
+await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorageKeys()));
 
 const buildHealthPayload = () => ({
   service: 'webperf-api',
@@ -206,6 +264,12 @@ const buildHealthPayload = () => ({
     databasePath: runtime.databasePath,
     retainedDays: runtime.retentionDays,
     persistedJobs: repository.countJobs()
+  },
+  artifacts: {
+    kind: 'local-filesystem' as const,
+    path: runtime.artifactsPath,
+    maxArtifactBytes: runtime.maxArtifactBytes,
+    uploadTtlSeconds: runtime.artifactUploadTtlSeconds
   },
   savedConfigs: {
     properties: repository.listProperties().length,
@@ -234,11 +298,22 @@ const buildPublicCapabilitiesPayload = () => ({
     baselineCompare: true,
     reportExports: true,
     webhookAlerts: true,
-    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl && runtime.browserAuditSharedSecret),
+    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl),
     aiAnalyses: false,
     openApi: true,
     appRpc: true,
     opsRpc: true
+  },
+  metrics: {
+    networkProbe: {
+      version: 'v1' as const,
+      dnsTiming: true,
+      tcpTiming: false,
+      tlsTiming: false,
+      responseHeaderTiming: true,
+      bodySampleTiming: false,
+      tlsMetadata: false
+    }
   }
 });
 
@@ -581,7 +656,7 @@ const buildExportResource = (input: CreateExportInput): ExportResource => {
           profile,
           runs: report.recentRuns
         })
-      : JSON.stringify(report, null, 2);
+      : JSON.stringify(redactSensitiveData(report), null, 2);
 
   const exportResource = exportResourceSchema.parse({
     id: `exp_${crypto.randomUUID()}`,
@@ -684,7 +759,7 @@ const createJobSnapshotStream = (jobId: string) => {
             type: 'job.snapshot',
             job
           };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(redactSensitiveData(payload))}\n\n`));
 
           if (job.summary.inflight === 0) {
             break;
@@ -701,10 +776,7 @@ const createJobSnapshotStream = (jobId: string) => {
   });
 };
 
-export const server = Bun.serve({
-  hostname: runtime.host,
-  port: runtime.port,
-  async fetch(request) {
+const routeRequest = async (request: Request) => {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
@@ -743,7 +815,11 @@ export const server = Bun.serve({
       }
     }
 
-    if (pathname === '/health' || pathname === '/v1/health') {
+    if (pathname === '/health') {
+      return json({ service: 'webperf-api', ok: true });
+    }
+
+    if (pathname === '/v1/health') {
       return json(buildHealthPayload());
     }
 
@@ -936,6 +1012,57 @@ export const server = Bun.serve({
 
     if (pathname === '/v1/scheduler/dispatch' && request.method === 'POST') {
       return handleDispatchScheduledProfiles(request, url);
+    }
+
+    if (pathname === '/internal/execution-jobs/claim' && request.method === 'POST') {
+      return withExecutionTransportErrors('claim', () => handleClaimExecutionJob(request));
+    }
+
+    const browserAuditArtifactUploadMatch = pathname.match(
+      browserAuditArtifactUploadPathPattern
+    );
+    if (browserAuditArtifactUploadMatch?.[1] && request.method === 'POST') {
+      return handleBrowserAuditArtifactUpload(
+        browserAuditArtifactUploadMatch[1],
+        request,
+        url
+      );
+    }
+
+    const executionResourceMatch = pathname.match(executionJobResourcePathPattern);
+    if (executionResourceMatch?.[1] && executionResourceMatch[2] && request.method === 'POST') {
+      const executionJobId = executionJobIdSchema.safeParse(executionResourceMatch[1]);
+
+      if (!executionJobId.success) {
+        return json(
+          { error: 'Invalid execution job ID' },
+          { status: 400, headers: { 'cache-control': 'no-store' } }
+        );
+      }
+
+      const action = executionResourceMatch[2] as ExecutionJobResourceAction;
+      return withExecutionTransportErrors(
+        action,
+        () => handleExecutionResourceOperation(executionJobId.data, action, request)
+      );
+    }
+
+    const executionJobMatch = pathname.match(executionJobMutationPathPattern);
+    if (executionJobMatch?.[1] && executionJobMatch[2] && request.method === 'POST') {
+      const executionJobId = executionJobIdSchema.safeParse(executionJobMatch[1]);
+
+      if (!executionJobId.success) {
+        return json(
+          { error: 'Invalid execution job ID' },
+          { status: 400, headers: { 'cache-control': 'no-store' } }
+        );
+      }
+
+      const action = executionJobMatch[2] as ExecutionJobMutationAction;
+      return withExecutionTransportErrors(
+        action,
+        () => handleExecutionJobMutation(executionJobId.data, action, request)
+      );
     }
 
     const propertyMatch = pathname.match(/^\/v1\/properties\/([^/]+)$/);
@@ -1286,6 +1413,20 @@ export const server = Bun.serve({
       return analysis ? json(analysis) : json({ error: 'Analysis not found' }, { status: 404 });
     }
 
+    const browserAuditArtifactDownloadMatch = pathname.match(
+      browserAuditArtifactDownloadPathPattern
+    );
+    if (
+      browserAuditArtifactDownloadMatch?.[1]
+      && browserAuditArtifactDownloadMatch[2]
+      && request.method === 'GET'
+    ) {
+      return handleBrowserAuditArtifactDownload(
+        browserAuditArtifactDownloadMatch[1],
+        browserAuditArtifactDownloadMatch[2]
+      );
+    }
+
     const browserAuditMatch = pathname.match(/^\/v1\/browser-audits\/([^/]+)$/);
     if (browserAuditMatch?.[1] && request.method === 'GET') {
       return handleGetBrowserAudit(browserAuditMatch[1]);
@@ -1295,10 +1436,35 @@ export const server = Bun.serve({
       {
         ok: false,
         message:
-          'Use /health, /v1/regions, /v1/jobs, /v1/properties, /v1/route-sets, /v1/region-packs, /v1/check-profiles, /v1/browser-audits, or their detail routes'
+          'Use /health, /v1/capabilities, /v1/sites, /v1/route-groups, /v1/region-sets, /v1/checks, /v1/checks/:checkId/runs, /v1/runs/:runId, /v1/comparisons, /v1/exports, /v1/analyses, or /v1/browser-audits'
       },
       { status: 404 }
     );
+};
+
+export const server = Bun.serve({
+  hostname: runtime.host,
+  port: runtime.port,
+  async fetch(request) {
+    const pathname = new URL(request.url).pathname;
+    const usesScopedArtifactToken = request.method === 'POST'
+      && browserAuditArtifactUploadPathPattern.test(pathname);
+    const unauthorized = usesScopedArtifactToken
+      ? null
+      : authorizeApiRequest(request, runtime);
+
+    if (unauthorized) {
+      return unauthorized;
+    }
+
+    const routedResponse = await routeRequest(request);
+    const response = (
+      isExecutionTransportPath(pathname)
+      || (request.method === 'GET' && browserAuditArtifactDownloadPathPattern.test(pathname))
+    )
+      ? routedResponse
+      : await redactJsonResponse(routedResponse);
+    return addCompatibilityDeprecationHeaders(request, response);
   }
 });
 
@@ -1308,6 +1474,7 @@ console.log(
     listeningOn: `http://${runtime.host}:${runtime.port}`,
     activeRegions: runtime.activeRegionCodes,
     databasePath: runtime.databasePath,
+    artifactsPath: runtime.artifactsPath,
     retainedDays: runtime.retentionDays
   })
 );
@@ -1351,7 +1518,18 @@ async function handleCreateJob(request: Request) {
     );
   }
 
-  void processJob(job.id);
+  try {
+    createNetworkExecutionResource([job], null, null);
+  } catch (error) {
+    const incidentId = logExecutionCreationFailure('manual_job_create', error, job.id);
+    return json(
+      {
+        error: 'Failed to queue job',
+        incidentId
+      },
+      { status: 500 }
+    );
+  }
 
   return json(
     {
@@ -1360,6 +1538,564 @@ async function handleCreateJob(request: Request) {
     { status: 201 }
   );
 }
+
+async function handleClaimExecutionJob(request: Request) {
+  const body = await parseExecutionTransportBody(
+    request,
+    executionJobLeaseRequestSchema,
+    'Invalid execution lease request'
+  );
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const executionJob = repository.claimExecutionJob(body.data);
+
+  if (!executionJob) {
+    return new Response(null, {
+      status: 204,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
+
+  return json(executionJob, {
+    status: 200,
+    headers: { 'cache-control': 'no-store' }
+  });
+}
+
+async function handleExecutionJobMutation(
+  executionJobId: string,
+  action: ExecutionJobMutationAction,
+  request: Request
+) {
+  if (action === 'start' || action === 'renew') {
+    const body = await parseExecutionTransportBody(
+      request,
+      executionJobLeaseRequestSchema,
+      'Invalid execution lease request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = action === 'start'
+      ? repository.markExecutionJobRunning({ id: executionJobId, ...body.data })
+      : repository.renewExecutionJobLease({ id: executionJobId, ...body.data });
+    return executionJob
+      ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
+      : executionLeaseConflict();
+  }
+
+  if (action === 'complete') {
+    const body = await parseExecutionTransportBody(
+      request,
+      executionJobOwnerRequestSchema,
+      'Invalid execution owner request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = repository.completeExecutionJob({
+      id: executionJobId,
+      leaseOwner: body.data.leaseOwner
+    });
+    return executionJob
+      ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
+      : executionLeaseConflict();
+  }
+
+  const body = await parseExecutionTransportBody(
+    request,
+    executionJobFailRequestSchema,
+    'Invalid execution failure request'
+  );
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const executionJob = repository.failExecutionJob({
+    id: executionJobId,
+    ...body.data
+  });
+  return executionJob
+    ? json(executionJob, { headers: { 'cache-control': 'no-store' } })
+    : executionLeaseConflict();
+}
+
+async function handleExecutionResourceOperation(
+  executionJobId: string,
+  action: ExecutionJobResourceAction,
+  request: Request
+) {
+  if (action === 'context') {
+    const body = await parseExecutionTransportBody(
+      request,
+      executionResourceContextRequestSchema,
+      'Invalid execution context request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+    return executionJob
+      ? json(buildExecutionResourceContext(executionJob), {
+          headers: { 'cache-control': 'no-store' }
+        })
+      : executionLeaseConflict();
+  }
+
+  if (action === 'artifact-upload-grant') {
+    const body = await parseExecutionTransportBody(
+      request,
+      browserAuditArtifactUploadGrantRequestSchema,
+      'Invalid Browser Audit artifact upload grant request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+    if (!executionJob) {
+      return executionLeaseConflict();
+    }
+
+    if (executionJob.kind !== 'browser_audit') {
+      return json(
+        { error: 'Artifact upload grants are only available for Browser Audit executions' },
+        { status: 409, headers: { 'cache-control': 'no-store' } }
+      );
+    }
+
+    return json(
+      buildBrowserAuditArtifactUploadGrant(
+        executionJob,
+        body.data.leaseOwner,
+        request
+      ),
+      { headers: { 'cache-control': 'no-store' } }
+    );
+  }
+
+  if (action === 'result') {
+    const body = await parseExecutionTransportBody(
+      request,
+      executionResourceResultRequestSchema,
+      'Invalid execution result request'
+    );
+
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+
+    if (!executionJob) {
+      return executionLeaseConflict();
+    }
+
+    if (executionJob.kind !== body.data.result.kind) {
+      return json(
+        { error: 'Execution result kind does not match the leased job' },
+        { status: 409, headers: { 'cache-control': 'no-store' } }
+      );
+    }
+
+    const persisted = persistExecutionResourceResult(
+      executionJob,
+      body.data.leaseOwner,
+      body.data.result
+    );
+
+    if (!persisted) {
+      return executionLeaseConflict();
+    }
+
+    return new Response(null, {
+      status: 204,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
+
+  const body = await parseExecutionTransportBody(
+    request,
+    executionFollowupsRequestSchema,
+    'Invalid execution follow-up request'
+  );
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const executionJob = getOwnedRunningExecutionJob(executionJobId, body.data.leaseOwner);
+
+  if (!executionJob) {
+    return executionLeaseConflict();
+  }
+
+  const parentPayload = executionJob.kind === 'network_probe'
+    ? networkProbeExecutionPayloadSchema.parse(executionJob.payload)
+    : null;
+
+  if (
+    !parentPayload?.runId
+    || body.data.jobs.some((job) => {
+      if (job.kind !== 'webhook_delivery' || job.resourceId !== parentPayload.runId) {
+        return true;
+      }
+
+      const payload = webhookDeliveryExecutionPayloadSchema.safeParse(job.payload);
+      return !payload.success || payload.data.runId !== parentPayload.runId;
+    })
+  ) {
+    return json(
+      { error: 'Only run-owned webhook follow-ups may be enqueued' },
+      { status: 409, headers: { 'cache-control': 'no-store' } }
+    );
+  }
+
+  const followups = repository.enqueueExecutionJobs({
+    executionJobId: executionJob.id,
+    leaseOwner: body.data.leaseOwner,
+    jobs: body.data.jobs
+  });
+
+  if (!followups) {
+    return executionLeaseConflict();
+  }
+
+  return json(
+    executionFollowupsResponseSchema.parse({ jobs: followups }),
+    { status: 201, headers: { 'cache-control': 'no-store' } }
+  );
+}
+
+function getOwnedRunningExecutionJob(executionJobId: string, leaseOwner: string) {
+  const executionJob = repository.getExecutionJob(executionJobId);
+  const now = new Date().toISOString();
+
+  if (
+    !executionJob
+    || executionJob.status !== 'running'
+    || executionJob.leaseOwner !== leaseOwner
+    || !executionJob.leaseExpiresAt
+    || executionJob.leaseExpiresAt <= now
+  ) {
+    return null;
+  }
+
+  return executionJob;
+}
+
+function buildExecutionResourceContext(
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>
+): ExecutionResourceContext {
+  if (executionJob.kind === 'network_probe') {
+    const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
+    const expectedResourceId = payload.runId ?? payload.jobIds[0];
+
+    if (executionJob.resourceId !== expectedResourceId) {
+      throw new Error('Network execution resource does not match its payload');
+    }
+
+    const jobs = payload.jobIds.map((jobId) => repository.getJob(jobId));
+
+    if (jobs.some((job) => job === null)) {
+      throw new Error('Network execution references a missing job');
+    }
+
+    const check = payload.checkId ? repository.getCheckProfile(payload.checkId) : null;
+    const run = payload.runId ? repository.getCheckProfileRun(payload.runId) : null;
+
+    if ((payload.checkId && !check) || (payload.runId && !run)) {
+      throw new Error('Network execution references a missing check or run');
+    }
+
+    const baselineRun = check && run ? resolveBaselineRun(check) : null;
+    let comparedRun: CheckProfileRun | null = null;
+    let comparisonMode: 'baseline' | 'latest_previous' | null = null;
+
+    if (check && run) {
+      if (baselineRun && baselineRun.id !== run.id) {
+        comparedRun = baselineRun;
+        comparisonMode = 'baseline';
+      } else {
+        comparedRun = findPreviousRun(check.id, run.id);
+        comparisonMode = comparedRun ? 'latest_previous' : null;
+      }
+    }
+
+    return executionResourceContextSchema.parse({
+      kind: 'network_probe',
+      executionJob,
+      payload,
+      jobs,
+      check,
+      run,
+      comparedRun,
+      comparedJobs: comparedRun ? getJobsForRun(comparedRun) : [],
+      comparisonMode
+    });
+  }
+
+  if (executionJob.kind === 'browser_audit') {
+    const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+    const audit = repository.getBrowserAudit(payload.auditId);
+
+    if (executionJob.resourceId !== payload.auditId || !audit) {
+      throw new Error('Browser audit execution references a missing resource');
+    }
+
+    return executionResourceContextSchema.parse({
+      kind: 'browser_audit',
+      executionJob,
+      payload,
+      audit
+    });
+  }
+
+  const payload = webhookDeliveryExecutionPayloadSchema.parse(executionJob.payload);
+  const run = repository.getCheckProfileRun(payload.runId);
+
+  if (executionJob.resourceId !== payload.runId || !run) {
+    throw new Error('Webhook execution references a missing run');
+  }
+
+  return executionResourceContextSchema.parse({
+    kind: 'webhook_delivery',
+    executionJob,
+    payload,
+    run
+  });
+}
+
+function buildBrowserAuditArtifactUploadGrant(
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  leaseOwner: string,
+  request: Request
+) {
+  const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+  if (
+    executionJob.resourceId !== payload.auditId
+    || !repository.getBrowserAudit(payload.auditId)
+  ) {
+    throw new Error('Browser Audit artifact grant references a missing resource');
+  }
+
+  const issuedAt = new Date();
+  const expiresAt = new Date(
+    issuedAt.getTime() + runtime.artifactUploadTtlSeconds * 1_000
+  );
+  const artifactUploadBaseUrl = resolveArtifactUploadBaseUrl(
+    runtime.artifactUploadBaseUrl ?? new URL(request.url).origin
+  );
+  return browserAuditArtifactUploadGrantSchema.parse({
+    baseUrl: artifactUploadBaseUrl,
+    bearerToken: issueBrowserAuditUploadToken({
+      secret: runtime.internalSecret,
+      auditId: payload.auditId,
+      executionJobId: executionJob.id,
+      leaseOwner,
+      attemptCount: executionJob.attemptCount,
+      expiresAt,
+      maxArtifactBytes: runtime.maxArtifactBytes,
+      now: issuedAt
+    }),
+    expiresAt: expiresAt.toISOString(),
+    maxArtifactBytes: runtime.maxArtifactBytes,
+    allowedContentTypes: [...defaultBrowserAuditArtifactContentTypes]
+  });
+}
+
+function persistExecutionResourceResult(
+  executionJob: NonNullable<ReturnType<typeof getOwnedRunningExecutionJob>>,
+  leaseOwner: string,
+  result: ExecutionResourceResult
+) {
+  if (result.kind === 'network_probe') {
+    const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
+    const expectedJobIds = new Set(payload.jobIds);
+
+    if (
+      result.jobs.length !== expectedJobIds.size
+      || result.jobs.some((job) => !expectedJobIds.has(job.id))
+      || Boolean(result.run) !== Boolean(payload.runId)
+      || (result.run && (result.run.id !== payload.runId || result.run.profileId !== payload.checkId))
+    ) {
+      throw new Error('Network execution result does not match its payload');
+    }
+
+    return repository.saveExecutionResourceResult({
+      executionJobId: executionJob.id,
+      leaseOwner,
+      result
+    });
+  }
+
+  if (result.kind === 'browser_audit') {
+    const payload = browserAuditExecutionPayloadSchema.parse(executionJob.payload);
+    const existing = repository.getBrowserAudit(payload.auditId);
+
+    if (
+      result.audit.id !== payload.auditId
+      || !existing
+      || !browserAuditInputsMatch(existing, result.audit)
+      || !browserAuditArtifactsMatch(payload.auditId, result.audit.result?.artifacts ?? [])
+    ) {
+      throw new Error('Browser audit result does not match its payload');
+    }
+
+    return repository.saveExecutionResourceResult({
+      executionJobId: executionJob.id,
+      leaseOwner,
+      result
+    });
+  }
+
+  const payload = webhookDeliveryExecutionPayloadSchema.parse(executionJob.payload);
+
+  if (
+    result.runId !== payload.runId
+    || result.delivery.targetId !== payload.target.id
+    || result.delivery.targetName !== payload.target.name
+    || result.delivery.url !== payload.target.url
+  ) {
+    throw new Error('Webhook result does not match its payload');
+  }
+
+  return repository.saveExecutionResourceResult({
+    executionJobId: executionJob.id,
+    leaseOwner,
+    result
+  });
+}
+
+const browserAuditInputsMatch = (
+  existing: BrowserAuditResource,
+  result: BrowserAuditResource
+) =>
+  existing.targetUrl === result.targetUrl
+  && existing.region === result.region
+  && existing.requestedAt === result.requestedAt
+  && isDeepStrictEqual(existing.policy, result.policy)
+  && isDeepStrictEqual(existing.customHeaders, result.customHeaders)
+  && isDeepStrictEqual(existing.cookies, result.cookies);
+
+const browserAuditArtifactsMatch = (
+  auditId: string,
+  artifacts: BrowserAuditArtifactRef[]
+) => artifacts.every((artifact) => {
+  const indexed = repository.getBrowserAuditArtifact(auditId, artifact.id);
+  return Boolean(
+    indexed
+    && artifact.registryVersion === indexed.registryVersion
+    && artifact.kind === indexed.kind
+    && artifact.url === `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(indexed.id)}`
+    && artifact.filename !== undefined
+    && artifact.filename !== null
+    && artifact.filename === indexed.filename
+    && artifact.contentType === indexed.contentType
+    && artifact.byteSize !== undefined
+    && artifact.byteSize !== null
+    && artifact.byteSize === indexed.byteSize
+    && artifact.sha256 !== undefined
+    && artifact.sha256 !== null
+    && artifact.sha256 === indexed.sha256
+    && artifact.createdAt === indexed.createdAt
+  );
+});
+
+const executionLeaseConflict = () =>
+  json(
+    { error: 'Execution lease is no longer owned or has expired' },
+    { status: 409, headers: { 'cache-control': 'no-store' } }
+  );
+
+const isExecutionTransportPath = (pathname: string) =>
+  pathname === '/internal/execution-jobs/claim'
+  || executionJobMutationPathPattern.test(pathname)
+  || executionJobResourcePathPattern.test(pathname);
+
+// Follow-up transport can carry 20 bounded payloads plus identifiers and JSON framing.
+const executionTransportBodyMaxBytes = executionPayloadMaxBytes * 20 + 64 * 1_024;
+
+async function parseExecutionTransportBody<T>(
+  request: Request,
+  schema: {
+    safeParse(value: unknown):
+      | { success: true; data: T }
+      | { success: false; error: { flatten(): unknown } };
+  },
+  errorLabel: string
+) {
+  const body = await parseJsonBody<unknown>(
+    request,
+    executionTransportBodyMaxBytes
+  );
+
+  if (!body.ok) {
+    return {
+      ok: false as const,
+      response: withNoStore(body.response)
+    };
+  }
+
+  const parsed = schema.safeParse(body.data);
+
+  if (!parsed.success) {
+    return {
+      ok: false as const,
+      response: json(
+        { error: errorLabel, issues: parsed.error.flatten() },
+        { status: 400, headers: { 'cache-control': 'no-store' } }
+      )
+    };
+  }
+
+  return { ok: true as const, data: parsed.data };
+}
+
+const withExecutionTransportErrors = async (
+  operation: 'claim' | ExecutionJobMutationAction | ExecutionJobResourceAction,
+  execute: () => Promise<Response>
+) => {
+  try {
+    return await execute();
+  } catch (error) {
+    const incidentId = crypto.randomUUID();
+    console.error(
+      JSON.stringify({
+        service: 'webperf-api',
+        event: 'execution_transport_failed',
+        operation,
+        incidentId,
+        ...describeSafeError(error)
+      })
+    );
+    return json(
+      { error: 'Execution transport failed', incidentId },
+      { status: 500, headers: { 'cache-control': 'no-store' } }
+    );
+  }
+};
+
+const withNoStore = (response: Response) => {
+  const headers = new Headers(response.headers);
+  headers.set('cache-control', 'no-store');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+};
 
 async function handleCreateProperty(request: Request) {
   return handleUpsertProperty(request);
@@ -1802,7 +2538,7 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     const now = new Date().toISOString();
     const name = requireTrimmedText(parsed.data.name, 'Check profile name');
     const note = normalizeOptionalText(parsed.data.note);
-    const requestConfig = normalizeCustomRequestConfig(parsed.data.request);
+    const requestConfig = normalizeCustomRequestConfig(parsed.data.request, existing?.request);
     const monitorPolicy = normalizeMonitorPolicy(parsed.data.monitorPolicy);
     const alerts = normalizeAlertConfig(parsed.data.alerts, existing?.alerts);
     ensureUniqueCheckProfile({
@@ -1862,7 +2598,19 @@ async function handleRunCheckProfile(profileId: string, request: Request) {
   }
 
   const run = createCheckProfileRunRecord(profile, 'manual', createdJobs);
-  void processCheckProfileRun(profile, run, createdJobs);
+  try {
+    createNetworkExecutionResource(
+      createdJobs.map((item) => item.job),
+      run,
+      profile.id
+    );
+  } catch (error) {
+    const incidentId = logExecutionCreationFailure('manual_check_run', error, profile.id);
+    return json(
+      { error: 'Failed to queue check run', incidentId },
+      { status: 500 }
+    );
+  }
 
   const response: CheckProfileRunResponse = {
     profile,
@@ -1882,45 +2630,39 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
     );
 
   const triggeredProfiles = dueProfiles.flatMap((profile) => {
-    let createdJobs: CreatedProfileJob[];
-
     try {
-      createdJobs = createJobsForProfile(profile, null);
-    } catch (error) {
-      console.warn(
-        JSON.stringify({
-          service: 'webperf-api',
-          warning: 'scheduled_profile_dispatch_failed',
-          profileId: profile.id,
-          error: error instanceof Error ? error.message : 'Unknown profile dispatch error'
-        })
+      const createdJobs = createJobsForProfile(profile, null);
+      const run = createCheckProfileRunRecord(profile, 'schedule', createdJobs);
+      createNetworkExecutionResource(
+        createdJobs.map((item) => item.job),
+        run,
+        profile.id
       );
+
+      const updatedProfile: CheckProfile = {
+        ...profile,
+        schedule: profile.schedule
+          ? {
+            ...profile.schedule,
+            lastRunAt: dispatchAt.toISOString(),
+            lastRunJobCount: createdJobs.length,
+            nextRunAt: computeNextRunAt(dispatchAt.toISOString(), profile.schedule.intervalMinutes)
+          }
+          : null,
+        updatedAt: dispatchAt.toISOString()
+      };
+
+      repository.saveCheckProfile(updatedProfile);
+
+      return [{
+        profileId: profile.id,
+        jobIds: run.routes.map((route) => route.jobId),
+        nextRunAt: updatedProfile.schedule?.nextRunAt ?? null
+      }];
+    } catch (error) {
+      logExecutionCreationFailure('scheduled_check_run', error, profile.id);
       return [];
     }
-
-    const run = createCheckProfileRunRecord(profile, 'schedule', createdJobs);
-    void processCheckProfileRun(profile, run, createdJobs);
-
-    const updatedProfile: CheckProfile = {
-      ...profile,
-      schedule: profile.schedule
-        ? {
-          ...profile.schedule,
-          lastRunAt: dispatchAt.toISOString(),
-          lastRunJobCount: createdJobs.length,
-          nextRunAt: computeNextRunAt(dispatchAt.toISOString(), profile.schedule.intervalMinutes)
-        }
-        : null,
-      updatedAt: dispatchAt.toISOString()
-    };
-
-    repository.saveCheckProfile(updatedProfile);
-
-    return [{
-      profileId: profile.id,
-      jobIds: run.routes.map((route) => route.jobId),
-      nextRunAt: updatedProfile.schedule?.nextRunAt ?? null
-    }];
   });
 
   const response: SchedulerDispatchResponse = {
@@ -2121,7 +2863,7 @@ async function handleCreateBrowserAudit(request: Request) {
     );
   }
 
-  if (!runtime.browserAuditBaseUrl || !runtime.browserAuditSharedSecret) {
+  if (!runtime.browserAuditBaseUrl) {
     return json(
       {
         error: 'Browser audit direct-run is not configured'
@@ -2133,87 +2875,47 @@ async function handleCreateBrowserAudit(request: Request) {
   const requestedAt = new Date().toISOString();
   const executionId = `audit_${crypto.randomUUID()}`;
   const input = parsed.data;
-  const workerRequest: BrowserAuditWorkerRequest = {
-    executionId,
+  const browserAudit = browserAuditResourceSchema.parse({
+    id: executionId,
     targetUrl: input.targetUrl,
     region: input.region ?? null,
+    status: 'queued',
+    requestedAt,
+    startedAt: null,
+    completedAt: null,
     policy: input.policy,
     customHeaders: input.customHeaders,
     cookies: input.cookies,
-    artifactUpload: null,
-    timestamp: requestedAt,
-    signature: 'pending',
-    keyVersion: 'current'
-  };
-  workerRequest.signature = await createBrowserAuditSignature(runtime.browserAuditSharedSecret, workerRequest);
-
-  let browserAudit: BrowserAuditResource;
+    result: null,
+    error: null
+  });
 
   try {
-    const response = await fetch(new URL('/audit', runtime.browserAuditBaseUrl).toString(), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json'
+    repository.createExecutionResource({
+      executionJob: {
+        id: `exec_${executionId}`,
+        kind: 'browser_audit',
+        resourceId: executionId,
+        maxAttempts: runtime.maxTargetAttempts,
+        payload: browserAuditExecutionPayloadSchema.parse({
+          version: 'v1',
+          auditId: executionId
+        })
       },
-      body: JSON.stringify(browserAuditWorkerRequestSchema.parse(workerRequest))
+      result: {
+        kind: 'browser_audit',
+        audit: browserAudit
+      }
     });
-    const payload = await readResponsePayload(response);
-    const parsedWorkerResponse = browserAuditWorkerResponseSchema.safeParse(payload);
-
-    if (parsedWorkerResponse.success) {
-      browserAudit = browserAuditResourceSchema.parse({
-        id: executionId,
-        targetUrl: input.targetUrl,
-        region: input.region ?? null,
-        status: parsedWorkerResponse.data.status === 'succeeded' ? 'succeeded' : 'failed',
-        requestedAt,
-        startedAt: parsedWorkerResponse.data.result?.startedAt ?? requestedAt,
-        completedAt: parsedWorkerResponse.data.result?.completedAt ?? new Date().toISOString(),
-        policy: input.policy,
-        customHeaders: input.customHeaders,
-        cookies: input.cookies,
-        result: parsedWorkerResponse.data.result,
-        error: parsedWorkerResponse.data.error
-      });
-    } else {
-      const message =
-        payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-          ? payload.error
-          : `Browser audit worker returned ${response.status}`;
-      browserAudit = browserAuditResourceSchema.parse({
-        id: executionId,
-        targetUrl: input.targetUrl,
-        region: input.region ?? null,
-        status: 'failed',
-        requestedAt,
-        startedAt: requestedAt,
-        completedAt: new Date().toISOString(),
-        policy: input.policy,
-        customHeaders: input.customHeaders,
-        cookies: input.cookies,
-        result: null,
-        error: message
-      });
-    }
   } catch (error) {
-    browserAudit = browserAuditResourceSchema.parse({
-      id: executionId,
-      targetUrl: input.targetUrl,
-      region: input.region ?? null,
-      status: 'failed',
-      requestedAt,
-      startedAt: requestedAt,
-      completedAt: new Date().toISOString(),
-      policy: input.policy,
-      customHeaders: input.customHeaders,
-      cookies: input.cookies,
-      result: null,
-      error: error instanceof Error ? error.message : 'Browser audit request failed'
-    });
+    const incidentId = logExecutionCreationFailure('browser_audit', error, executionId);
+    return json(
+      { error: 'Failed to queue Browser Audit', incidentId },
+      { status: 500 }
+    );
   }
 
-  repository.saveBrowserAudit(browserAudit);
-  return json(browserAudit, { status: 201 });
+  return json(browserAudit, { status: 202 });
 }
 
 function handleGetBrowserAudit(auditId: string) {
@@ -2225,6 +2927,217 @@ function handleGetBrowserAudit(auditId: string) {
 
   return json(browserAudit, { status: 200 });
 }
+
+async function handleBrowserAuditArtifactUpload(
+  auditId: string,
+  request: Request,
+  url: URL
+) {
+  const token = readBearerToken(request.headers.get('authorization'));
+  const claims = token
+    ? verifyBrowserAuditUploadToken({
+        token,
+        secrets: [runtime.internalSecret, runtime.internalSecretNext]
+      })
+    : null;
+
+  if (!claims || claims.auditId !== auditId) {
+    return artifactUploadError('Artifact upload token is invalid or expired', 401);
+  }
+
+  const executionJob = repository.getExecutionJob(claims.executionJobId);
+  const now = new Date().toISOString();
+  if (
+    !executionJob
+    || executionJob.kind !== 'browser_audit'
+    || executionJob.resourceId !== auditId
+    || executionJob.status !== 'running'
+    || executionJob.leaseOwner !== claims.leaseOwner
+    || executionJob.attemptCount !== claims.attemptCount
+    || !executionJob.leaseExpiresAt
+    || executionJob.leaseExpiresAt <= now
+    || !repository.getBrowserAudit(auditId)
+  ) {
+    return artifactUploadError('Artifact upload lease is no longer active', 409);
+  }
+
+  if (repository.listBrowserAuditArtifacts(auditId).length >= browserAuditArtifactLimit) {
+    return artifactUploadError('Browser audit artifact limit has been reached', 409);
+  }
+
+  const kindValues = url.searchParams.getAll('kind');
+  const filenameValues = url.searchParams.getAll('filename');
+  const kind = browserAuditArtifactKindSchema.safeParse(kindValues[0]);
+  if (kindValues.length !== 1 || !kind.success || filenameValues.length !== 1) {
+    return artifactUploadError('Artifact kind and filename are required', 400);
+  }
+
+  let filename: string;
+  try {
+    filename = normalizeArtifactFilename(filenameValues[0] ?? '');
+  } catch (error) {
+    return artifactUploadError(
+      error instanceof Error ? error.message : 'Artifact filename is invalid',
+      400
+    );
+  }
+
+  const contentType = request.headers
+    .get('content-type')
+    ?.split(';', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  const allowedContentTypes = browserAuditArtifactContentTypesForKind(kind.data);
+  if (!contentType || !allowedContentTypes.includes(contentType)) {
+    return artifactUploadError('Artifact content type is not allowed for its kind', 415);
+  }
+
+  const declaredSize = parseArtifactByteSize(request.headers.get('x-artifact-size'));
+  if (declaredSize === null) {
+    return artifactUploadError('Artifact byte size is required', 400);
+  }
+
+  const maxBytes = Math.min(runtime.maxArtifactBytes, claims.maxArtifactBytes);
+  if (declaredSize > maxBytes) {
+    return artifactUploadError('Artifact exceeds the configured byte limit', 413);
+  }
+
+  const contentLength = request.headers.get('content-length');
+  if (contentLength !== null && parseArtifactByteSize(contentLength) !== declaredSize) {
+    return artifactUploadError('Artifact content length does not match its declared size', 400);
+  }
+
+  const artifactId = `artifact_${crypto.randomUUID()}`;
+  let storedStorageKey: string | null = null;
+  let indexed = false;
+
+  try {
+    const stored = await artifactStore.write({
+      auditId,
+      artifactId,
+      body: request.body,
+      expectedBytes: declaredSize,
+      maxBytes
+    });
+    storedStorageKey = stored.storageKey;
+    const createdAt = new Date().toISOString();
+    indexed = repository.saveBrowserAuditArtifact({
+      id: artifactId,
+      auditId,
+      registryVersion: browserAuditArtifactRegistryVersion,
+      kind: kind.data,
+      filename,
+      contentType,
+      byteSize: stored.byteSize,
+      sha256: stored.sha256,
+      storageKey: stored.storageKey,
+      createdAt
+    });
+
+    if (!indexed) {
+      return artifactUploadError('Artifact could not be indexed', 409);
+    }
+
+    const artifact = browserAuditArtifactRefSchema.parse({
+      id: artifactId,
+      registryVersion: browserAuditArtifactRegistryVersion,
+      kind: kind.data,
+      url: `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      filename,
+      contentType,
+      byteSize: stored.byteSize,
+      sha256: stored.sha256,
+      createdAt
+    });
+    return json(artifact, {
+      status: 201,
+      headers: { 'cache-control': 'no-store' }
+    });
+  } catch (error) {
+    if (error instanceof ArtifactStoreValidationError) {
+      return artifactUploadError(error.message, error.status);
+    }
+
+    const incidentId = crypto.randomUUID();
+    console.error(JSON.stringify({
+      service: 'webperf-api',
+      event: 'browser_audit_artifact_upload_failed',
+      auditId,
+      incidentId,
+      ...describeSafeError(error)
+    }));
+    return artifactUploadError('Artifact upload failed', 500, incidentId);
+  } finally {
+    if (storedStorageKey && !indexed) {
+      await artifactStore.delete(storedStorageKey).catch((error) => {
+        console.warn(JSON.stringify({
+          service: 'webperf-api',
+          warning: 'browser_audit_artifact_cleanup_failed',
+          storageKey: storedStorageKey,
+          ...describeSafeError(error)
+        }));
+      });
+    }
+  }
+}
+
+async function handleBrowserAuditArtifactDownload(
+  auditId: string,
+  artifactId: string
+) {
+  const artifact = repository.getBrowserAuditArtifact(auditId, artifactId);
+  if (!artifact || !repository.getBrowserAudit(auditId)) {
+    return json({ error: 'Browser audit artifact not found' }, { status: 404 });
+  }
+
+  try {
+    const download = await artifactStore.openDownload(
+      artifact.storageKey,
+      artifact.byteSize
+    );
+    return new Response(download.body, {
+      status: 200,
+      headers: {
+        'cache-control': 'private, no-store',
+        'content-type': artifact.contentType,
+        'content-disposition': `attachment; filename="${artifact.filename}"`,
+        'x-content-type-options': 'nosniff',
+        'x-webperf-artifact-bytes': String(download.byteSize),
+        etag: `"sha256-${artifact.sha256}"`
+      }
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      service: 'webperf-api',
+      warning: 'browser_audit_artifact_file_unavailable',
+      auditId,
+      artifactId,
+      ...describeSafeError(error)
+    }));
+    return json({ error: 'Browser audit artifact not found' }, { status: 404 });
+  }
+}
+
+const parseArtifactByteSize = (value: string | null) => {
+  if (!value || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+};
+
+const readBearerToken = (authorization: string | null) =>
+  authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1] ?? null;
+
+const artifactUploadError = (
+  error: string,
+  status: number,
+  incidentId?: string
+) => json(
+  incidentId ? { error, incidentId } : { error },
+  { status, headers: { 'cache-control': 'no-store' } }
+);
 
 function handleJobStream(jobId: string) {
   return new Response(createJobSnapshotStream(jobId), {
@@ -2272,168 +3185,6 @@ function buildCheckProfileReport(profile: CheckProfile): CheckProfileReportRespo
     baselineComparison,
     recentRuns
   };
-}
-
-async function processJob(jobId: string) {
-  const job = repository.getJob(jobId);
-
-  if (!job) {
-    return;
-  }
-
-  if (!runtime.probeSharedSecret) {
-    for (const target of job.targets) {
-      markTargetFailed(target, 'missing_probe_shared_secret', 'Probe shared secret is not configured');
-    }
-    finalizeJob(job);
-    return;
-  }
-
-  for (const target of job.targets) {
-    job.startedAt ??= new Date().toISOString();
-    target.attemptNo = 1;
-    target.status = 'measuring';
-    target.startedAt ??= new Date().toISOString();
-    target.updatedAt = new Date().toISOString();
-    recomputeJob(job);
-
-    const probeBaseUrl = runtime.probeBaseUrls[target.region];
-
-    if (!probeBaseUrl) {
-      markTargetFailed(target, 'missing_probe_region', `No probe base URL is configured for ${target.region}`);
-      recomputeJob(job);
-      continue;
-    }
-
-    try {
-      const payload = signedProbeMeasurementRequestSchema.parse({
-        jobId: job.id,
-        targetId: `${job.id}:${target.region}`,
-        region: target.region,
-        url: job.url,
-        request: job.request,
-        timestamp: new Date().toISOString(),
-        signature: 'placeholder-signature',
-        keyVersion: 'current'
-      });
-      payload.signature = await createProbeSignature(runtime.probeSharedSecret, payload);
-
-      const response = await fetch(new URL('/measure', probeBaseUrl).toString(), {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify(payload satisfies SignedProbeMeasurementRequest)
-      });
-
-      if (!response.ok) {
-        markTargetFailed(target, `probe_http_${response.status}`, `Probe call failed with ${response.status}`);
-        recomputeJob(job);
-        continue;
-      }
-
-      const parsed = probeMeasurementResponseSchema.safeParse(
-        (await response.json()) as ProbeMeasurementResponse
-      );
-
-      if (!parsed.success) {
-        markTargetFailed(target, 'probe_invalid_payload', 'Probe returned an invalid payload');
-        recomputeJob(job);
-        continue;
-      }
-
-      target.status = parsed.data.measurement.success ? 'succeeded' : 'failed';
-      target.latencyMs = parsed.data.measurement.latencyMs;
-      target.statusCode = parsed.data.measurement.statusCode;
-      target.success = evaluateTargetSuccess(parsed.data.measurement);
-      target.status = target.success ? 'succeeded' : 'failed';
-      target.probeImpl = parsed.data.measurement.probeImpl;
-      target.measurement = parsed.data.measurement;
-      target.errorCode = parsed.data.measurement.error
-        ? 'probe_measurement_failed'
-        : target.success
-          ? null
-          : 'status_rule_failed';
-      target.errorClass = parsed.data.measurement.error || !target.success ? 'terminal' : null;
-      target.errorMessage = parsed.data.measurement.error
-        ?? (target.success ? null : buildStatusFailureMessage(parsed.data.measurement.statusCode));
-      target.finishedAt = parsed.data.measurement.measuredAt;
-      target.updatedAt = new Date().toISOString();
-      recomputeJob(job);
-    } catch (error) {
-      markTargetFailed(
-        target,
-        'probe_runtime_error',
-        error instanceof Error ? error.message : 'Unknown probe error'
-      );
-      recomputeJob(job);
-    }
-  }
-
-  finalizeJob(job);
-}
-
-async function processCheckProfileRun(
-  profile: CheckProfile,
-  run: CheckProfileRun,
-  createdJobs: CreatedProfileJob[]
-) {
-  await Promise.all(createdJobs.map((item) => processJob(item.job.id)));
-
-  const refreshedRun = repository.getCheckProfileRun(run.id) ?? run;
-  const comparison = resolveComparisonForRun(profile, refreshedRun);
-  const jobs = getJobsForRun(refreshedRun);
-  const evaluation = evaluateMonitorTargets({
-    monitorPolicy: profile.monitorPolicy,
-    targets: jobs.flatMap((job) => job.targets),
-    regressedCount: comparison?.summary.regressed ?? 0
-  });
-  const nextRun: CheckProfileRun = {
-    ...refreshedRun,
-    evaluation,
-    alertDeliveries: await dispatchProfileAlerts({
-      profile,
-      run: refreshedRun,
-      jobs,
-      evaluation,
-      comparison
-    })
-  };
-
-  repository.saveCheckProfileRun(nextRun);
-}
-
-function markTargetFailed(target: MutableTarget, errorCode: string, errorMessage: string) {
-  target.status = 'failed';
-  target.latencyMs = null;
-  target.statusCode = null;
-  target.success = false;
-  target.probeImpl = null;
-  target.measurement = null;
-  target.slotId = null;
-  target.errorCode = errorCode;
-  target.errorClass = 'terminal';
-  target.errorMessage = errorMessage;
-  target.finishedAt = new Date().toISOString();
-  target.updatedAt = new Date().toISOString();
-}
-
-function finalizeJob(job: MutableJob) {
-  recomputeJob(job);
-  if (job.summary.inflight === 0) {
-    job.completedAt = new Date().toISOString();
-  }
-  repository.saveJob(job);
-}
-
-function recomputeJob(job: MutableJob) {
-  job.summary = summarizeTargets(job.targets);
-  job.status = deriveJobStatus(job.targets);
-  job.evaluation = evaluateMonitorTargets({
-    monitorPolicy: job.monitorPolicy,
-    targets: job.targets
-  });
-  repository.saveJob(job);
 }
 
 function createJobRecord({
@@ -2506,10 +3257,70 @@ function createJobRecord({
     summary: summarizeTargets(targets)
   };
 
-  repository.pruneJobsOlderThan(runtime.retentionDays);
-  repository.saveJob(job);
-
   return job;
+}
+
+function createNetworkExecutionResource(
+  jobs: LatencyJobDetail[],
+  run: CheckProfileRun | null,
+  checkId: string | null
+) {
+  const firstJob = jobs[0];
+
+  if (!firstJob) {
+    throw new Error('Network execution requires at least one job');
+  }
+
+  const resourceId = run?.id ?? firstJob.id;
+  const attemptCounts = jobs.flatMap((job) =>
+    job.targets.map((target) => target.maxAttempts)
+  );
+
+  if (attemptCounts.length === 0) {
+    throw new Error('Network execution requires at least one target');
+  }
+
+  const maxAttempts = Math.max(...attemptCounts);
+  const payload = networkProbeExecutionPayloadSchema.parse({
+    version: 'v1',
+    jobIds: jobs.map((job) => job.id),
+    checkId,
+    runId: run?.id ?? null
+  });
+
+  repository.pruneJobsOlderThan(runtime.retentionDays);
+
+  return repository.createExecutionResource({
+    executionJob: {
+      id: `exec_${resourceId}`,
+      kind: 'network_probe',
+      resourceId,
+      maxAttempts,
+      payload
+    },
+    result: {
+      kind: 'network_probe',
+      jobs,
+      run
+    }
+  });
+}
+
+function logExecutionCreationFailure(
+  operation: 'manual_job_create' | 'manual_check_run' | 'scheduled_check_run' | 'browser_audit',
+  error: unknown,
+  resourceId: string
+) {
+  const incidentId = crypto.randomUUID();
+  console.error(JSON.stringify({
+    service: 'webperf-api',
+    event: 'execution_creation_failed',
+    operation,
+    resourceId,
+    incidentId,
+    ...describeSafeError(error)
+  }));
+  return incidentId;
 }
 
 function createJobsForProfile(profile: CheckProfile, requesterIp: string | null): CreatedProfileJob[] {
@@ -2563,7 +3374,6 @@ function createCheckProfileRunRecord(
     }))
   };
 
-  repository.saveCheckProfileRun(run);
   return run;
 }
 
@@ -2625,32 +3435,15 @@ function findPreviousRun(profileId: string, runId: string) {
   return runs[runIndex + 1] ?? null;
 }
 
-function evaluateTargetSuccess(measurement: ProbeMeasurementResponse['measurement']) {
-  if (measurement.error) {
-    return false;
-  }
-
-  if (measurement.statusCode == null) {
-    return false;
-  }
-
-  return measurement.statusCode >= 200 && measurement.statusCode < 400;
-}
-
-function buildStatusFailureMessage(statusCode: number | null | undefined) {
-  if (statusCode == null) {
-    return null;
-  }
-
-  return `Status ${statusCode} did not satisfy status_2xx_3xx`;
-}
-
-function normalizeCustomRequestConfig(request: CreateLatencyJobInput['request'] | CreateCheckProfileInput['request']) {
+function normalizeCustomRequestConfig(
+  request: CreateLatencyJobInput['request'] | CreateCheckProfileInput['request'],
+  existing?: CheckProfile['request']
+) {
   return {
     method: request?.method ?? 'GET',
     headers: (request?.headers ?? []).map((header) => ({
       name: requireTrimmedText(header.name, 'Header name'),
-      value: header.value.trim()
+      value: resolveMaskedHeaderValue(header.name, header.value.trim(), existing)
     })),
     body:
       request?.body == null
@@ -2661,6 +3454,26 @@ function normalizeCustomRequestConfig(request: CreateLatencyJobInput['request'] 
             value: request.body.value
           }
   } satisfies NonNullable<CreateLatencyJobInput['request']>;
+}
+
+function resolveMaskedHeaderValue(
+  name: string,
+  value: string,
+  existing: CheckProfile['request'] | undefined
+) {
+  if (value !== redactedValue || !isSensitiveHeaderName(name)) {
+    return value;
+  }
+
+  const previous = existing?.headers.find(
+    (header) => header.name.trim().toLowerCase() === name.trim().toLowerCase()
+  );
+
+  if (!previous) {
+    throw new Error(`A new sensitive header cannot use ${redactedValue} as its value`);
+  }
+
+  return previous.value;
 }
 
 function normalizeMonitorPolicy(
@@ -2684,7 +3497,7 @@ function normalizeAlertConfig(
       name: requireTrimmedText(target.name, 'Webhook target name'),
       url: target.url.trim(),
       enabled: target.enabled ?? true,
-      secret: normalizeOptionalText(target.secret)
+      secret: resolveMaskedWebhookSecret(target.secret, previousTarget?.secret ?? null)
     };
   }) ?? existing?.webhookTargets ?? [];
 
@@ -2700,109 +3513,19 @@ function normalizeAlertConfig(
   } satisfies NonNullable<CheckProfile['alerts']>;
 }
 
-async function dispatchProfileAlerts({
-  profile,
-  run,
-  jobs,
-  evaluation,
-  comparison
-}: {
-  profile: CheckProfile;
-  run: CheckProfileRun;
-  jobs: LatencyJobDetail[];
-  evaluation: CheckProfileRun['evaluation'];
-  comparison: CheckProfileComparisonResponse | null;
-}): Promise<CheckProfileAlertDelivery[]> {
-  if (!profile.alerts?.enabled || (profile.alerts.webhookTargets?.length ?? 0) === 0 || !evaluation) {
-    return [];
+function resolveMaskedWebhookSecret(
+  value: string | null | undefined,
+  previousValue: string | null
+) {
+  if (value !== redactedValue) {
+    return normalizeOptionalText(value);
   }
 
-  const shouldAlert =
-    (profile.alerts.triggers.onFailure && evaluation.failedChecks > 0) ||
-    (profile.alerts.triggers.onLatencyThresholdBreach && evaluation.thresholdBreached) ||
-    (profile.alerts.triggers.onRegression && evaluation.regressionDetected);
-
-  if (!shouldAlert) {
-    return [];
+  if (!previousValue) {
+    throw new Error(`A new webhook secret cannot use ${redactedValue} as its value`);
   }
 
-  const payload = {
-    type: 'check_profile.alert',
-    profile: {
-      id: profile.id,
-      name: profile.name
-    },
-    run: {
-      id: run.id,
-      createdAt: run.createdAt,
-      trigger: run.trigger
-    },
-    evaluation,
-    jobs: jobs.map((job) => ({
-      id: job.id,
-      url: job.url,
-      status: job.status,
-      evaluation: job.evaluation ?? null,
-      summary: job.summary
-    })),
-    comparison: comparison
-      ? {
-          mode: comparison.mode,
-          summary: comparison.summary
-        }
-      : null
-  };
-
-  return Promise.all(
-    profile.alerts.webhookTargets
-      .filter((target) => target.enabled)
-      .map(async (target) => {
-        const deliveredAt = new Date().toISOString();
-
-        try {
-          const response = await fetch(target.url, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              ...(target.secret ? { 'x-webperf-signature': target.secret } : {})
-            },
-            body: JSON.stringify(payload)
-          });
-
-          if (!response.ok) {
-            return {
-              targetId: target.id,
-              targetName: target.name,
-              url: target.url,
-              deliveredAt,
-              status: 'failed',
-              responseStatus: response.status,
-              error: `Webhook responded with ${response.status}`
-            } satisfies CheckProfileAlertDelivery;
-          }
-
-          return {
-            targetId: target.id,
-            targetName: target.name,
-            url: target.url,
-            deliveredAt,
-            status: 'sent',
-            responseStatus: response.status,
-            error: null
-          } satisfies CheckProfileAlertDelivery;
-        } catch (error) {
-          return {
-            targetId: target.id,
-            targetName: target.name,
-            url: target.url,
-            deliveredAt,
-            status: 'failed',
-            responseStatus: null,
-            error: error instanceof Error ? error.message : 'Webhook delivery failed'
-          } satisfies CheckProfileAlertDelivery;
-        }
-      })
-  );
+  return previousValue;
 }
 
 function safeLatestComparison(profile: CheckProfile, currentRun: CheckProfileRun) {
@@ -3039,17 +3762,41 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     host: parsed.SELFHOST_API_HOST,
     port: parsed.SELFHOST_API_PORT,
     databasePath: parsed.SELFHOST_DATABASE_PATH,
+    artifactsPath: parsed.SELFHOST_ARTIFACTS_PATH,
+    artifactUploadBaseUrl: parsed.SELFHOST_ARTIFACT_UPLOAD_BASE_URL
+      ? resolveArtifactUploadBaseUrl(parsed.SELFHOST_ARTIFACT_UPLOAD_BASE_URL)
+      : undefined,
+    maxArtifactBytes: parsed.SELFHOST_MAX_ARTIFACT_BYTES,
+    artifactUploadTtlSeconds: parsed.SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS,
     retentionDays: parsed.SELFHOST_RETENTION_DAYS,
-    probeSharedSecret: parsed.PROBE_SHARED_SECRET,
-    probeSharedSecretNext: parsed.PROBE_SHARED_SECRET_NEXT,
-    browserAuditSharedSecret: parsed.BROWSER_AUDIT_SHARED_SECRET,
-    browserAuditSharedSecretNext: parsed.BROWSER_AUDIT_SHARED_SECRET_NEXT,
+    migrationBackup: parsed.SELFHOST_MIGRATION_BACKUP,
+    adminToken: parsed.SELFHOST_ADMIN_TOKEN,
+    adminTokenNext: parsed.SELFHOST_ADMIN_TOKEN_NEXT,
+    internalSecret: parsed.SELFHOST_INTERNAL_SECRET,
+    internalSecretNext: parsed.SELFHOST_INTERNAL_SECRET_NEXT,
     browserAuditBaseUrl: parsed.SELFHOST_BROWSER_AUDIT_BASE_URL,
     activeRegionCodes: parseRegionCodes(parsed.SELFHOST_ACTIVE_REGION_CODES_JSON),
     regionIds: parseRegionMap(parsed.SELFHOST_REGION_IDS_JSON),
     probeBaseUrls: parseRegionMap(parsed.SELFHOST_PROBE_BASE_URLS_JSON),
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS
   };
+}
+
+function resolveArtifactUploadBaseUrl(value: string) {
+  const url = new URL(value);
+
+  if (
+    !['http:', 'https:'].includes(url.protocol)
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    throw new Error('Artifact upload base URL must be a credential-free HTTP(S) origin');
+  }
+
+  return url.origin;
 }
 
 function getRegionAvailability() {
@@ -3099,20 +3846,28 @@ function parseRegionMap(jsonValue: string): Partial<Record<RegionCode, string>> 
   }
 }
 
-async function parseJsonBody<T>(request: Request) {
+async function parseJsonBody<T>(request: Request, maxBytes = 1_024 * 1_024) {
   try {
     return {
       ok: true as const,
-      data: (await request.json()) as T
+      data: (await readBoundedJson(request, maxBytes)) as T
     };
-  } catch {
+  } catch (error) {
+    let message = 'Invalid JSON payload';
+    let status = 400;
+
+    if (error instanceof JsonBodyTooLargeError) {
+      message = error.message;
+      status = 413;
+    } else if (error instanceof JsonBodyEmptyError) {
+      message = error.message;
+    }
+
     return {
       ok: false as const,
       response: json(
-        {
-          error: 'Invalid JSON payload'
-        },
-        { status: 400 }
+        { error: message },
+        { status }
       )
     };
   }
@@ -3170,6 +3925,45 @@ function json(data: unknown, init: ResponseInit = {}) {
       'content-type': 'application/json; charset=utf-8',
       ...(init.headers ?? {})
     }
+  });
+}
+
+const compatibilityRouteMappings = [
+  { legacy: '/v1/properties', canonical: '/v1/sites' },
+  { legacy: '/v1/route-sets', canonical: '/v1/route-groups' },
+  { legacy: '/v1/region-packs', canonical: '/v1/region-sets' },
+  { legacy: '/v1/check-profiles', canonical: '/v1/checks' }
+] as const;
+
+function addCompatibilityDeprecationHeaders(request: Request, response: Response) {
+  const requestUrl = new URL(request.url);
+  const mapping = compatibilityRouteMappings.find(
+    ({ legacy }) => requestUrl.pathname === legacy || requestUrl.pathname.startsWith(`${legacy}/`)
+  );
+
+  if (!mapping) {
+    return response;
+  }
+
+  const successorUrl = new URL(
+    `${mapping.canonical}${requestUrl.pathname.slice(mapping.legacy.length)}`,
+    requestUrl.origin
+  );
+  successorUrl.search = requestUrl.search;
+
+  const headers = new Headers(response.headers);
+  headers.set('deprecation', 'true');
+  // A Sunset date will be added only after the public v1.0 removal date is announced.
+  headers.append('link', `<${successorUrl.toString()}>; rel="successor-version"`);
+  headers.set(
+    'warning',
+    `299 WebPerf "Deprecated API path; migrate to ${successorUrl.pathname}"`
+  );
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
   });
 }
 
@@ -4200,10 +4994,57 @@ const getPublicOpenApiDocument = async () => {
 
 export type SelfhostControlServer = typeof server;
 
-const shutdown = () => {
-  repository.close();
-  server.stop(true);
+let shutdownPromise: Promise<void> | undefined;
+
+export const shutdown = (signal = 'manual') => {
+  if (!shutdownPromise) {
+    shutdownPromise = (async () => {
+      console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.started', signal }));
+      let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
+      const forceStop = new Promise<void>((resolve, reject) => {
+        forceStopTimer = setTimeout(() => {
+          console.warn(JSON.stringify({
+            service: 'webperf-api',
+            event: 'shutdown.force_stop',
+            signal
+          }));
+          void server.stop(true).then(resolve, reject);
+        }, 10_000);
+      });
+
+      try {
+        await Promise.race([server.stop(false), forceStop]);
+      } finally {
+        clearTimeout(forceStopTimer);
+        removeShutdownSignalHandlers();
+        repository.close();
+      }
+
+      console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.completed', signal }));
+    })();
+  }
+
+  return shutdownPromise;
 };
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+const handleShutdownSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+  void shutdown(signal).catch((error) => {
+    console.error(JSON.stringify({
+      service: 'webperf-api',
+      event: 'shutdown.failed',
+      signal,
+      error: describeSafeError(error)
+    }));
+    process.exitCode = 1;
+  });
+};
+
+const onSigint = () => handleShutdownSignal('SIGINT');
+const onSigterm = () => handleShutdownSignal('SIGTERM');
+process.once('SIGINT', onSigint);
+process.once('SIGTERM', onSigterm);
+
+function removeShutdownSignalHandlers() {
+  process.off('SIGINT', onSigint);
+  process.off('SIGTERM', onSigterm);
+}

@@ -84,6 +84,8 @@ The checked-in [LICENSE](../LICENSE) file is now part of the public-launch basel
 - enable Issues with templates
 - protect `main`
 - keep Packages enabled for GHCR image publishing
+- create a `release` Environment with a required reviewer and restrict its
+  deployment branches and tags to protected `v0.*` tags
 - add the repo description and topics above
 - upload a social preview image later if the project gets a dedicated visual identity
 

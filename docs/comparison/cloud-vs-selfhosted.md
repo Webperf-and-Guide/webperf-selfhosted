@@ -30,7 +30,7 @@ It should include:
 - JSON and CSV exports
 - generic webhook delivery
 - extension points for optional browser-audit adapters
-- the optional Bun browser-audit worker runtime itself, when used without managed orchestration
+- the optional Bun browser-audit Lighthouse runner runtime itself, when used without managed orchestration
 
 It should not include:
 

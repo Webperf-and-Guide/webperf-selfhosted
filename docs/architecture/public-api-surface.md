@@ -37,7 +37,22 @@ Treat this document as the current freeze line:
 - `GET /v1/browser-audits`
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
+- `GET /v1/browser-audits/:id/artifacts/:artifactId`
 - `GET /v1/capabilities`
+
+Authentication boundary:
+
+- `GET /health` is the unauthenticated, minimal process health probe.
+- `GET /v1/capabilities` and `GET /openapi/public.json` are unauthenticated.
+- `GET /v1/health`, artifact downloads, and every data or execution endpoint
+  require the appropriate administrator or internal-service bearer token.
+
+Request boundary:
+
+- JSON request bodies on the resource-oriented `/v1` routes are limited to
+  1 MiB and return `413` before parsing when the declared or streamed body is larger.
+- Browser Audit binary uploads use their separately configured per-artifact
+  limit and do not pass through the JSON reader.
 
 ## Compatibility Aliases
 
@@ -50,6 +65,17 @@ The older self-host aliases remain supported:
 
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
 Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
+
+Every response below a compatibility prefix includes:
+
+- `Deprecation: true`
+- a `Link` header with `rel="successor-version"` pointing to the canonical path
+- an HTTP `Warning` identifying the successor path
+
+The aliases receive compatibility fixes only. New capabilities land on canonical
+resources first. They are migration candidates for removal at public v1.0 after
+managed consumers and existing self-host installations have moved to the
+canonical paths.
 
 `runs` are intentionally not a top-level list resource in v1:
 

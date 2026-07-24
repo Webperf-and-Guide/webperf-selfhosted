@@ -23,10 +23,22 @@ type OpenApiDoc = {
         summary?: string;
         description?: string;
         tags?: string[];
+        security?: Array<Record<string, string[]>>;
         responses: Record<string, { description: string }>;
       }
     >
   >;
+  components?: {
+    securitySchemes: Record<
+      string,
+      {
+        type: 'http';
+        scheme: 'bearer';
+        bearerFormat: string;
+        description?: string;
+      }
+    >;
+  };
 };
 
 type OpenApiSkeletonOptions = {
@@ -36,6 +48,11 @@ type OpenApiSkeletonOptions = {
   serverUrl?: string;
   contract: unknown;
   tags: OpenApiTag[];
+  bearerAuth?: {
+    schemeName: string;
+    publicPaths?: string[];
+    description?: string;
+  };
 };
 
 const traverseContract = (router: unknown, visit: (procedure: Record<string, unknown>) => void) => {
@@ -66,6 +83,19 @@ export const buildOpenApiSkeletonDocument = (options: OpenApiSkeletonOptions): O
     paths: {}
   };
 
+  if (options.bearerAuth) {
+    doc.components = {
+      securitySchemes: {
+        [options.bearerAuth.schemeName]: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'opaque',
+          description: options.bearerAuth.description
+        }
+      }
+    };
+  }
+
   traverseContract(options.contract, (procedure) => {
     const route = (procedure['~orpc'] as { route?: Record<string, unknown> } | undefined)?.route;
 
@@ -82,6 +112,10 @@ export const buildOpenApiSkeletonDocument = (options: OpenApiSkeletonOptions): O
       summary: typeof route.summary === 'string' ? route.summary : undefined,
       description: typeof route.description === 'string' ? route.description : undefined,
       tags: Array.isArray(route.tags) ? route.tags.filter((tag): tag is string => typeof tag === 'string') : undefined,
+      security:
+        options.bearerAuth && !options.bearerAuth.publicPaths?.includes(path)
+          ? [{ [options.bearerAuth.schemeName]: [] }]
+          : undefined,
       responses: {
         '200': {
           description: typeof route.successDescription === 'string' ? route.successDescription : 'OK'

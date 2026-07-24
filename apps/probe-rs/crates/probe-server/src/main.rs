@@ -1,16 +1,26 @@
 use anyhow::Result;
 use probe_core::Config;
-use probe_server::{AppState, serve};
+use probe_server::{AppState, run_local_healthcheck, serve};
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
+fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--healthcheck") {
+        return run_local_healthcheck(
+            &std::env::var("PROBE_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
+        );
+    }
+
+    run_server()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run_server() -> Result<()> {
     init_tracing();
 
-    let config = Config::from_env();
-    let state = AppState::new(config.clone())?;
+    let config = Config::from_env()?;
+    let state = AppState::new(config.clone());
     let listener = TcpListener::bind(&config.listen_addr).await?;
 
     info!(

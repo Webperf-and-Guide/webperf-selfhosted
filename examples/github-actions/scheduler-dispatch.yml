@@ -7,12 +7,15 @@ on:
 
 jobs:
   dispatch:
-    runs-on: ubuntu-latest
+    # Keep this runner on the same private network as the self-host API.
+    runs-on: self-hosted
     steps:
       - name: Trigger self-host scheduler
         env:
           SELFHOST_CONTROL_URL: ${{ secrets.SELFHOST_CONTROL_URL }}
+          SELFHOST_INTERNAL_SECRET: ${{ secrets.SELFHOST_INTERNAL_SECRET }}
         run: |
           curl --fail --show-error --silent \
             -X POST \
+            -H "Authorization: Bearer ${SELFHOST_INTERNAL_SECRET}" \
             "${SELFHOST_CONTROL_URL%/}/v1/scheduler/dispatch"

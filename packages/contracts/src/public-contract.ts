@@ -76,6 +76,17 @@ const publicCapabilitiesSchema = z.object({
     openApi: z.boolean(),
     appRpc: z.boolean(),
     opsRpc: z.boolean()
+  }),
+  metrics: z.object({
+    networkProbe: z.object({
+      version: z.literal('v1'),
+      dnsTiming: z.boolean(),
+      tcpTiming: z.boolean(),
+      tlsTiming: z.boolean(),
+      responseHeaderTiming: z.boolean(),
+      bodySampleTiming: z.boolean(),
+      tlsMetadata: z.boolean()
+    })
   })
 });
 

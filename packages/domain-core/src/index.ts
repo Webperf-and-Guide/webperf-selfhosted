@@ -27,7 +27,7 @@ export type RegionDefinition = {
   continent: RegionContinent;
   countryCode: string;
   rolloutTrack: RegionRolloutTrack;
-  bunnyRegionHint?: string;
+  providerRegionHint?: string;
 };
 
 export const regionCatalog: RegionDefinition[] = [
@@ -46,7 +46,7 @@ export const regionCatalog: RegionDefinition[] = [
     continent: 'North America',
     countryCode: 'US',
     rolloutTrack: 'core',
-    bunnyRegionHint: 'US'
+    providerRegionHint: 'US'
   },
   { code: 'sanjose', label: 'San Jose', city: 'San Jose', continent: 'North America', countryCode: 'US', rolloutTrack: 'catalog' },
   { code: 'seattle', label: 'Seattle', city: 'Seattle', continent: 'North America', countryCode: 'US', rolloutTrack: 'catalog' },
@@ -62,7 +62,7 @@ export const regionCatalog: RegionDefinition[] = [
     continent: 'Europe',
     countryCode: 'DE',
     rolloutTrack: 'core',
-    bunnyRegionHint: 'DE'
+    providerRegionHint: 'DE'
   },
   { code: 'london', label: 'London', city: 'London', continent: 'Europe', countryCode: 'GB', rolloutTrack: 'catalog' },
   { code: 'madrid', label: 'Madrid', city: 'Madrid', continent: 'Europe', countryCode: 'ES', rolloutTrack: 'catalog' },
@@ -86,7 +86,7 @@ export const regionCatalog: RegionDefinition[] = [
     continent: 'Asia',
     countryCode: 'SG',
     rolloutTrack: 'core',
-    bunnyRegionHint: 'SG'
+    providerRegionHint: 'SG'
   },
   { code: 'telaviv', label: 'Tel Aviv', city: 'Tel Aviv', continent: 'Asia', countryCode: 'IL', rolloutTrack: 'catalog' },
   {
@@ -96,7 +96,7 @@ export const regionCatalog: RegionDefinition[] = [
     continent: 'Asia',
     countryCode: 'JP',
     rolloutTrack: 'core',
-    bunnyRegionHint: 'JP'
+    providerRegionHint: 'JP'
   },
   { code: 'bogota', label: 'Bogota', city: 'Bogota', continent: 'South America', countryCode: 'CO', rolloutTrack: 'catalog' },
   { code: 'mexicocity', label: 'Mexico City', city: 'Mexico City', continent: 'South America', countryCode: 'MX', rolloutTrack: 'catalog' },
@@ -120,7 +120,7 @@ export const buildRegionAvailabilityList = ({
   const activeRegions = new Set(activeRegionCodes);
 
   return regionCatalog.map((region) => {
-    const selectable = activeRegions.has(region.code) && Boolean(regionHints[region.code] ?? region.bunnyRegionHint);
+    const selectable = activeRegions.has(region.code) && Boolean(regionHints[region.code] ?? region.providerRegionHint);
 
     return {
       code: region.code,
@@ -131,7 +131,7 @@ export const buildRegionAvailabilityList = ({
       defaultSelected: selectable && defaultRegionSet.has(region.code),
       launchStage: region.rolloutTrack === 'core' ? 'core' : 'catalog',
       rolloutTrack: region.rolloutTrack,
-      bunnyRegionHint: regionHints[region.code] ?? region.bunnyRegionHint
+      providerRegionHint: regionHints[region.code] ?? region.providerRegionHint
     } satisfies RegionAvailability;
   });
 };
@@ -344,7 +344,9 @@ const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => 
   };
 };
 
-export const toProbeSignaturePayload = (request: SignedProbeMeasurementRequest) =>
+export type ProbeSignatureRequest = Omit<SignedProbeMeasurementRequest, 'signature'>;
+
+export const toProbeSignaturePayload = (request: ProbeSignatureRequest) =>
   stableStringify({
     jobId: request.jobId,
     targetId: request.targetId,
@@ -356,7 +358,7 @@ export const toProbeSignaturePayload = (request: SignedProbeMeasurementRequest) 
 
 export const createProbeSignature = async (
   sharedSecret: string,
-  request: SignedProbeMeasurementRequest
+  request: ProbeSignatureRequest
 ) => {
   const key = await crypto.subtle.importKey(
     'raw',
@@ -381,7 +383,9 @@ const normalizeBrowserAuditHeaders = (headers: BrowserAuditWorkerRequest['custom
 const normalizeBrowserAuditCookies = (cookies: BrowserAuditWorkerRequest['cookies']) =>
   [...cookies].sort((left, right) => left.name.localeCompare(right.name) || left.value.localeCompare(right.value));
 
-export const toBrowserAuditSignaturePayload = (request: BrowserAuditWorkerRequest) =>
+export type BrowserAuditSignatureRequest = Omit<BrowserAuditWorkerRequest, 'signature'>;
+
+export const toBrowserAuditSignaturePayload = (request: BrowserAuditSignatureRequest) =>
   JSON.stringify({
     executionId: request.executionId,
     targetUrl: request.targetUrl,
@@ -393,7 +397,11 @@ export const toBrowserAuditSignaturePayload = (request: BrowserAuditWorkerReques
       request.artifactUpload == null
         ? null
         : {
-            baseUrl: request.artifactUpload.baseUrl
+            baseUrl: request.artifactUpload.baseUrl,
+            bearerToken: request.artifactUpload.bearerToken,
+            expiresAt: request.artifactUpload.expiresAt,
+            maxArtifactBytes: request.artifactUpload.maxArtifactBytes,
+            allowedContentTypes: [...request.artifactUpload.allowedContentTypes].sort()
           },
     timestamp: request.timestamp,
     keyVersion: request.keyVersion
@@ -401,7 +409,7 @@ export const toBrowserAuditSignaturePayload = (request: BrowserAuditWorkerReques
 
 export const createBrowserAuditSignature = async (
   sharedSecret: string,
-  request: BrowserAuditWorkerRequest
+  request: BrowserAuditSignatureRequest
 ) => {
   const key = await crypto.subtle.importKey(
     'raw',

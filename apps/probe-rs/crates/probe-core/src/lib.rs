@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::Sha256;
 use std::{
-    env,
+    env, fmt,
     net::{IpAddr, Ipv4Addr},
 };
 use subtle::ConstantTimeEq;
@@ -15,9 +15,20 @@ type HmacSha256 = Hmac<Sha256>;
 
 const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_REGION_CODE: &str = "tokyo";
-const DEFAULT_SHARED_SECRET: &str = "dev-shared-secret";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ConfigError {
+    #[error(
+        "PROBE_SHARED_SECRET is required and must contain at least 16 bytes after trimming surrounding whitespace"
+    )]
+    InvalidSharedSecret,
+    #[error(
+        "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
+    )]
+    InvalidSharedSecretNext,
+}
+
+#[derive(Clone)]
 pub struct Config {
     pub listen_addr: String,
     pub region_code: String,
@@ -25,20 +36,60 @@ pub struct Config {
     pub shared_secret_next: Option<String>,
 }
 
+impl fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("listen_addr", &self.listen_addr)
+            .field("region_code", &self.region_code)
+            .field("shared_secret", &"[REDACTED]")
+            .field(
+                "shared_secret_next",
+                &self.shared_secret_next.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
 impl Config {
-    pub fn from_env() -> Self {
-        Self {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let shared_secret = env::var("PROBE_SHARED_SECRET")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| value.len() >= 16)
+            .ok_or(ConfigError::InvalidSharedSecret)?;
+
+        let shared_secret_next = match env::var("PROBE_SHARED_SECRET_NEXT") {
+            Ok(value) => parse_shared_secret_next(&value)?,
+            Err(_) => None,
+        };
+
+        Ok(Self {
             listen_addr: env::var("PROBE_LISTEN_ADDR")
                 .unwrap_or_else(|_| DEFAULT_LISTEN_ADDR.to_string()),
             region_code: env::var("REGION_CODE")
                 .unwrap_or_else(|_| DEFAULT_REGION_CODE.to_string()),
-            shared_secret: env::var("PROBE_SHARED_SECRET")
-                .unwrap_or_else(|_| DEFAULT_SHARED_SECRET.to_string()),
-            shared_secret_next: env::var("PROBE_SHARED_SECRET_NEXT")
-                .ok()
-                .filter(|value| !value.is_empty()),
-        }
+            shared_secret,
+            shared_secret_next,
+        })
     }
+}
+
+/// Parses the optional rotation key while preserving the Compose empty-string
+/// convention. Compose commonly injects `PROBE_SHARED_SECRET_NEXT=""` for an
+/// unset optional variable, but any non-empty raw value that trims below the
+/// minimum is treated as an operator misconfiguration rather than as unset.
+fn parse_shared_secret_next(value: &str) -> Result<Option<String>, ConfigError> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+
+    let trimmed = value.trim();
+    if trimmed.len() < 16 {
+        return Err(ConfigError::InvalidSharedSecretNext);
+    }
+
+    Ok(Some(trimmed.to_string()))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -236,13 +287,18 @@ pub fn signature_payload(request: &MeasureRequest) -> String {
     let mut headers = normalized_request
         .headers
         .into_iter()
-        .map(|header| json!({
-            "name": header.name.trim().to_ascii_lowercase(),
-            "value": header.value.trim(),
-        }))
+        .map(|header| {
+            json!({
+                "name": header.name.trim().to_ascii_lowercase(),
+                "value": header.value.trim(),
+            })
+        })
         .collect::<Vec<_>>();
     headers.sort_by(|left, right| {
-        let left_name = left.get("name").and_then(|value| value.as_str()).unwrap_or_default();
+        let left_name = left
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
         let right_name = right
             .get("name")
             .and_then(|value| value.as_str())
@@ -416,5 +472,45 @@ mod tests {
         });
 
         assert_ne!(baseline, signature_payload(&request));
+    }
+
+    #[test]
+    fn config_debug_redacts_current_and_next_secrets() {
+        let config = Config {
+            listen_addr: DEFAULT_LISTEN_ADDR.to_string(),
+            region_code: DEFAULT_REGION_CODE.to_string(),
+            shared_secret: "current-probe-secret".to_string(),
+            shared_secret_next: Some("next-probe-secret".to_string()),
+        };
+
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("current-probe-secret"));
+        assert!(!debug.contains("next-probe-secret"));
+        assert_eq!(debug.matches("[REDACTED]").count(), 2);
+    }
+
+    #[test]
+    fn next_secret_rejects_whitespace_but_allows_an_unset_empty_value() {
+        assert_eq!(parse_shared_secret_next(""), Ok(None));
+        assert_eq!(
+            parse_shared_secret_next("   \t"),
+            Err(ConfigError::InvalidSharedSecretNext)
+        );
+        assert_eq!(
+            parse_shared_secret_next("  next-probe-secret  "),
+            Ok(Some("next-probe-secret".to_string()))
+        );
+    }
+
+    #[test]
+    fn config_errors_explain_the_trimmed_byte_requirement() {
+        assert_eq!(
+            ConfigError::InvalidSharedSecret.to_string(),
+            "PROBE_SHARED_SECRET is required and must contain at least 16 bytes after trimming surrounding whitespace"
+        );
+        assert_eq!(
+            ConfigError::InvalidSharedSecretNext.to_string(),
+            "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
+        );
     }
 }

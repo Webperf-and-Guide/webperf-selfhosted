@@ -3,7 +3,7 @@ import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
 import type { ExportResource, JobSnapshotEvent, ListQuery } from '@webperf/contracts';
 import { appContract, opsContract, publicContract } from '@webperf/contracts';
-import { parseWebEnv } from '@webperf/config/public';
+import { parseSelfhostConsoleVars } from '@webperf/config/selfhost-console';
 import { env as privateEnv } from '$env/dynamic/private';
 
 type Platform = App.Platform | undefined;
@@ -73,15 +73,15 @@ const proxyResponse = (response: Response) => {
   });
 };
 
-const resolveRuntime = (platform: Platform) =>
-  parseWebEnv({
-    CONTROL_BASE_URL: platform?.env?.CONTROL_BASE_URL ?? privateEnv.CONTROL_BASE_URL,
-    DEPLOY_TARGET: platform?.env?.DEPLOY_TARGET ?? privateEnv.DEPLOY_TARGET,
-    TURNSTILE_SITE_KEY: platform?.env?.TURNSTILE_SITE_KEY ?? privateEnv.TURNSTILE_SITE_KEY
+const resolveRuntime = (_platform: Platform) =>
+  parseSelfhostConsoleVars({
+    CONTROL_BASE_URL: privateEnv.CONTROL_BASE_URL,
+    SELFHOST_ADMIN_TOKEN: privateEnv.SELFHOST_ADMIN_TOKEN
   });
 
-const buildHeaders = (requesterIp?: string | null, initial?: HeadersInit) => {
+const buildHeaders = (adminToken: string, requesterIp?: string | null, initial?: HeadersInit) => {
   const headers = new Headers(initial);
+  headers.set('authorization', `Bearer ${adminToken}`);
 
   if (requesterIp) {
     headers.set('cf-connecting-ip', requesterIp);
@@ -139,7 +139,7 @@ const createRpcLink = (
     url: new URL(path, runtime.CONTROL_BASE_URL).toString(),
     fetch: (input, init) => {
       const request = new Request(input, init);
-      const headers = buildHeaders(requesterIp, request.headers);
+      const headers = buildHeaders(runtime.SELFHOST_ADMIN_TOKEN, requesterIp, request.headers);
       return fetch(new Request(request, { headers, redirect: 'manual' }));
     }
   });
@@ -209,6 +209,31 @@ export const proxyControlDownload = async (promise: Promise<ExportResource>) =>
       )
     )
   );
+
+export const proxyBrowserAuditArtifactDownload = async (
+  platform: Platform,
+  auditId: string,
+  artifactId: string
+) => {
+  const runtime = resolveRuntime(platform);
+  const path = `/v1/browser-audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactId)}`;
+  const [, response, , isSuccess] = await safe(
+    fetch(new URL(path, runtime.CONTROL_BASE_URL), {
+      headers: buildHeaders(runtime.SELFHOST_ADMIN_TOKEN),
+      redirect: 'manual'
+    })
+  );
+
+  if (!isSuccess) {
+    return toErrorResponse(
+      new ORPCError('SERVICE_UNAVAILABLE', {
+        message: 'Browser Audit artifact service is unavailable'
+      })
+    );
+  }
+
+  return proxyResponse(response);
+};
 
 export const proxyControlStream = async (getSnapshot: () => Promise<JobSnapshotEvent>) =>
   new Response(createJobSseStream(getSnapshot), {

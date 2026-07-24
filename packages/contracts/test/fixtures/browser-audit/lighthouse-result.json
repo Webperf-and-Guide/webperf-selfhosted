@@ -1,0 +1,96 @@
+{
+  "protocolVersion": "v1",
+  "coreMetrics": {
+    "fcpMs": 820,
+    "lcpMs": 1460,
+    "cls": 0.018,
+    "inpMs": 126,
+    "tbtMs": 74,
+    "speedIndexMs": 1210
+  },
+  "scores": {
+    "performance": 0.94,
+    "accessibility": 0.98,
+    "bestPractices": 0.96,
+    "seo": 1
+  },
+  "extendedMetrics": [
+    {
+      "id": "transfer-size-bytes",
+      "label": "Transfer size",
+      "value": 384120,
+      "unit": "byte"
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "landing",
+      "mode": "navigation",
+      "label": "Landing page",
+      "finalUrl": "https://example.com/",
+      "statusCode": 200,
+      "coreMetrics": {
+        "fcpMs": 820,
+        "lcpMs": 1460,
+        "cls": 0.018,
+        "inpMs": 126,
+        "tbtMs": 74,
+        "speedIndexMs": 1210
+      },
+      "scores": {
+        "performance": 0.94,
+        "accessibility": 0.98,
+        "bestPractices": 0.96,
+        "seo": 1
+      },
+      "extendedMetrics": []
+    }
+  ],
+  "issues": [],
+  "artifacts": [
+    {
+      "id": "artifact_lhr",
+      "registryVersion": "v1",
+      "kind": "lighthouse-json",
+      "url": "/v1/browser-audits/audit_lighthouse/artifacts/artifact_lhr",
+      "contentType": "application/json",
+      "byteSize": 18420,
+      "createdAt": "2026-07-22T00:00:03.000Z"
+    },
+    {
+      "id": "artifact_report",
+      "registryVersion": "v1",
+      "kind": "lighthouse-html",
+      "url": "/v1/browser-audits/audit_lighthouse/artifacts/artifact_report",
+      "contentType": "text/html; charset=utf-8",
+      "byteSize": 92840,
+      "createdAt": "2026-07-22T00:00:03.000Z"
+    }
+  ],
+  "toolchain": {
+    "engine": {
+      "id": "lighthouse",
+      "version": "13.1.0"
+    },
+    "browser": {
+      "name": "Chrome",
+      "version": "136.0.0.0"
+    },
+    "runtime": {
+      "name": "Bun",
+      "version": "1.3.13"
+    },
+    "components": [
+      {
+        "name": "puppeteer-core",
+        "version": "24.7.1"
+      },
+      {
+        "name": "webperf-browser-audit-lighthouse",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "startedAt": "2026-07-22T00:00:01.000Z",
+  "completedAt": "2026-07-22T00:00:03.000Z"
+}

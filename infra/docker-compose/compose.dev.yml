@@ -1,0 +1,48 @@
+services:
+  console:
+    image: webperf-console:dev
+    build:
+      context: ../..
+      dockerfile: apps/console/Dockerfile
+
+  api:
+    image: webperf-api:dev
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+
+  scheduler:
+    image: webperf-scheduler:dev
+    build:
+      context: ../..
+      dockerfile: apps/scheduler/Dockerfile
+
+  executor:
+    image: webperf-executor:dev
+    build:
+      context: ../..
+      dockerfile: apps/executor/Dockerfile
+
+  probe:
+    image: webperf-probe:dev
+    build:
+      context: ../../apps/probe-rs
+      dockerfile: Dockerfile
+
+  browser-audit-lighthouse:
+    image: webperf-browser-audit-lighthouse:dev
+    build:
+      context: ../..
+      dockerfile: apps/browser-audit-lighthouse/Dockerfile
+
+  api-debug:
+    image: webperf-api:dev
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+
+  browser-audit-debug:
+    image: webperf-api:dev
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile

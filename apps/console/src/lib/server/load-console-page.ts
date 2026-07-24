@@ -1,4 +1,3 @@
-import { parseWebEnv } from '@webperf/config/public';
 import type {
   BrowserAuditListResponse,
   CheckProfileComparisonResponse,
@@ -12,26 +11,11 @@ import type {
   RegionsResponse,
   RouteSetListResponse
 } from '@webperf/contracts';
-import { env as privateEnv } from '$env/dynamic/private';
 import type { ConsolePageData, SavedChecksData } from '$lib/console-data';
 import { CONSOLE_COLLECTION_PAGE_SIZE, CONSOLE_RECENT_RUN_COUNT, CONSOLE_RUN_PAGE_SIZE } from '$lib/console-workspace/formatters';
 
 type LoaderFetch = typeof fetch;
-type Platform = App.Platform | undefined;
-
-export const loadConsolePage = async ({
-  fetch,
-  platform
-}: {
-  fetch: LoaderFetch;
-  platform: Platform;
-}): Promise<ConsolePageData> => {
-  const runtime = parseWebEnv({
-    CONTROL_BASE_URL: platform?.env?.CONTROL_BASE_URL ?? privateEnv.CONTROL_BASE_URL,
-    DEPLOY_TARGET: platform?.env?.DEPLOY_TARGET ?? privateEnv.DEPLOY_TARGET,
-    TURNSTILE_SITE_KEY: platform?.env?.TURNSTILE_SITE_KEY ?? privateEnv.TURNSTILE_SITE_KEY
-  });
-
+export const loadConsolePage = async ({ fetch }: { fetch: LoaderFetch }): Promise<ConsolePageData> => {
   const regionsPayload = await fetchOptionalJson<RegionsResponse>(fetch, '/api/control/regions');
   const capabilitiesPayload = await fetchOptionalJson<{
     features?: {
@@ -46,7 +30,6 @@ export const loadConsolePage = async ({
 
   return {
     regions: regionsPayload?.regions ?? [],
-    turnstileSiteKey: runtime.TURNSTILE_SITE_KEY ?? null,
     capabilities: {
       browserAuditDirectRun: Boolean(capabilitiesPayload?.features?.browserAuditDirectRun)
     },

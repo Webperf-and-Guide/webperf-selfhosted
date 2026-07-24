@@ -1,7 +1,6 @@
-use anyhow::Result;
 use probe_core::{
-    ProbeImplementation, ProbeMeasurement, ProbeTimings, ProbeTlsMetadata, RequestConfig,
-    utc_timestamp, validate_target_url,
+    ProbeImplementation, ProbeMeasurement, ProbeTimings, RequestConfig, utc_timestamp,
+    validate_target_url,
 };
 use reqwest::{
     Client, Method, Url,
@@ -15,16 +14,7 @@ use std::{
 use tokio::net::lookup_host;
 use tracing::debug;
 
-pub fn build_client() -> Result<Client> {
-    Ok(Client::builder()
-        .redirect(Policy::none())
-        .timeout(Duration::from_secs(8))
-        .use_rustls_tls()
-        .build()?)
-}
-
 pub async fn measure_url(
-    client: &Client,
     region: &str,
     target: &str,
     request_config: Option<&RequestConfig>,
@@ -62,24 +52,41 @@ pub async fn measure_url(
 
     loop {
         let dns_started_at = Instant::now();
-        if let Err(message) = resolve_public_host(&current).await {
-            return ProbeMeasurement::failure(
-                region,
-                target,
-                Some(display_url(&current)),
-                redirect_count,
-                base_timings(
-                    started_at.elapsed(),
-                    last_dns_ms.or_else(|| elapsed_millis(dns_started_at)),
-                    last_ttfb_ms,
-                ),
-                message,
-            );
-        }
+        let resolved_addresses = match resolve_public_host(&current).await {
+            Ok(addresses) => addresses,
+            Err(message) => {
+                return ProbeMeasurement::failure(
+                    region,
+                    target,
+                    Some(display_url(&current)),
+                    redirect_count,
+                    base_timings(
+                        started_at.elapsed(),
+                        last_dns_ms.or_else(|| elapsed_millis(dns_started_at)),
+                        last_ttfb_ms,
+                    ),
+                    message,
+                );
+            }
+        };
         last_dns_ms = elapsed_millis(dns_started_at);
 
+        let client = match build_pinned_client(&current, &resolved_addresses) {
+            Ok(client) => client,
+            Err(message) => {
+                return ProbeMeasurement::failure(
+                    region,
+                    target,
+                    Some(display_url(&current)),
+                    redirect_count,
+                    base_timings(started_at.elapsed(), last_dns_ms, last_ttfb_ms),
+                    message,
+                );
+            }
+        };
+
         let request_started_at = Instant::now();
-        let request = match build_request(client, current.clone(), request_config) {
+        let request = match build_request(&client, current.clone(), request_config) {
             Ok(request) => request,
             Err(error) => {
                 return ProbeMeasurement::failure(
@@ -109,7 +116,7 @@ pub async fn measure_url(
                         last_dns_ms,
                         elapsed_millis(request_started_at),
                     ),
-                    error.to_string(),
+                    error.without_url().to_string(),
                 );
             }
         };
@@ -176,7 +183,7 @@ pub async fn measure_url(
         }
 
         let status_code = response.status().as_u16();
-        debug!(url = %current, status_code, redirect_count, "probe request completed");
+        debug!(url = %display_url(&current), status_code, redirect_count, "probe request completed");
 
         return ProbeMeasurement {
             region: region.to_string(),
@@ -189,10 +196,27 @@ pub async fn measure_url(
             final_url: Some(display_url(&current)),
             redirect_count,
             timings: base_timings(started_at.elapsed(), last_dns_ms, last_ttfb_ms),
-            tls: tls_metadata(&current),
+            // reqwest does not expose the complete negotiated TLS tuple used by
+            // the public contract. Keep this nullable instead of synthesizing
+            // server_name from the URL; final_url already preserves authority.
+            tls: None,
             error: None,
         };
     }
+}
+
+fn build_pinned_client(url: &Url, addresses: &[SocketAddr]) -> Result<Client, String> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| "target url is required".to_string())?;
+
+    Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(8))
+        .use_rustls_tls()
+        .resolve_to_addrs(host, addresses)
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 fn build_request(
@@ -269,25 +293,19 @@ fn elapsed_millis(started_at: Instant) -> Option<u64> {
     Some(started_at.elapsed().as_millis() as u64)
 }
 
-fn tls_metadata(url: &Url) -> Option<ProbeTlsMetadata> {
-    if url.scheme() != "https" {
-        return None;
-    }
-
-    Some(ProbeTlsMetadata {
-        version: None,
-        alpn: None,
-        cipher_suite: None,
-        server_name: url.host_str().map(str::to_string),
-    })
-}
-
 fn is_private_ip(ip: IpAddr) -> bool {
     probe_core::is_private_ip(ip)
 }
 
 fn display_url(url: &Url) -> String {
-    if url.path() == "/" && url.query().is_none() && url.fragment().is_none() {
+    let mut redacted = url.clone();
+
+    redacted.set_query(None);
+    redacted.set_fragment(None);
+    let _ = redacted.set_username("");
+    let _ = redacted.set_password(None);
+
+    if redacted.path() == "/" {
         let mut normalized = format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default());
 
         if let Some(port) = url.port() {
@@ -298,5 +316,28 @@ fn display_url(url: &Url) -> String {
         return normalized;
     }
 
-    url.to_string()
+    redacted.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_url;
+    use reqwest::Url;
+
+    #[test]
+    fn display_url_removes_query_credentials_and_fragment() {
+        let target =
+            Url::parse("https://user:password@example.com/path?token=secret#private-fragment")
+                .expect("test URL should parse");
+
+        assert_eq!(display_url(&target), "https://example.com/path");
+    }
+
+    #[test]
+    fn display_url_keeps_root_origins_compact_after_query_removal() {
+        let target =
+            Url::parse("https://example.com:8443/?token=secret").expect("test URL should parse");
+
+        assert_eq!(display_url(&target), "https://example.com:8443");
+    }
 }

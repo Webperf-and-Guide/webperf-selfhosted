@@ -1,0 +1,18 @@
+# Ubuntu 24.04 restricts unprivileged user namespaces unless the executable is
+# covered by an AppArmor 4 profile that grants `userns`. Chromium recommends an
+# unconfined, path-scoped allowlist profile for downloaded Chrome builds rather
+# than disabling the host restriction globally. Docker selects this profile by
+# name only for the Browser Audit container; the runtime remains bounded by its
+# non-root UID, read-only filesystem, cap-drop ALL with only SYS_CHROOT restored,
+# no-new-privileges, custom default-deny seccomp policy, private network, and
+# Chromium's own sandbox.
+#
+# Reference:
+# https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+abi <abi/4.0>,
+
+#include <tunables/global>
+
+profile "webperf-browser-audit" flags=(unconfined) {
+  userns,
+}

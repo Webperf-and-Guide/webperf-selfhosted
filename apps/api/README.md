@@ -46,16 +46,32 @@ apps/api/.env.example
 Useful defaults:
 - `SELFHOST_DATABASE_PATH=./data/webperf.sqlite`
 - `SELFHOST_RETENTION_DAYS=30`
+- `SELFHOST_MIGRATION_BACKUP=false`
 - `SELFHOST_ACTIVE_REGION_CODES_JSON=["tokyo"]`
 - `SELFHOST_PROBE_BASE_URLS_JSON={"tokyo":"http://127.0.0.1:8080"}`
-- `PROBE_SHARED_SECRET=dev-shared-secret`
+
+Required secrets have no defaults:
+
+- `SELFHOST_ADMIN_TOKEN`
+- `SELFHOST_INTERNAL_SECRET`
+
+Probe and Browser Audit signing secrets belong only to their runtime and the
+executor; the API does not receive them.
+
+Use `bun run selfhost:init` for a generated Compose environment or provide
+explicit values for local process mode. See
+[self-host authentication and secrets](../../docs/security/auth-and-secrets.md).
+
+SQLite migrations run automatically at API startup. Operator-facing migrate,
+backup, restore, integrity, retention, and compaction commands are documented in
+[SQLite operations](../../docs/self-hosting/database-operations.md).
 
 ## Compose
 
 The Compose bundle lives at:
 
 ```text
-infra/docker-compose/docker-compose.yml
+infra/docker-compose/compose.yml
 ```
 
 The polling scheduler lives in `apps/scheduler` and calls the dispatch endpoint on

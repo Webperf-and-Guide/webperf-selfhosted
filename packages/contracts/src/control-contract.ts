@@ -10,7 +10,6 @@ import {
   checkProfileRunListResponseSchema,
   checkProfileRunResponseSchema,
   checkProfileSchema,
-  controlPlaneHealthSchema,
   createCheckProfileSchema,
   createLatencyJobSchema,
   createPropertySchema,
@@ -138,7 +137,7 @@ const deleteCheckProfileResponseSchema = z.object({
   deletedRunCount: z.number().int().nonnegative()
 });
 
-const selfHostedControlHealthSchema = z.object({
+export const selfhostControlHealthSchema = z.object({
   service: z.string().min(1),
   ok: z.boolean(),
   activeRegions: z.array(z.string().min(1)),
@@ -163,7 +162,8 @@ const selfHostedControlHealthSchema = z.object({
   })
 });
 
-export const controlHealthSchema = z.union([controlPlaneHealthSchema, selfHostedControlHealthSchema]);
+export type SelfhostControlHealth = z.infer<typeof selfhostControlHealthSchema>;
+export const controlHealthSchema = selfhostControlHealthSchema;
 
 export const CONTROL_OPENAPI_TAG_DEFINITIONS = [
   { name: 'system', description: 'Health, region catalog, and scheduler surfaces.' },

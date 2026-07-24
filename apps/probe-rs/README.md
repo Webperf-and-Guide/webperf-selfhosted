@@ -1,6 +1,6 @@
 # probe-rs
 
-Rust probe runtime for Bunny Magic Containers.
+Rust network probe runtime for self-hosted WebPerf.
 
 ## Local run
 
@@ -17,8 +17,8 @@ cargo clippy --workspace --all-targets --manifest-path apps/probe-rs/Cargo.toml 
 
 ## Docker build
 
-Build for Bunny Magic Containers with `linux/amd64`:
+Build the reusable `linux/amd64` image:
 
 ```sh
-docker buildx build --platform linux/amd64 -t ghcr.io/webperf-and-guide/webperf-probe:dev ./apps/probe-rs
+docker buildx build --platform linux/amd64 -t webperf-probe:dev ./apps/probe-rs
 ```

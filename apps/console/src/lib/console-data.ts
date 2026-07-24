@@ -29,7 +29,6 @@ export type SavedChecksData = {
 
 export type ConsolePageData = {
   regions: RegionAvailability[];
-  turnstileSiteKey: string | null;
   capabilities: {
     browserAuditDirectRun: boolean;
   };

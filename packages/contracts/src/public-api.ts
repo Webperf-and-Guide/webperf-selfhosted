@@ -102,12 +102,24 @@ export const alertTriggerSchema = z.object({
 });
 export type AlertTrigger = z.infer<typeof alertTriggerSchema>;
 
+export const redactedValue = '[REDACTED]' as const;
+const configuredWebhookSecretSchema = z.union([
+  z.string().min(16).max(200),
+  z.literal(redactedValue)
+]);
+const persistedWebhookSecretSchema = z.preprocess(
+  (value) => value === '' ? null : value,
+  z.string().min(1).max(200).nullable()
+);
+
 export const webhookAlertTargetSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
   url: z.string().url(),
   enabled: z.boolean().default(true),
-  secret: z.string().max(200).nullable().default(null)
+  // Keep non-empty legacy secrets readable; every new write uses the stricter
+  // create schema below, while an old empty value means "not configured".
+  secret: persistedWebhookSecretSchema.default(null)
 });
 export type WebhookAlertTarget = z.infer<typeof webhookAlertTargetSchema>;
 
@@ -115,7 +127,7 @@ export const createWebhookAlertTargetSchema = z.object({
   name: z.string().min(1).max(120),
   url: z.string().url(),
   enabled: z.boolean().optional(),
-  secret: z.string().max(200).optional()
+  secret: configuredWebhookSecretSchema.optional()
 });
 export type CreateWebhookAlertTargetInput = z.infer<typeof createWebhookAlertTargetSchema>;
 
@@ -140,7 +152,11 @@ export type CreateCheckProfileAlertConfigInput = z.infer<typeof createCheckProfi
 export const executionRunnerTypeSchema = z.enum(['network_probe', 'browser_audit']);
 export type ExecutionRunnerType = z.infer<typeof executionRunnerTypeSchema>;
 
-export const executionProviderSchema = z.enum(['selfhost', 'cloudflare', 'bunny']);
+export const executionProviderSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9][a-z0-9_-]*$/);
 export type ExecutionProvider = z.infer<typeof executionProviderSchema>;
 
 export const locationModeSchema = z.enum(['best_effort', 'fixed']);
@@ -208,6 +224,7 @@ export const publicApiPaths = [
   '/v1/check-profiles/:id/report/export',
   '/v1/browser-audits',
   '/v1/browser-audits/:id',
+  '/v1/browser-audits/:id/artifacts/:artifactId',
   '/v1/scheduler/dispatch'
 ] as const;
 
@@ -216,8 +233,9 @@ export const createLatencyJobSchema = z.object({
   regions: z.array(regionCodeSchema).min(1).max(4).optional(),
   note: z.string().max(200).optional(),
   request: customRequestConfigSchema.optional(),
-  monitorPolicy: monitorPolicySchema.optional(),
-  turnstileToken: z.string().min(1).optional()
+  // Self-host job creation is admin-token protected at the HTTP boundary.
+  // Managed-cloud bot protection such as Turnstile is intentionally not an OSS contract field.
+  monitorPolicy: monitorPolicySchema.optional()
 });
 export type CreateLatencyJobInput = z.infer<typeof createLatencyJobSchema>;
 
@@ -454,7 +472,7 @@ export const regionAvailabilitySchema = z.object({
   defaultSelected: z.boolean(),
   launchStage: regionLaunchStageSchema,
   rolloutTrack: z.enum(['core', 'catalog']),
-  bunnyRegionHint: z.string().min(1).optional()
+  providerRegionHint: z.string().min(1).optional()
 });
 export type RegionAvailability = z.infer<typeof regionAvailabilitySchema>;
 
@@ -797,43 +815,3 @@ export const jobSnapshotEventSchema = z.object({
   job: latencyJobDetailSchema
 });
 export type JobSnapshotEvent = z.infer<typeof jobSnapshotEventSchema>;
-
-export const controlPlaneHealthSchema = z.object({
-  service: z.string().min(1),
-  ok: z.boolean(),
-  batchMode: z.enum(['ondemand', 'batch', 'always_on']),
-  regionCatalogSize: z.number().int().nonnegative(),
-  selectableRegions: z.array(regionCodeSchema),
-  slotPoolSize: z.number().int().nonnegative(),
-  features: z.record(z.string(), z.boolean()),
-  bindings: z.record(z.string(), z.boolean()),
-  slotInventory: z.array(
-    z.object({
-      slotId: z.string().min(1),
-      currentRegion: regionCodeSchema.nullable(),
-      currentStatus: z.enum(['unknown', 'active', 'progressing', 'inactive', 'failing', 'suspended']),
-      desiredImage: z.string().min(1).nullable(),
-      currentImage: z.string().min(1).nullable(),
-      leaseActive: z.boolean(),
-      leaseExpiresAt: z.string().datetime().nullable(),
-      graceUntil: z.string().datetime().nullable(),
-      lastHealthyAt: z.string().datetime().nullable()
-    })
-  ),
-  requiredSecrets: z.object({
-    probeCurrent: z.boolean(),
-    bunnyAccessKey: z.boolean(),
-    turnstileSecret: z.boolean(),
-    opsSharedSecret: z.boolean()
-  }),
-  lastSuccessfulSmoke: z
-    .object({
-      at: z.string().datetime(),
-      region: regionCodeSchema,
-      slotId: z.string().min(1),
-      probeImpl: probeImplementationSchema,
-      ok: z.boolean()
-    })
-    .nullable()
-});
-export type ControlPlaneHealth = z.infer<typeof controlPlaneHealthSchema>;

@@ -76,9 +76,15 @@ describe('API secret redaction', () => {
         secretConfig: 'private-secret-config',
         passwordHash: 'private-password-hash',
         keyStore: 'private-key-store',
+        keyMaterial: 'private-key-material',
         privateKey: 'private-key',
         publicKey: 'public-key-identifier',
-        keyVersion: 'current'
+        keyVersion: 'current',
+        keyCode: 'Enter',
+        keyDown: true,
+        keyEvent: 'keydown',
+        keyName: 'Enter',
+        keyPath: 'results.0'
       })
     ).toEqual({
       headers: [
@@ -99,9 +105,15 @@ describe('API secret redaction', () => {
       secretConfig: redactedValue,
       passwordHash: redactedValue,
       keyStore: redactedValue,
+      keyMaterial: redactedValue,
       privateKey: redactedValue,
       publicKey: 'public-key-identifier',
-      keyVersion: 'current'
+      keyVersion: 'current',
+      keyCode: 'Enter',
+      keyDown: true,
+      keyEvent: 'keydown',
+      keyName: 'Enter',
+      keyPath: 'results.0'
     });
   });
 
@@ -130,6 +142,12 @@ describe('API secret redaction', () => {
       'https://example.com/path?redacted'
     );
     expect(redactUrlQuery('https://user:pass@example.com/path')).toBe('https://example.com/path');
+    expect(redactUrlQuery(
+      'https://user:pass@[not-ipv6]/path?token=private#fragment'
+    )).toBe(`https://${redactedValue}@[not-ipv6]/path?redacted`);
+    expect(redactUrlQuery(
+      'https://user:p@ss@example.com:bad/path?token=private#fragment'
+    )).toBe(`https://${redactedValue}@example.com:bad/path?redacted`);
     expect(redactUrlQuery('/relative/path?token=private#fragment')).toBe('/relative/path?redacted');
     expect(redactUrlsInText('failed for https://example.com/path?token=private')).toBe(
       'failed for https://example.com/path?redacted'

@@ -77,6 +77,15 @@ const sensitiveKeyQualifiers = new Set([
   'session',
   'signing'
 ]);
+const sensitiveKeyPayloadSegments = new Set([
+  'bytes',
+  'data',
+  'material',
+  'pair',
+  'pem',
+  'store',
+  'value'
+]);
 const diagnosticCredentialNamePattern =
   '(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|credentials?|passwd|password|secret|token)';
 const diagnosticCredentialValuePattern = `(?:"[^"]*"|'[^']*'|[^\\s"',;)}\\]|]+)`;
@@ -125,7 +134,7 @@ const isSensitivePropertyName = (name: string) => {
 
   const keyIndex = segments.indexOf('key');
   return keyIndex === 0
-    ? segments[1] !== 'version'
+    ? segments.length === 1 || sensitiveKeyPayloadSegments.has(segments[1]!)
     : keyIndex > 0 && sensitiveKeyQualifiers.has(segments[keyIndex - 1]!);
 };
 
@@ -236,11 +245,35 @@ export const redactUrlQuery = (value: string) => {
     url.hash = '';
     return url.toString();
   } catch {
-    const fragmentIndex = value.indexOf('#');
-    const withoutFragment = fragmentIndex >= 0 ? value.slice(0, fragmentIndex) : value;
+    const withoutCredentials = redactMalformedUrlCredentials(value);
+    const fragmentIndex = withoutCredentials.indexOf('#');
+    const withoutFragment = fragmentIndex >= 0
+      ? withoutCredentials.slice(0, fragmentIndex)
+      : withoutCredentials;
     const queryIndex = withoutFragment.indexOf('?');
     return queryIndex >= 0 ? `${withoutFragment.slice(0, queryIndex)}?redacted` : withoutFragment;
   }
+};
+
+const redactMalformedUrlCredentials = (value: string) => {
+  const scheme = /^https?:\/\//i.exec(value);
+  if (!scheme) {
+    return value;
+  }
+
+  const authorityStart = scheme[0].length;
+  const authorityEnd = [
+    value.indexOf('/', authorityStart),
+    value.indexOf('?', authorityStart),
+    value.indexOf('#', authorityStart)
+  ].filter((index) => index >= 0)
+    .reduce((minimum, index) => Math.min(minimum, index), value.length);
+  const credentialEnd = value.lastIndexOf('@', authorityEnd - 1);
+  if (credentialEnd < authorityStart) {
+    return value;
+  }
+
+  return `${value.slice(0, authorityStart)}${redactedValue}${value.slice(credentialEnd)}`;
 };
 
 export const redactJsonResponse = async (response: Response) => {

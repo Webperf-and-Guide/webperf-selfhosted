@@ -6,6 +6,7 @@ import {
 } from 'node:fs/promises';
 import { parse, resolve, sep } from 'node:path';
 import {
+  isPinnedDirectoryEntryName,
   linkPinnedDirectoryEntries,
   openPinnedDirectoryEntry,
   readPinnedDirectoryEntries,
@@ -18,6 +19,7 @@ const safeStorageSegment = /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/;
 const maximumPinnedCleanupDepth = 32;
 const pinnedCleanupAttempts = 3;
 const removableEntryOpenErrorCodes = new Set([
+  'ARTIFACT_DIRECTORY_UNSAFE',
   'EACCES',
   'ELOOP',
   'ENODEV',
@@ -370,6 +372,13 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     const valid = new Set(validStorageKeys);
     let removedFiles = 0;
     let removedDirectories = 0;
+    const recordRemovedEntry = (kind: RemovedPinnedEntryKind | null) => {
+      if (kind === 'directory') {
+        removedDirectories += 1;
+      } else if (kind === 'file') {
+        removedFiles += 1;
+      }
+    };
     const rootDirectory = await openPrivateDirectory(
       this.rootPath,
       'Browser Audit artifact root is unsafe'
@@ -398,12 +407,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
             continue;
           }
           if (code && removableEntryOpenErrorCodes.has(code)) {
-            const removedKind = await removePinnedTreeEntry(rootDirectory, auditEntry.name);
-            if (removedKind === 'directory') {
-              removedDirectories += 1;
-            } else if (removedKind === 'file') {
-              removedFiles += 1;
-            }
+            recordRemovedEntry(
+              await removePinnedTreeEntry(rootDirectory, auditEntry.name)
+            );
             continue;
           }
           throw error;
@@ -413,6 +419,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
           const directoryMtimeMs = (await auditDirectory.stat()).mtimeMs;
 
           for (const artifactEntry of await readPinnedDirectoryEntries(auditDirectory)) {
+            if (!isPinnedDirectoryEntryName(artifactEntry.name)) {
+              continue;
+            }
             const storageKey = `${auditEntry.name}/${artifactEntry.name}`;
             let artifactHandle: ArtifactFileHandle;
             try {
@@ -427,9 +436,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
                 continue;
               }
               if (code && removableEntryOpenErrorCodes.has(code)) {
-                if (await removePinnedTreeEntry(auditDirectory, artifactEntry.name)) {
-                  removedFiles += 1;
-                }
+                recordRemovedEntry(
+                  await removePinnedTreeEntry(auditDirectory, artifactEntry.name)
+                );
                 continue;
               }
               throw error;
@@ -459,9 +468,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
               continue;
             }
 
-            if (await removePinnedTreeEntry(auditDirectory, artifactEntry.name)) {
-              removedFiles += 1;
-            }
+            recordRemovedEntry(
+              await removePinnedTreeEntry(auditDirectory, artifactEntry.name)
+            );
           }
 
           const remainingEntries = await readPinnedDirectoryEntries(auditDirectory);
@@ -594,7 +603,7 @@ const securePrivateDirectoryHandle = async <Handle extends {
     const directory = await handle.stat();
 
     if (!directory.isDirectory()) {
-      throw new Error(unsafeMessage);
+      throw new UnsafeArtifactDirectoryError(unsafeMessage);
     }
 
     const effectiveUid = typeof process.geteuid === 'function'
@@ -602,7 +611,7 @@ const securePrivateDirectoryHandle = async <Handle extends {
       : undefined;
     const directoryUid = Number(directory.uid);
     if (effectiveUid !== undefined && directoryUid !== effectiveUid) {
-      throw new Error(
+      throw new UnsafeArtifactDirectoryError(
         `${unsafeMessage}: directory owner uid ${directoryUid} does not match process uid ${effectiveUid}`
       );
     }
@@ -610,7 +619,7 @@ const securePrivateDirectoryHandle = async <Handle extends {
     await handle.chmod(0o700);
     const securedDirectory = await handle.stat();
     if ((Number(securedDirectory.mode) & 0o077) !== 0) {
-      throw new Error(unsafeMessage);
+      throw new UnsafeArtifactDirectoryError(unsafeMessage);
     }
 
     return handle;
@@ -622,11 +631,20 @@ const securePrivateDirectoryHandle = async <Handle extends {
 
 type RemovedPinnedEntryKind = 'file' | 'directory';
 
+class UnsafeArtifactDirectoryError extends Error {
+  override readonly name = 'UnsafeArtifactDirectoryError';
+  readonly code = 'ARTIFACT_DIRECTORY_UNSAFE';
+}
+
 const removePinnedTreeEntry = async (
   parentDirectory: { readonly fd: number },
   entryName: string,
   depth = 0
 ): Promise<RemovedPinnedEntryKind | null> => {
+  if (!isPinnedDirectoryEntryName(entryName)) {
+    return null;
+  }
+
   // Preserve pathologically deep trees for the next pass instead of falling
   // back to an unpinned path operation or exhausting descriptor limits.
   if (depth > maximumPinnedCleanupDepth) {

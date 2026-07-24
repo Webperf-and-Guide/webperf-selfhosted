@@ -279,10 +279,27 @@ describe('local Browser Audit artifact storage', () => {
       allowImmediateOrphanDeletion: true,
       minimumOrphanAgeMs: 0
     })).toEqual({
-      removedFiles: 1,
-      removedDirectories: 1
+      removedFiles: 0,
+      removedDirectories: 2
     });
     expect(existsSync(join(root, 'audit_nested'))).toBe(false);
+  });
+
+  test('preserves unsupported artifact entry names without aborting reconciliation', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const auditPath = join(root, 'audit_unsupported_name');
+    mkdirSync(auditPath, { recursive: true });
+    writeFileSync(join(auditPath, 'unsupported\nname'), 'preserve');
+    const store = new LocalBrowserAuditArtifactStore(root);
+
+    expect(await store.reconcile(new Set(), {
+      allowImmediateOrphanDeletion: true,
+      minimumOrphanAgeMs: 0
+    })).toEqual({
+      removedFiles: 0,
+      removedDirectories: 0
+    });
+    expect(readFileSync(join(auditPath, 'unsupported\nname'), 'utf8')).toBe('preserve');
   });
 
   test('requires explicit opt-in before deleting orphans without a grace period', async () => {

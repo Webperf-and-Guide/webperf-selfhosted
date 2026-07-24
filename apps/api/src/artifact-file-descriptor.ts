@@ -15,6 +15,7 @@ import {
 } from './artifact-file-descriptor-darwin';
 
 type DirectoryDescriptor = { readonly fd: number };
+const safeDirectoryEntryName = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$/;
 
 export type ArtifactDirectoryEntry = {
   name: string;
@@ -41,6 +42,9 @@ export type ArtifactFileHandle = {
   chmod(mode: number): Promise<void>;
   close(): Promise<void>;
 };
+
+export const isPinnedDirectoryEntryName = (entryName: string) =>
+  safeDirectoryEntryName.test(entryName);
 
 export const openPinnedDirectoryEntry = async (
   directoryHandle: DirectoryDescriptor,
@@ -147,13 +151,7 @@ const linuxDirectoryPath = (directoryHandle: DirectoryDescriptor) =>
   `/proc/self/fd/${directoryHandle.fd}`;
 
 const assertDirectoryEntryName = (entryName: string) => {
-  if (
-    entryName.length === 0
-    || entryName === '.'
-    || entryName === '..'
-    || entryName.includes('/')
-    || entryName.includes('\0')
-  ) {
+  if (!isPinnedDirectoryEntryName(entryName)) {
     throw new Error('Browser Audit artifact directory entry is invalid');
   }
 };

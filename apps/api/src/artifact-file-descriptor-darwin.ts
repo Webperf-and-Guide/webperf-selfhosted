@@ -144,8 +144,8 @@ export const readDarwinDirectoryEntries = (
   const entries: DarwinArtifactDirectoryEntry[] = [];
   let readFailed = false;
   try {
-    resetNativeErrno(binding);
     while (true) {
+      resetNativeErrno(binding);
       const entry = binding.readdir(directory);
       if (entry === null) {
         const errno = readNativeErrno(binding);
@@ -163,7 +163,7 @@ export const readDarwinDirectoryEntries = (
         entry,
         darwinDirectoryEntryNameLengthOffset
       );
-      if (nameLength > darwinDirectoryEntryNameLimit) {
+      if (nameLength === 0 || nameLength > darwinDirectoryEntryNameLimit) {
         throw new Error('Browser Audit artifact directory entry name is invalid');
       }
       const name = Buffer.from(toArrayBuffer(

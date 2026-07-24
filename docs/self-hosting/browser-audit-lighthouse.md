@@ -101,16 +101,36 @@ The default `.env.example` leaves `SELFHOST_BROWSER_AUDIT_BASE_URL` empty, so
 the default Compose stack does not advertise Browser Audit until the optional
 profile is deliberately enabled.
 
+Ubuntu 24.04 and other AppArmor 4 hosts restrict unprivileged user namespaces
+under Docker's default AppArmor profile. Load the checked-in container profile
+and add its Compose overlay before starting the runner:
+
+```bash
+sudo apparmor_parser -r -W infra/docker-compose/browser-audit.apparmor
+
+docker compose \
+  --env-file infra/docker-compose/.env \
+  --profile browser-audit \
+  -f infra/docker-compose/compose.yml \
+  -f infra/docker-compose/compose.apparmor.yml \
+  up -d
+```
+
+The AppArmor profile derives from Moby's default container policy, remains
+confined, and adds the explicit `userns` permission required by Chromium. Omit
+the overlay on hosts without AppArmor user-namespace restrictions.
+
 Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` when
 enabling the profile. The worker remains on its dedicated Compose network and
 does not publish a host port. On amd64, the image installs the explicitly pinned
 Chrome for Testing revision under the product-specific `/opt/webperf/chrome`
 directory. This avoids host AppArmor profiles that target conventional Chrome
-installation paths while retaining Chromium's user-namespace sandbox. Packaged
-sandbox helpers remain non-setuid, and Compose applies `no-new-privileges` plus
-a default-deny seccomp profile derived from Moby `seccomp/v0.2.1` with only
-`clone`, `setns`, and `unshare` added for that sandbox; the production profile
-does not add `SYS_ADMIN` or launch Chrome with `--no-sandbox`.
+installation paths while the WebPerf container profile explicitly permits the
+user-namespace sandbox. Packaged sandbox helpers remain non-setuid, and Compose
+applies `no-new-privileges` plus a default-deny seccomp profile derived from
+Moby `seccomp/v0.2.1` with only `clone`, `setns`, and `unshare` added for that
+sandbox; the production profile does not add `SYS_ADMIN` or launch Chrome with
+`--no-sandbox`.
 
 ## Docker Build
 
@@ -198,10 +218,13 @@ Recommended Docker runtime settings for local validation:
 - keep `infra/docker-compose/browser-audit-seccomp.json` attached to the
   service; it preserves Moby's default syscall policy while allowing the three
   namespace operations required by Chromium
+- on AppArmor 4 hosts, load `infra/docker-compose/browser-audit.apparmor` and
+  attach `infra/docker-compose/compose.apparmor.yml`; do not disable the host
+  restriction globally
 - run as the image's non-root `bun` user with non-executable writable `/tmp`
   and home tmpfs mounts, plus at least 1 GiB of `/dev/shm`
-- preserve `no-new-privileges` and ensure the host permits unprivileged user
-  namespaces for the container runtime
+- preserve `no-new-privileges` and ensure the selected AppArmor profile permits
+  unprivileged user namespaces for the container runtime
 - do not grant `SYS_ADMIN`; if a host policy blocks the bundled sandbox, fix
   user-namespace support instead
 - only as a documented last resort, opt into

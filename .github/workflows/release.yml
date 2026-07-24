@@ -211,6 +211,8 @@ jobs:
             dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}.tar.gz
             dist/SHA256SUMS
             dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/compose.yml
+            dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/compose.apparmor.yml
+            dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/browser-audit.apparmor
             dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/browser-audit-seccomp.json
             dist/webperf-selfhosted-v${{ needs.prepare.outputs.version }}/runtime-metadata.json
             release-input/*.spdx.json
@@ -227,6 +229,8 @@ jobs:
             "dist/${bundle_name}.tar.gz"
             "dist/SHA256SUMS"
             "dist/${bundle_name}/compose.yml"
+            "dist/${bundle_name}/compose.apparmor.yml"
+            "dist/${bundle_name}/browser-audit.apparmor"
             "dist/${bundle_name}/browser-audit-seccomp.json"
             "dist/${bundle_name}/runtime-metadata.json"
             release-input/*.spdx.json

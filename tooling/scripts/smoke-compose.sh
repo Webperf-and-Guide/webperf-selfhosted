@@ -4,17 +4,28 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 compose_file="$root_dir/infra/docker-compose/compose.yml"
 dev_compose_file="$root_dir/infra/docker-compose/compose.dev.yml"
+apparmor_compose_file="$root_dir/infra/docker-compose/compose.apparmor.yml"
 compose_project="webperf-smoke-$$"
 profile="${COMPOSE_PROFILE:-default}"
 temp_env="$(mktemp)"
 temp_artifact="$(mktemp)"
+compose_files=(-f "$compose_file" -f "$dev_compose_file")
+
+if [[ "$profile" == "browser-audit" ]] && docker info --format '{{range .SecurityOptions}}{{println .}}{{end}}' | grep -qx 'name=apparmor'; then
+  if [[ -r /sys/kernel/security/apparmor/profiles ]] \
+    && ! grep -q '^webperf-browser-audit ' /sys/kernel/security/apparmor/profiles; then
+    echo "Browser Audit requires the checked-in AppArmor profile on this host." >&2
+    echo "Load it with: sudo apparmor_parser -r -W infra/docker-compose/browser-audit.apparmor" >&2
+    exit 1
+  fi
+  compose_files+=(-f "$apparmor_compose_file")
+fi
 
 compose() {
   docker compose \
     --project-name "$compose_project" \
     --env-file "$temp_env" \
-    -f "$compose_file" \
-    -f "$dev_compose_file" \
+    "${compose_files[@]}" \
     "$@"
 }
 

@@ -61,6 +61,9 @@ too short, or still a placeholder. Never solve it by adding a fallback value.
   `browser-audit` profile is healthy.
 - Verify executor and runner share `BROWSER_AUDIT_SHARED_SECRET`.
 - Keep 1 GiB of shared memory and unprivileged user namespaces available.
+- On AppArmor 4 hosts, confirm `webperf-browser-audit` is loaded and include
+  `compose.apparmor.yml`; a zygote `No such file or directory` failure can be a
+  denied user-namespace transition rather than a missing file.
 - A private target, redirect, subresource, download, popup, or unapproved port
   is blocked by design.
 - Review the persisted normalized failure and checkpoints in **Reports** before

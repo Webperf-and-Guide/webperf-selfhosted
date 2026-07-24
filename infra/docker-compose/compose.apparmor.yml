@@ -1,0 +1,4 @@
+services:
+  browser-audit-lighthouse:
+    security_opt:
+      - apparmor=webperf-browser-audit

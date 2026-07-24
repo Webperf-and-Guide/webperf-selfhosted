@@ -108,11 +108,22 @@ The browser-audit Lighthouse runner is intentionally not part of the default sta
 
 Enable it only when you want to run the optional Bun + Chrome + Puppeteer + Lighthouse runtime:
 
+On an AppArmor 4 host such as Ubuntu 24.04, first load the checked-in profile:
+
+```sh
+sudo apparmor_parser -r -W infra/docker-compose/browser-audit.apparmor
+```
+
+Then include the AppArmor overlay in addition to the production Compose file.
+On hosts without AppArmor user-namespace restrictions, omit the final `-f`
+argument and file.
+
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
   --profile browser-audit \
   -f infra/docker-compose/compose.yml \
+  -f infra/docker-compose/compose.apparmor.yml \
   up -d
 ```
 
@@ -125,8 +136,9 @@ downloaded through the authenticated API/console. The size and upload lifetime
 can be tuned with `SELFHOST_MAX_ARTIFACT_BYTES` and
 `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`.
 The profile uses Chrome's user-namespace sandbox with `no-new-privileges`,
-non-executable temporary mounts, and no `SYS_ADMIN`. One runner accepts at most
-one in-flight audit.
+non-executable temporary mounts, and no `SYS_ADMIN`. The AppArmor overlay keeps
+Moby's default container restrictions and grants only the user-namespace rule
+needed by that sandbox. One runner accepts at most one in-flight audit.
 
 For direct API debugging only, start the loopback proxy and then send an
 administrator-authenticated request:

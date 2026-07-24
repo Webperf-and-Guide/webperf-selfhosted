@@ -37,7 +37,9 @@ const repositoryRoot = resolve(import.meta.dir, '../..');
 const envFile = resolve(repositoryRoot, 'infra/docker-compose/.env.example');
 const productionFile = resolve(repositoryRoot, 'infra/docker-compose/compose.yml');
 const developmentFile = resolve(repositoryRoot, 'infra/docker-compose/compose.dev.yml');
+const appArmorComposeFile = resolve(repositoryRoot, 'infra/docker-compose/compose.apparmor.yml');
 const browserSeccompFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json');
+const browserAppArmorFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit.apparmor');
 const composeRenderTimeoutMs = 30_000;
 const maximumTmpfsBytes = 2 * 1024 ** 3;
 const defaultServiceNames = ['api', 'console', 'executor', 'probe', 'scheduler'];
@@ -67,6 +69,10 @@ const productionWithProfiles = renderCompose(
 );
 const developmentWithProfiles = renderCompose(
   [productionFile, developmentFile],
+  ['browser-audit', 'debug']
+);
+const developmentWithAppArmorProfiles = renderCompose(
+  [productionFile, developmentFile, appArmorComposeFile],
   ['browser-audit', 'debug']
 );
 
@@ -168,6 +174,7 @@ assert(
 assertSecureTmpfs(browser, '/tmp', 'Browser Audit runner');
 assertSecureTmpfs(browser, '/home/bun', 'Browser Audit runner home');
 assertBrowserSeccompProfile();
+assertBrowserAppArmorProfile();
 assert(
   parseSizeToBytes(browser.shm_size) >= 1024 ** 3,
   'Browser Audit runner must have at least 1 GiB of shared memory'
@@ -186,6 +193,21 @@ assert(
   Boolean(selectedBrowserRuntimeVersion)
     && browser.environment?.WEBPERF_RUNTIME_VERSION === selectedBrowserRuntimeVersion,
   'Browser Audit runner version must match its selected image tag'
+);
+const appArmorBrowser = developmentWithAppArmorProfiles.services['browser-audit-lighthouse'];
+assert(
+  appArmorBrowser.security_opt?.includes('apparmor=webperf-browser-audit'),
+  'Browser Audit AppArmor overlay must select the checked-in host profile'
+);
+assertStringArrayEqual(
+  appArmorBrowser.cap_drop,
+  browser.cap_drop,
+  'Browser Audit AppArmor overlay capability drops'
+);
+assertStringArrayEqual(
+  appArmorBrowser.cap_add,
+  browser.cap_add,
+  'Browser Audit AppArmor overlay capability additions'
 );
 assertLoopbackPort(productionWithProfiles.services['api-debug'], 8789, 'API debug proxy');
 assertLoopbackPort(
@@ -384,6 +406,22 @@ function assertBrowserSeccompProfile() {
       `Browser seccomp must not allow high-risk syscalls without a capability condition: ${unsafe.join(', ')}`
     );
   }
+}
+
+function assertBrowserAppArmorProfile() {
+  const profile = readFileSync(browserAppArmorFile, 'utf8');
+  assert(
+    profile.includes('abi <abi/4.0>,')
+      && profile.includes('profile "webperf-browser-audit"')
+      && /^\s*userns,$/m.test(profile),
+    'Browser AppArmor profile must explicitly allow user namespaces under the AppArmor 4 ABI'
+  );
+  assert(
+    /^\s*deny mount,$/m.test(profile)
+      && !profile.includes('flags=(unconfined)')
+      && !profile.includes('capability sys_admin'),
+    'Browser AppArmor profile must retain container confinement without SYS_ADMIN'
+  );
 }
 
 function parseSizeToBytes(value: string | number | undefined) {

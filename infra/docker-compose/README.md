@@ -47,15 +47,22 @@ docker compose \
 ## Optional Browser Audit
 
 Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080`, then
-enable the optional profile:
+enable the optional profile. On AppArmor 4 hosts such as Ubuntu 24.04, first
+load the checked-in profile and include the host-specific overlay:
 
 ```sh
+sudo apparmor_parser -r -W infra/docker-compose/browser-audit.apparmor
+
 docker compose \
   --env-file infra/docker-compose/.env \
   --profile browser-audit \
   -f infra/docker-compose/compose.yml \
+  -f infra/docker-compose/compose.apparmor.yml \
   up -d
 ```
+
+Omit `compose.apparmor.yml` on hosts without AppArmor user-namespace
+restrictions.
 
 The Lighthouse reference runner stays off the host network, runs one audit at
 a time, uses a 1 GiB shared-memory allocation, and keeps the Chrome sandbox
@@ -64,7 +71,11 @@ enabled without adding `SYS_ADMIN`. Compose applies the checked-in
 default profile and adds only the `clone`, `setns`, and `unshare` permissions
 recommended for a non-root Chromium user-namespace sandbox. The vendored
 Apache-2.0 source is Moby `default.json` blob
-`ea5a494afb8d64898fa0f4f47ae0c4f5ba9cbbc9`.
+`ea5a494afb8d64898fa0f4f47ae0c4f5ba9cbbc9`. The AppArmor profile derives
+from the Apache-2.0 Moby default profile at commit
+`9ab5a6f7e286e9c0b56733abb95876c2d1815beb`, keeps those container restrictions,
+and adds only AppArmor 4's `userns` permission plus the ABI's explicit Unix
+socket rule.
 
 ## Loopback Debug Profile
 

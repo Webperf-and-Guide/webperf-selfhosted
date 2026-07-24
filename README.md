@@ -87,6 +87,11 @@ Lighthouse reference runner for navigation, snapshot, and timespan flows:
 docker compose --env-file .env --profile browser-audit -f compose.yml up -d
 ```
 
+Ubuntu 24.04 and other AppArmor 4 hosts must first load the bundled
+`browser-audit.apparmor` profile and add `-f compose.apparmor.yml` to that
+command. The [Browser Audits guide](docs/users/browser-audits.md) has the
+persistent host setup.
+
 The runner has no public host port, keeps Chrome sandboxing enabled, uses 1 GiB
 of shared memory, and accepts one audit at a time. Audits are queued through
 the durable executor; result contracts remain engine-neutral so another

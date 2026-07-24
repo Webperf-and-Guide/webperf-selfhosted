@@ -90,7 +90,9 @@ for (const requiredFragment of [
   'provenance: mode=max',
   'actions/attest@',
   'environment: release',
+  'browser-audit.apparmor',
   'browser-audit-seccomp.json',
+  'compose.apparmor.yml',
   'runtime-metadata.json',
   'SHA256SUMS'
 ]) {

@@ -184,6 +184,14 @@ export function renderReleaseBundle({
     join(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json'),
     join(outputDirectory, 'browser-audit-seccomp.json')
   );
+  copyFileSync(
+    join(repositoryRoot, 'infra/docker-compose/browser-audit.apparmor'),
+    join(outputDirectory, 'browser-audit.apparmor')
+  );
+  copyFileSync(
+    join(repositoryRoot, 'infra/docker-compose/compose.apparmor.yml'),
+    join(outputDirectory, 'compose.apparmor.yml')
+  );
 
   const envExample = readFileSync(
     join(repositoryRoot, 'infra/docker-compose/.env.example'),
@@ -415,7 +423,7 @@ function walkFiles(directory: string): string[] {
 }
 
 function releaseReadme(version: string) {
-  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\` beside \`compose.yml\` when enabling Browser Audit.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
+  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\`, \`browser-audit.apparmor\`, and \`compose.apparmor.yml\` beside \`compose.yml\` when enabling Browser Audit. On an AppArmor 4 host, install \`browser-audit.apparmor\` as \`/etc/apparmor.d/webperf-browser-audit\`, load it with \`sudo apparmor_parser -r -W /etc/apparmor.d/webperf-browser-audit\`, then add \`-f compose.apparmor.yml\` to the Browser Audit Compose command.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
 }
 
 function escapeRegExp(value: string) {

@@ -15,12 +15,27 @@ BROWSER_AUDIT_ALLOW_NO_SANDBOX=false
 ```
 
 Keep the generated `BROWSER_AUDIT_SHARED_SECRET` identical for the executor
-and runner, then start the optional profile:
+and runner. Ubuntu 24.04 and other AppArmor 4 hosts restrict unprivileged user
+namespaces even inside Docker's default profile. Install the release-bundled
+WebPerf profile once so AppArmor reloads it after reboot:
 
 ```sh
-docker compose --env-file .env --profile browser-audit -f compose.yml up -d
-docker compose --env-file .env --profile browser-audit -f compose.yml ps
+sudo install -o root -g root -m 0644 browser-audit.apparmor \
+  /etc/apparmor.d/webperf-browser-audit
+sudo apparmor_parser -r -W /etc/apparmor.d/webperf-browser-audit
 ```
+
+On those hosts, start the optional profile with the AppArmor Compose overlay:
+
+```sh
+docker compose --env-file .env --profile browser-audit \
+  -f compose.yml -f compose.apparmor.yml up -d
+docker compose --env-file .env --profile browser-audit \
+  -f compose.yml -f compose.apparmor.yml ps
+```
+
+Omit `compose.apparmor.yml` on hosts that do not enforce AppArmor
+user-namespace restrictions.
 
 The runner remains on its dedicated internal network with no host port. The
 production profile uses Chromium's user-namespace sandbox, a non-root runtime,
@@ -28,9 +43,11 @@ production profile uses Chromium's user-namespace sandbox, a non-root runtime,
 default `SYS_ADMIN`, and one in-flight audit per worker. Packaged setuid helpers
 are kept non-setuid and the runner explicitly disables the setuid sandbox path;
 do not replace that policy with `--no-sandbox` in a production deployment. The
-amd64 image pins its exact Chrome for Testing
-revision in the Dockerfile, keeps it aligned with the locked `puppeteer-core`
-package, and never follows the mutable `stable` channel.
+AppArmor overlay derives from Moby's default container profile and adds only
+the explicit `userns` permission; it does not make the container unconfined.
+The amd64 image pins its exact Chrome for Testing revision in the Dockerfile,
+keeps it aligned with the locked `puppeteer-core` package, and never follows
+the mutable `stable` channel.
 
 ## Launch and inspect
 
@@ -74,9 +91,10 @@ an explicit SSRF-policy exception, remain DNS-pinned, and should be used only
 on an isolated runner network.
 
 Do not set `BROWSER_AUDIT_ALLOW_NO_SANDBOX=true` merely to make a host boot.
-First enable unprivileged user namespaces for the container host. A no-sandbox
-runner is a degraded security mode and should
-not share a host with sensitive workloads.
+First load the bundled AppArmor profile when the host restricts unprivileged
+user namespaces. Do not disable that restriction globally. A no-sandbox runner
+is a degraded security mode and should not share a host with sensitive
+workloads.
 
 ## Artifacts and failures
 

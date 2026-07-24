@@ -54,11 +54,19 @@ describe('release bundle generation', () => {
     expect(JSON.parse(
       readFileSync(join(output, 'browser-audit-seccomp.json'), 'utf8')
     ).defaultAction).toBe('SCMP_ACT_ERRNO');
+    expect(readFileSync(join(output, 'browser-audit.apparmor'), 'utf8')).toContain(
+      'profile "webperf-browser-audit"'
+    );
+    expect(readFileSync(join(output, 'compose.apparmor.yml'), 'utf8')).toContain(
+      'apparmor=webperf-browser-audit'
+    );
     const checksumPaths = readFileSync(join(output, 'SHA256SUMS'), 'utf8')
       .trim()
       .split('\n')
       .map((line) => line.split('  ')[1] ?? '');
     expect(checksumPaths).toContain('browser-audit-seccomp.json');
+    expect(checksumPaths).toContain('browser-audit.apparmor');
+    expect(checksumPaths).toContain('compose.apparmor.yml');
     expect(checksumPaths).toEqual([...checksumPaths].sort((left, right) =>
       Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
     ));

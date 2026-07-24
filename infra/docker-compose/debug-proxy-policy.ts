@@ -42,6 +42,10 @@ export const stripHopByHopHeaders = (headers: Headers) => {
   }
 };
 
+/**
+ * Fully consumes a bounded body before the proxy opens an upstream request, so
+ * an overflow cannot partially reach the internal service.
+ */
 export const readBoundedDebugProxyBody = async (
   request: Request,
   maxBytes = maximumDebugProxyRequestBytes

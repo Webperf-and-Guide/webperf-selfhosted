@@ -14,7 +14,7 @@ export type LookupHost = (hostname: string) => Promise<LookupAddress[]>;
 
 export type PinnedHttpRequestInit = {
   method: string;
-  headers?: HeadersInit;
+  headers?: Readonly<Record<string, string>>;
   body?: string;
   signal: AbortSignal;
   addressPolicy: OutboundAddressPolicy;

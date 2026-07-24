@@ -216,6 +216,14 @@ const reportFatalError = (
   error: unknown
 ) => {
   if (fatalErrorReported) {
+    console.error(
+      JSON.stringify({
+        service: 'webperf-executor',
+        event: 'critical_event_during_shutdown',
+        source,
+        ...describeSafeError(error)
+      })
+    );
     return;
   }
   fatalErrorReported = true;

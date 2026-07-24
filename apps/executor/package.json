@@ -1,5 +1,6 @@
 {
   "name": "webperf-executor",
+  "description": "Durable self-host execution worker for probes, webhooks, and Browser Audits",
   "private": true,
   "type": "module",
   "scripts": {

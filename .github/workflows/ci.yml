@@ -149,6 +149,15 @@ jobs:
       - run: bun run "$COMMAND"
         env:
           COMMAND: ${{ matrix.command }}
+      - name: Report Browser Audit sandbox denials
+        if: ${{ failure() && matrix.profile == 'browser-audit' }}
+        run: |
+          set -o pipefail
+          if sudo journalctl --dmesg --no-pager --since '-20 minutes' > /tmp/webperf-kernel.log 2>/dev/null; then
+            grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' /tmp/webperf-kernel.log | tail -n 200 || true
+          else
+            sudo dmesg 2>/dev/null | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 200 || true
+          fi
 
   required:
     name: Required CI

@@ -201,6 +201,7 @@ Current repo state as of 2026-07-22:
 - public-beta tags are accepted only from `main` after Sampo changesets are applied, the tag matches the highest public package version, and the protected `release` environment approves publication; release assets are generated deterministically from six same-commit image digests and attested in GitHub and GHCR
 - defensive migration checks now resolve storage crypto only when locked pending work actually runs, self-host init narrows template keys through an explicit allowlist guard, and maintenance reports committed database work separately from retryable artifact reconciliation failures
 - the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
+- Browser Audit Compose CI reports bounded host-kernel AppArmor and namespace denial records when sandboxed Chromium health checks fail, so runtime-policy regressions can be diagnosed without weakening the sandbox
 
 Current local dev entrypoints:
 - `bun run dev`

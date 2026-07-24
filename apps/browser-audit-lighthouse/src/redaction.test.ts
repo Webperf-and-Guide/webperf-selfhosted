@@ -119,6 +119,31 @@ describe('browser audit redaction', () => {
     expect(byteText).toContain('x-code: ABC');
   });
 
+  test('redacts short artifact bearer tokens in named authorization contexts', () => {
+    const input = {
+      customHeaders: [],
+      cookies: [],
+      artifactUpload: {
+        baseUrl: 'http://api:8788',
+        bearerToken: 'abc',
+        expiresAt: '2026-07-22T12:15:00.000Z',
+        maxArtifactBytes: 25_000_000,
+        allowedContentTypes: ['application/json']
+      }
+    } as unknown as BrowserAuditWorkerRequest;
+    const source = 'Authorization: Bearer abc bearerToken=abc unrelated=abc';
+    const redactedText = redactBrowserAuditText(source, input);
+    const redactedBytes = new TextDecoder().decode(
+      redactBrowserAuditBytesInPlace(new TextEncoder().encode(source), input)
+    );
+
+    for (const redacted of [redactedText, redactedBytes]) {
+      expect(redacted).not.toContain('Bearer abc');
+      expect(redacted).not.toContain('bearerToken=abc');
+      expect(redacted).toContain('unrelated=abc');
+    }
+  });
+
   test('ignores malformed empty credential names in both redaction paths', () => {
     const input = {
       customHeaders: [{ name: '', value: 'ok' }],

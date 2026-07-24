@@ -119,14 +119,27 @@ const getSensitiveValueGroups = (input: BrowserAuditWorkerRequest) => {
 
 type SensitivePair = { name: string; value: string };
 
-const getShortSensitivePairs = (input: BrowserAuditWorkerRequest): SensitivePair[] => [
-  ...input.customHeaders,
-  ...input.cookies
-].filter(
-  (candidate) => candidate.name.length > 0
-    && candidate.value.length > 0
-    && candidate.value.length < broadRedactionMinimumLength
-);
+const getShortSensitivePairs = (input: BrowserAuditWorkerRequest): SensitivePair[] => {
+  const configuredPairs = [
+    ...input.customHeaders,
+    ...input.cookies
+  ].filter(
+    (candidate) => candidate.name.length > 0
+      && candidate.value.length > 0
+      && candidate.value.length < broadRedactionMinimumLength
+  );
+  const bearerToken = input.artifactUpload?.bearerToken;
+
+  if (!bearerToken || bearerToken.length >= broadRedactionMinimumLength) {
+    return configuredPairs;
+  }
+
+  return [
+    ...configuredPairs,
+    { name: 'authorization', value: `Bearer ${bearerToken}` },
+    { name: 'bearerToken', value: bearerToken }
+  ];
+};
 
 const redactMalformedUrl = (value: string) => {
   const withoutCredentials = value.replace(

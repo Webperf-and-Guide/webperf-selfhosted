@@ -8,7 +8,32 @@ import {
   type Stats
 } from 'node:fs';
 import { constants as osConstants } from 'node:os';
-import { dlopen, FFIType, ptr, read as ffiRead, type Pointer } from 'bun:ffi';
+import {
+  dlopen,
+  FFIType,
+  ptr,
+  read as ffiRead,
+  toArrayBuffer,
+  type Pointer
+} from 'bun:ffi';
+
+const darwinDirectoryEntryTypeDirectory = 4;
+const darwinDirectoryEntryTypeRegularFile = 8;
+const darwinDirectoryEntryTypeSymbolicLink = 10;
+const darwinAtRemoveDirectory = 0x0080;
+// macOS `struct dirent` stores d_namlen, d_type, then d_name at these
+// stable ABI offsets. d_name reserves 1,024 bytes in the public SDK.
+const darwinDirectoryEntryNameLengthOffset = 18;
+const darwinDirectoryEntryTypeOffset = 20;
+const darwinDirectoryEntryNameOffset = 21;
+const darwinDirectoryEntryNameLimit = 1_024;
+
+export type DarwinArtifactDirectoryEntry = {
+  name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+};
 
 export type DarwinArtifactFileHandle = {
   readonly fd: number;
@@ -78,6 +103,100 @@ export const unlinkDarwinDirectoryEntry = (
     }
     throw error;
   }
+};
+
+export const removeDarwinDirectoryEntry = (
+  directoryFd: number,
+  entryName: string
+) => {
+  const binding = getDarwinDirectoryBinding();
+  const name = Buffer.from(`${entryName}\0`);
+  const result = binding.unlinkat(
+    directoryFd,
+    ptr(name),
+    darwinAtRemoveDirectory
+  );
+  if (result !== 0) {
+    throw createNativeFilesystemError(binding, 'unlinkat', entryName);
+  }
+};
+
+export const readDarwinDirectoryEntries = (
+  directoryFd: number
+): DarwinArtifactDirectoryEntry[] => {
+  const binding = getDarwinDirectoryBinding();
+  const duplicatedFd = binding.dup(directoryFd);
+  if (duplicatedFd < 0) {
+    throw createNativeFilesystemError(binding, 'dup', String(directoryFd));
+  }
+
+  const directory = binding.fdopendir(duplicatedFd);
+  if (directory === null) {
+    const error = createNativeFilesystemError(
+      binding,
+      'fdopendir',
+      String(directoryFd)
+    );
+    binding.close(duplicatedFd);
+    throw error;
+  }
+
+  const entries: DarwinArtifactDirectoryEntry[] = [];
+  let readFailed = false;
+  try {
+    resetNativeErrno(binding);
+    while (true) {
+      const entry = binding.readdir(directory);
+      if (entry === null) {
+        const errno = readNativeErrno(binding);
+        if (errno !== 0) {
+          throw createNativeFilesystemError(
+            binding,
+            'readdir',
+            String(directoryFd)
+          );
+        }
+        break;
+      }
+
+      const nameLength = ffiRead.u16(
+        entry,
+        darwinDirectoryEntryNameLengthOffset
+      );
+      if (nameLength > darwinDirectoryEntryNameLimit) {
+        throw new Error('Browser Audit artifact directory entry name is invalid');
+      }
+      const name = Buffer.from(toArrayBuffer(
+        entry,
+        darwinDirectoryEntryNameOffset,
+        nameLength
+      )).toString();
+      if (name === '.' || name === '..') {
+        continue;
+      }
+      const type = ffiRead.u8(entry, darwinDirectoryEntryTypeOffset);
+      entries.push({
+        name,
+        isDirectory: () => type === darwinDirectoryEntryTypeDirectory,
+        isFile: () => type === darwinDirectoryEntryTypeRegularFile,
+        isSymbolicLink: () => type === darwinDirectoryEntryTypeSymbolicLink
+      });
+    }
+  } catch (error) {
+    readFailed = true;
+    throw error;
+  } finally {
+    const result = binding.closedir(directory);
+    if (result !== 0 && !readFailed) {
+      throw createNativeFilesystemError(
+        binding,
+        'closedir',
+        String(directoryFd)
+      );
+    }
+  }
+
+  return entries;
 };
 
 const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHandle => {
@@ -216,6 +335,11 @@ type DarwinDirectoryBinding = {
     flags: number
   ) => number;
   unlinkat: (directoryFd: number, path: Pointer, flags: number) => number;
+  dup: (fileDescriptor: number) => number;
+  close: (fileDescriptor: number) => number;
+  fdopendir: (fileDescriptor: number) => Pointer | null;
+  readdir: (directory: Pointer) => Pointer | null;
+  closedir: (directory: Pointer) => number;
   errno: () => Pointer | null;
 };
 
@@ -240,6 +364,26 @@ const loadDarwinDirectoryBinding = (): DarwinDirectoryBinding => {
       args: [FFIType.i32, FFIType.ptr, FFIType.i32],
       returns: FFIType.i32
     },
+    dup: {
+      args: [FFIType.i32],
+      returns: FFIType.i32
+    },
+    close: {
+      args: [FFIType.i32],
+      returns: FFIType.i32
+    },
+    fdopendir: {
+      args: [FFIType.i32],
+      returns: FFIType.ptr
+    },
+    readdir: {
+      args: [FFIType.ptr],
+      returns: FFIType.ptr
+    },
+    closedir: {
+      args: [FFIType.ptr],
+      returns: FFIType.i32
+    },
     __error: {
       args: [],
       returns: FFIType.ptr
@@ -249,6 +393,11 @@ const loadDarwinDirectoryBinding = (): DarwinDirectoryBinding => {
     openat: DarwinDirectoryBinding['openat'];
     linkat: DarwinDirectoryBinding['linkat'];
     unlinkat: DarwinDirectoryBinding['unlinkat'];
+    dup: DarwinDirectoryBinding['dup'];
+    close: DarwinDirectoryBinding['close'];
+    fdopendir: DarwinDirectoryBinding['fdopendir'];
+    readdir: DarwinDirectoryBinding['readdir'];
+    closedir: DarwinDirectoryBinding['closedir'];
     __error: DarwinDirectoryBinding['errno'];
   };
 
@@ -256,13 +405,37 @@ const loadDarwinDirectoryBinding = (): DarwinDirectoryBinding => {
     openat: symbols.openat,
     linkat: symbols.linkat,
     unlinkat: symbols.unlinkat,
+    dup: symbols.dup,
+    close: symbols.close,
+    fdopendir: symbols.fdopendir,
+    readdir: symbols.readdir,
+    closedir: symbols.closedir,
     errno: symbols.__error
   };
 };
 
+const readNativeErrno = (binding: DarwinDirectoryBinding) => {
+  const errnoPointer = binding.errno();
+  return errnoPointer === null ? 0 : ffiRead.i32(errnoPointer, 0);
+};
+
+const resetNativeErrno = (binding: DarwinDirectoryBinding) => {
+  const errnoPointer = binding.errno();
+  if (errnoPointer !== null) {
+    new Int32Array(toArrayBuffer(errnoPointer, 0, 4))[0] = 0;
+  }
+};
+
 const createNativeFilesystemError = (
   binding: DarwinDirectoryBinding,
-  syscall: 'openat' | 'linkat' | 'unlinkat',
+  syscall:
+    | 'openat'
+    | 'linkat'
+    | 'unlinkat'
+    | 'dup'
+    | 'fdopendir'
+    | 'readdir'
+    | 'closedir',
   entryName: string
 ) => {
   // The POSIX calls above are synchronous; read thread-local errno before any

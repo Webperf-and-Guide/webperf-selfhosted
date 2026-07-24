@@ -1,22 +1,30 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
-  lstat,
   mkdir,
-  open,
-  readdir,
-  rm,
-  rmdir
+  open
 } from 'node:fs/promises';
 import { parse, resolve, sep } from 'node:path';
 import {
   linkPinnedDirectoryEntries,
   openPinnedDirectoryEntry,
+  readPinnedDirectoryEntries,
+  removePinnedDirectoryEntry,
   unlinkPinnedDirectoryEntry,
   type ArtifactFileHandle
 } from './artifact-file-descriptor';
 
 const safeStorageSegment = /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/;
+const maximumPinnedCleanupDepth = 32;
+const pinnedCleanupAttempts = 3;
+const removableEntryOpenErrorCodes = new Set([
+  'EACCES',
+  'ELOOP',
+  'ENODEV',
+  'ENOTDIR',
+  'ENXIO',
+  'EPERM'
+]);
 
 export type StoredArtifactFile = {
   storageKey: string;
@@ -362,93 +370,132 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     const valid = new Set(validStorageKeys);
     let removedFiles = 0;
     let removedDirectories = 0;
+    const rootDirectory = await openPrivateDirectory(
+      this.rootPath,
+      'Browser Audit artifact root is unsafe'
+    );
 
-    for (const auditEntry of await readdir(this.rootPath, { withFileTypes: true })) {
-      const auditPath = resolve(this.rootPath, auditEntry.name);
-
-      // The store owns only ID-shaped root names. Preserve filesystem and
-      // deployment entries such as lost+found or .gitkeep.
-      if (!safeStorageSegment.test(auditEntry.name)) {
-        continue;
-      }
-
-      if (!auditEntry.isDirectory()) {
-        await rm(auditPath, { recursive: true, force: true });
-        removedFiles += 1;
-        continue;
-      }
-
-      let directoryMtimeMs: number;
-      try {
-        const directory = await lstat(auditPath);
-        if (!directory.isDirectory() || directory.isSymbolicLink()) {
-          await rm(auditPath, { recursive: true, force: true });
-          removedDirectories += 1;
-          continue;
-        }
-        directoryMtimeMs = directory.mtimeMs;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          continue;
-        }
-        throw error;
-      }
-
-      for (const artifactEntry of await readdir(auditPath, { withFileTypes: true })) {
-        const artifactPath = resolve(auditPath, artifactEntry.name);
-        const storageKey = `${auditEntry.name}/${artifactEntry.name}`;
-
-        const safeRegularFile = artifactEntry.isFile() && !artifactEntry.isSymbolicLink();
-        const indexedFile = safeRegularFile
-          && safeStorageSegment.test(artifactEntry.name)
-          && valid.has(storageKey);
-
-        if (indexedFile) {
+    // Every traversal and deletion below stays relative to a pinned descriptor.
+    // Visible paths are used only to detect root replacement after the pass.
+    try {
+      for (const auditEntry of await readPinnedDirectoryEntries(rootDirectory)) {
+        // The store owns only ID-shaped root names. Preserve filesystem and
+        // deployment entries such as lost+found or .gitkeep.
+        if (!safeStorageSegment.test(auditEntry.name)) {
           continue;
         }
 
-        if (safeRegularFile && minimumOrphanAgeMs > 0) {
-          let file;
-          try {
-            file = await lstat(artifactPath);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-              continue;
-            }
-            throw error;
-          }
-          if (file.isFile() && !file.isSymbolicLink() && file.mtimeMs > orphanCutoffMs) {
+        let auditDirectory: ArtifactFileHandle;
+        try {
+          auditDirectory = await openPrivatePinnedDirectoryEntry(
+            rootDirectory,
+            auditEntry.name,
+            'Browser Audit artifact directory is unsafe'
+          );
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT') {
             continue;
           }
+          if (code && removableEntryOpenErrorCodes.has(code)) {
+            const removedKind = await removePinnedTreeEntry(rootDirectory, auditEntry.name);
+            if (removedKind === 'directory') {
+              removedDirectories += 1;
+            } else if (removedKind === 'file') {
+              removedFiles += 1;
+            }
+            continue;
+          }
+          throw error;
         }
 
-        await rm(artifactPath, { recursive: true, force: true });
-        removedFiles += 1;
-      }
+        try {
+          const directoryMtimeMs = (await auditDirectory.stat()).mtimeMs;
 
-      let remainingEntries;
-      try {
-        remainingEntries = await readdir(auditPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          continue;
-        }
-        throw error;
-      }
-
-      if (remainingEntries.length === 0) {
-        if (minimumOrphanAgeMs === 0 || directoryMtimeMs <= orphanCutoffMs) {
-          try {
-            await rmdir(auditPath);
-            removedDirectories += 1;
-          } catch (error) {
-            const code = (error as NodeJS.ErrnoException).code;
-            if (code !== 'ENOTEMPTY' && code !== 'ENOENT') {
+          for (const artifactEntry of await readPinnedDirectoryEntries(auditDirectory)) {
+            const storageKey = `${auditEntry.name}/${artifactEntry.name}`;
+            let artifactHandle: ArtifactFileHandle;
+            try {
+              artifactHandle = await openPinnedDirectoryEntry(
+                auditDirectory,
+                artifactEntry.name,
+                constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+              );
+            } catch (error) {
+              const code = (error as NodeJS.ErrnoException).code;
+              if (code === 'ENOENT') {
+                continue;
+              }
+              if (code && removableEntryOpenErrorCodes.has(code)) {
+                if (await removePinnedTreeEntry(auditDirectory, artifactEntry.name)) {
+                  removedFiles += 1;
+                }
+                continue;
+              }
               throw error;
             }
+
+            let artifact;
+            try {
+              artifact = await artifactHandle.stat();
+            } finally {
+              await artifactHandle.close().catch(() => undefined);
+            }
+
+            const safeRegularFile = artifact.isFile();
+            const indexedFile = safeRegularFile
+              && safeStorageSegment.test(artifactEntry.name)
+              && valid.has(storageKey);
+
+            if (indexedFile) {
+              continue;
+            }
+
+            if (
+              safeRegularFile
+              && minimumOrphanAgeMs > 0
+              && artifact.mtimeMs > orphanCutoffMs
+            ) {
+              continue;
+            }
+
+            if (await removePinnedTreeEntry(auditDirectory, artifactEntry.name)) {
+              removedFiles += 1;
+            }
           }
+
+          const remainingEntries = await readPinnedDirectoryEntries(auditDirectory);
+          if (
+            remainingEntries.length === 0
+            && (minimumOrphanAgeMs === 0 || directoryMtimeMs <= orphanCutoffMs)
+          ) {
+            try {
+              await removePinnedDirectoryEntry(rootDirectory, auditEntry.name);
+              removedDirectories += 1;
+            } catch (error) {
+              const code = (error as NodeJS.ErrnoException).code;
+              if (
+                code !== 'ENOTEMPTY'
+                && code !== 'EEXIST'
+                && code !== 'ENOENT'
+                && code !== 'ENOTDIR'
+                && code !== 'ELOOP'
+              ) {
+                throw error;
+              }
+            }
+          }
+        } finally {
+          await auditDirectory.close().catch(() => undefined);
         }
       }
+      await assertPinnedDirectory(
+        this.rootPath,
+        rootDirectory,
+        'Browser Audit artifact root changed during reconciliation'
+      );
+    } finally {
+      await rootDirectory.close().catch(() => undefined);
     }
 
     return { removedFiles, removedDirectories };
@@ -521,6 +568,28 @@ const openDirectoryNoFollow = async (path: string, unsafeMessage: string) => {
 const openPrivateDirectory = async (path: string, unsafeMessage: string) => {
   const handle = await openDirectoryNoFollow(path, unsafeMessage);
 
+  return securePrivateDirectoryHandle(handle, unsafeMessage);
+};
+
+const openPrivatePinnedDirectoryEntry = async (
+  parentDirectory: { readonly fd: number },
+  entryName: string,
+  unsafeMessage: string
+) => {
+  const handle = await openPinnedDirectoryEntry(
+    parentDirectory,
+    entryName,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+  );
+
+  return securePrivateDirectoryHandle(handle, unsafeMessage);
+};
+
+const securePrivateDirectoryHandle = async <Handle extends {
+  stat(): ReturnType<ArtifactFileHandle['stat']>;
+  chmod(mode: number): Promise<void>;
+  close(): Promise<void>;
+}>(handle: Handle, unsafeMessage: string): Promise<Handle> => {
   try {
     const directory = await handle.stat();
 
@@ -531,15 +600,16 @@ const openPrivateDirectory = async (path: string, unsafeMessage: string) => {
     const effectiveUid = typeof process.geteuid === 'function'
       ? process.geteuid()
       : undefined;
-    if (effectiveUid !== undefined && directory.uid !== effectiveUid) {
+    const directoryUid = Number(directory.uid);
+    if (effectiveUid !== undefined && directoryUid !== effectiveUid) {
       throw new Error(
-        `${unsafeMessage}: directory owner uid ${directory.uid} does not match process uid ${effectiveUid}`
+        `${unsafeMessage}: directory owner uid ${directoryUid} does not match process uid ${effectiveUid}`
       );
     }
 
     await handle.chmod(0o700);
     const securedDirectory = await handle.stat();
-    if ((securedDirectory.mode & 0o077) !== 0) {
+    if ((Number(securedDirectory.mode) & 0o077) !== 0) {
       throw new Error(unsafeMessage);
     }
 
@@ -548,6 +618,86 @@ const openPrivateDirectory = async (path: string, unsafeMessage: string) => {
     await handle.close().catch(() => undefined);
     throw error;
   }
+};
+
+type RemovedPinnedEntryKind = 'file' | 'directory';
+
+const removePinnedTreeEntry = async (
+  parentDirectory: { readonly fd: number },
+  entryName: string,
+  depth = 0
+): Promise<RemovedPinnedEntryKind | null> => {
+  // Preserve pathologically deep trees for the next pass instead of falling
+  // back to an unpinned path operation or exhausting descriptor limits.
+  if (depth > maximumPinnedCleanupDepth) {
+    return null;
+  }
+
+  for (let attempt = 0; attempt < pinnedCleanupAttempts; attempt += 1) {
+    let directory: ArtifactFileHandle;
+    try {
+      directory = await openPinnedDirectoryEntry(
+        parentDirectory,
+        entryName,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+      );
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        return null;
+      }
+      if (!code || !removableEntryOpenErrorCodes.has(code)) {
+        throw error;
+      }
+
+      try {
+        await unlinkPinnedDirectoryEntry(parentDirectory, entryName);
+        return 'file';
+      } catch (unlinkError) {
+        const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
+        if (unlinkCode === 'ENOENT') {
+          return null;
+        }
+        if (
+          unlinkCode === 'EISDIR'
+          || unlinkCode === 'EPERM'
+          || unlinkCode === 'ERR_FS_EISDIR'
+        ) {
+          continue;
+        }
+        throw unlinkError;
+      }
+    }
+
+    try {
+      for (const child of await readPinnedDirectoryEntries(directory)) {
+        await removePinnedTreeEntry(directory, child.name, depth + 1);
+      }
+    } finally {
+      await directory.close().catch(() => undefined);
+    }
+
+    try {
+      await removePinnedDirectoryEntry(parentDirectory, entryName);
+      return 'directory';
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        return null;
+      }
+      if (
+        code === 'ENOTEMPTY'
+        || code === 'EEXIST'
+        || code === 'ENOTDIR'
+        || code === 'ELOOP'
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
 };
 
 const enforcePrivateDirectory = async (path: string, unsafeMessage: string) => {

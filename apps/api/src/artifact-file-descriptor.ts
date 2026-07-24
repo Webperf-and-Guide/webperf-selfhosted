@@ -1,9 +1,27 @@
-import { link, open, rm, type FileHandle } from 'node:fs/promises';
+import {
+  link,
+  open,
+  readdir,
+  rm,
+  rmdir,
+  type FileHandle
+} from 'node:fs/promises';
 import {
   linkDarwinDirectoryEntries,
   openDarwinDirectoryEntry,
+  readDarwinDirectoryEntries,
+  removeDarwinDirectoryEntry,
   unlinkDarwinDirectoryEntry
 } from './artifact-file-descriptor-darwin';
+
+type DirectoryDescriptor = { readonly fd: number };
+
+export type ArtifactDirectoryEntry = {
+  name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+};
 
 export type ArtifactFileHandle = {
   readonly fd: number;
@@ -25,7 +43,7 @@ export type ArtifactFileHandle = {
 };
 
 export const openPinnedDirectoryEntry = async (
-  directoryHandle: FileHandle,
+  directoryHandle: DirectoryDescriptor,
   entryName: string,
   flags: number,
   mode = 0o600
@@ -60,7 +78,7 @@ export const openPinnedDirectoryEntry = async (
 };
 
 export const linkPinnedDirectoryEntries = async (
-  directoryHandle: FileHandle,
+  directoryHandle: DirectoryDescriptor,
   sourceName: string,
   destinationName: string
 ) => {
@@ -80,7 +98,7 @@ export const linkPinnedDirectoryEntries = async (
 };
 
 export const unlinkPinnedDirectoryEntry = async (
-  directoryHandle: FileHandle,
+  directoryHandle: DirectoryDescriptor,
   entryName: string
 ) => {
   assertDirectoryEntryName(entryName);
@@ -94,13 +112,48 @@ export const unlinkPinnedDirectoryEntry = async (
   unlinkDarwinDirectoryEntry(directoryHandle.fd, entryName);
 };
 
+export const removePinnedDirectoryEntry = async (
+  directoryHandle: DirectoryDescriptor,
+  entryName: string
+) => {
+  assertDirectoryEntryName(entryName);
+
+  if (process.platform === 'linux') {
+    await rmdir(linuxDirectoryEntryPath(directoryHandle, entryName));
+    return;
+  }
+
+  assertDarwin('directory deletion');
+  removeDarwinDirectoryEntry(directoryHandle.fd, entryName);
+};
+
+export const readPinnedDirectoryEntries = async (
+  directoryHandle: DirectoryDescriptor
+): Promise<ArtifactDirectoryEntry[]> => {
+  if (process.platform === 'linux') {
+    return readdir(linuxDirectoryPath(directoryHandle), { withFileTypes: true });
+  }
+
+  assertDarwin('directory enumeration');
+  return readDarwinDirectoryEntries(directoryHandle.fd);
+};
+
 const linuxDirectoryEntryPath = (
-  directoryHandle: FileHandle,
+  directoryHandle: DirectoryDescriptor,
   entryName: string
 ) => `/proc/self/fd/${directoryHandle.fd}/${entryName}`;
 
+const linuxDirectoryPath = (directoryHandle: DirectoryDescriptor) =>
+  `/proc/self/fd/${directoryHandle.fd}`;
+
 const assertDirectoryEntryName = (entryName: string) => {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$/.test(entryName)) {
+  if (
+    entryName.length === 0
+    || entryName === '.'
+    || entryName === '..'
+    || entryName.includes('/')
+    || entryName.includes('\0')
+  ) {
     throw new Error('Browser Audit artifact directory entry is invalid');
   }
 };

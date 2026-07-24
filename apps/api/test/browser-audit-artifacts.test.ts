@@ -21,6 +21,11 @@ import {
 } from '../src/browser-audit-artifact-store';
 import { openDarwinDirectoryEntry } from '../src/artifact-file-descriptor-darwin';
 import {
+  openPinnedDirectoryEntry,
+  readPinnedDirectoryEntries,
+  unlinkPinnedDirectoryEntry
+} from '../src/artifact-file-descriptor';
+import {
   issueBrowserAuditUploadToken,
   verifyBrowserAuditUploadToken
 } from '../src/browser-audit-upload-token';
@@ -140,6 +145,42 @@ describe('local Browser Audit artifact storage', () => {
     }
   });
 
+  test('keeps directory enumeration and deletion pinned across path replacement', async () => {
+    const directory = createTempDirectory();
+    const root = join(directory, 'artifacts');
+    const auditPath = join(root, 'audit_pinned_reconcile');
+    const replacedPath = join(root, 'audit_replaced_reconcile');
+    const outsidePath = join(directory, 'outside-reconcile');
+    mkdirSync(auditPath, { recursive: true });
+    mkdirSync(outsidePath);
+    writeFileSync(join(auditPath, 'artifact_pinned'), 'pinned bytes');
+    writeFileSync(join(outsidePath, 'artifact_pinned'), 'outside secret');
+    const rootHandle = await open(
+      root,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+    );
+    const auditHandle = await openPinnedDirectoryEntry(
+      rootHandle,
+      'audit_pinned_reconcile',
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+    );
+
+    try {
+      renameSync(auditPath, replacedPath);
+      symlinkSync(outsidePath, auditPath);
+      expect((await readPinnedDirectoryEntries(auditHandle)).map((entry) => entry.name))
+        .toEqual(['artifact_pinned']);
+      await unlinkPinnedDirectoryEntry(auditHandle, 'artifact_pinned');
+    } finally {
+      await auditHandle.close().catch(() => undefined);
+      await rootHandle.close();
+    }
+
+    expect(existsSync(join(replacedPath, 'artifact_pinned'))).toBe(false);
+    expect(readFileSync(join(outsidePath, 'artifact_pinned'), 'utf8'))
+      .toBe('outside secret');
+  });
+
   test('streams exact bytes into a private file and reconciles only orphaned entries', async () => {
     const root = join(createTempDirectory(), 'artifacts');
     const store = new LocalBrowserAuditArtifactStore(root);
@@ -225,6 +266,23 @@ describe('local Browser Audit artifact storage', () => {
       removedDirectories: 1
     });
     expect(await Bun.file(join(auditPath, 'artifact_fresh')).exists()).toBe(false);
+  });
+
+  test('removes unexpected nested artifact directories relative to pinned handles', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const nestedPath = join(root, 'audit_nested', 'artifact_directory', 'nested');
+    mkdirSync(nestedPath, { recursive: true });
+    writeFileSync(join(nestedPath, 'payload'), 'orphan');
+    const store = new LocalBrowserAuditArtifactStore(root);
+
+    expect(await store.reconcile(new Set(), {
+      allowImmediateOrphanDeletion: true,
+      minimumOrphanAgeMs: 0
+    })).toEqual({
+      removedFiles: 1,
+      removedDirectories: 1
+    });
+    expect(existsSync(join(root, 'audit_nested'))).toBe(false);
   });
 
   test('requires explicit opt-in before deleting orphans without a grace period', async () => {

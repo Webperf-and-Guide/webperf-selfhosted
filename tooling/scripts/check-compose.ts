@@ -49,7 +49,16 @@ const expectedImages: Record<string, string> = {
   scheduler: 'webperf-scheduler',
   'browser-audit-lighthouse': 'webperf-browser-audit-lighthouse'
 };
-const nonRootNumericUserPattern = /^[1-9]\d*(?::\d+)?$/;
+const nonRootNumericUserPattern = /^[1-9]\d*(?::[1-9]\d*)?$/;
+
+assert(nonRootNumericUserPattern.test('1000'), 'numeric non-root UID must be accepted');
+assert(nonRootNumericUserPattern.test('1000:1000'), 'numeric non-root UID:GID must be accepted');
+for (const unsafeUser of ['0', '0:1000', '1000:0']) {
+  assert(
+    !nonRootNumericUserPattern.test(unsafeUser),
+    `numeric container user ${unsafeUser} must be rejected`
+  );
+}
 
 const production = renderCompose([productionFile]);
 const productionWithProfiles = renderCompose(
@@ -198,8 +207,16 @@ for (const name of Object.keys(expectedImages)) {
   );
 }
 
-for (const [name, productionService] of Object.entries(productionWithProfiles.services)) {
+const productionServiceNames = Object.keys(productionWithProfiles.services).sort();
+assertStringArrayEqual(
+  Object.keys(developmentWithProfiles.services).sort(),
+  productionServiceNames,
+  'development and production Compose service sets'
+);
+for (const name of productionServiceNames) {
+  const productionService = productionWithProfiles.services[name];
   const developmentService = developmentWithProfiles.services[name];
+  assert(productionService, `${name} must exist in the production model`);
   assert(developmentService, `${name} must exist in the development model`);
   assertSecurityParity(name, productionService, developmentService);
 }

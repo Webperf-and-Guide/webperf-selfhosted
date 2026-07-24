@@ -86,6 +86,8 @@ binds a non-loopback interface.
 All production services have health checks, restart and stop policies, log
 rotation, non-root users, and configurable CPU/memory ceilings. Services are
 read-only except for explicit tmpfs mounts and the API's `/data` volume.
+`bun run compose:config` also requires non-zero numeric UID and GID values and
+the exact same service/security surface in the development override.
 
 See [Docker Compose install](../../docs/quickstart/local-compose.md),
 [authentication and secrets](../../docs/security/auth-and-secrets.md), and

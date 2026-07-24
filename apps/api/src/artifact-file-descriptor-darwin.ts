@@ -85,10 +85,11 @@ const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHand
   let closePromise: Promise<void> | null = null;
   const pendingOperations = new Set<Promise<unknown>>();
 
-  const assertOpen = () => {
+  const start = <Result>(createOperation: () => Promise<Result>): Promise<Result> => {
     if (state !== 'open') {
-      throw new Error('Browser Audit artifact file handle is closed');
+      return Promise.reject(new Error('Browser Audit artifact file handle is closed'));
     }
+    return track(createOperation());
   };
 
   const track = <Result>(operation: Promise<Result>) => {
@@ -100,8 +101,7 @@ const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHand
   return {
     fd: descriptor,
     write: (buffer, offset, length) => {
-      assertOpen();
-      return track(new Promise((resolveWrite, rejectWrite) => {
+      return start(() => new Promise((resolveWrite, rejectWrite) => {
         writeFileDescriptor(
           descriptor,
           buffer,
@@ -119,8 +119,7 @@ const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHand
       }));
     },
     read: (buffer, offset, length, position) => {
-      assertOpen();
-      return track(new Promise((resolveRead, rejectRead) => {
+      return start(() => new Promise((resolveRead, rejectRead) => {
         readFileDescriptor(
           descriptor,
           buffer,
@@ -138,8 +137,7 @@ const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHand
       }));
     },
     stat: () => {
-      assertOpen();
-      return track(new Promise((resolveStat, rejectStat) => {
+      return start(() => new Promise((resolveStat, rejectStat) => {
         fstat(descriptor, (error, stats) => {
           if (error) {
             rejectStat(error);
@@ -150,8 +148,7 @@ const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHand
       }));
     },
     sync: () => {
-      assertOpen();
-      return track(new Promise((resolveSync, rejectSync) => {
+      return start(() => new Promise((resolveSync, rejectSync) => {
         fsync(descriptor, (error) => {
           if (error) {
             rejectSync(error);
@@ -162,8 +159,7 @@ const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHand
       }));
     },
     chmod: (mode) => {
-      assertOpen();
-      return track(new Promise((resolveChmod, rejectChmod) => {
+      return start(() => new Promise((resolveChmod, rejectChmod) => {
         fchmod(descriptor, mode, (error) => {
           if (error) {
             rejectChmod(error);

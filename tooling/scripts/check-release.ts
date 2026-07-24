@@ -124,6 +124,8 @@ try {
     .match(/^ARG DEBIAN_CHROMIUM_VERSION=(\S+)$/m)?.[1];
   const debianSnapshot = browserAuditDockerfile
     .match(/^ARG DEBIAN_CHROMIUM_SNAPSHOT=(\d{8}T\d{6}Z)$/m)?.[1];
+  const debianSnapshotSourceUseCount = browserAuditDockerfile
+    .match(/Dir::Etc::sourcelist=\/tmp\/chromium-snapshot\.list/g)?.length ?? 0;
   let puppeteerChromeVersion: string | undefined;
   try {
     const puppeteerModulePath = Bun.resolveSync(
@@ -157,13 +159,18 @@ try {
   if (
     !debianSnapshot
     || !browserAuditDockerfile.includes(
+      'snapshot.debian.org/archive/debian/%s/'
+    )
+    || !browserAuditDockerfile.includes(
       'snapshot.debian.org/archive/debian-security/%s/'
     )
+    || debianSnapshotSourceUseCount < 2
+    || !browserAuditDockerfile.includes('--allow-downgrades --no-install-recommends')
     || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')
     || !browserAuditDockerfile.includes('"chromium-sandbox=$DEBIAN_CHROMIUM_VERSION"')
   ) {
     violations.push(
-      'browser-audit-lighthouse Dockerfile: arm64 Chromium must use the pinned Debian security snapshot and package version'
+      'browser-audit-lighthouse Dockerfile: arm64 Chromium must use pinned Debian main/security snapshots and package versions'
     );
   }
   if (

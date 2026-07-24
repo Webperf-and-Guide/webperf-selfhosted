@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
+  chmodSync,
   constants,
   existsSync,
   mkdirSync,
@@ -373,6 +374,23 @@ describe('local Browser Audit artifact storage', () => {
 
     expect(await new Response(download.body).text()).toBe('validated artifact');
     expect(readFileSync(artifactPath, 'utf8')).toBe('must not be served');
+    await expect(store.openDownload(stored.storageKey, body.byteLength))
+      .rejects.toThrow('missing or inconsistent');
+  });
+
+  test('rejects artifact files with group or other permissions', async () => {
+    const root = join(createTempDirectory(), 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const body = new TextEncoder().encode('private artifact');
+    const stored = await store.write({
+      auditId: 'audit_private_mode',
+      artifactId: 'artifact_private_mode',
+      body: new Response(body).body,
+      expectedBytes: body.byteLength,
+      maxBytes: 1_024
+    });
+    chmodSync(join(root, 'audit_private_mode', 'artifact_private_mode'), 0o640);
+
     await expect(store.openDownload(stored.storageKey, body.byteLength))
       .rejects.toThrow('missing or inconsistent');
   });

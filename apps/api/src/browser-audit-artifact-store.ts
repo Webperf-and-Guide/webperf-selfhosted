@@ -126,7 +126,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     expectedBytes: number;
     maxBytes: number;
   }): Promise<StoredArtifactFile> {
-    assertStorageSegment(auditId, 'audit ID');
+    const auditPath = this.pathForAudit(auditId);
     assertStorageSegment(artifactId, 'artifact ID');
 
     if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0) {
@@ -142,7 +142,6 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     }
 
     await this.ensureRoot();
-    const auditPath = this.pathForAudit(auditId);
     await mkdir(auditPath, { recursive: false, mode: 0o700 }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw error;
@@ -279,8 +278,19 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         constants.O_RDONLY | constants.O_NOFOLLOW
       );
       const file = await handle.stat();
+      const effectiveUid = typeof process.geteuid === 'function'
+        ? process.geteuid()
+        : undefined;
+      const ownedByEffectiveUser = effectiveUid === undefined
+        || Number(file.uid) === effectiveUid;
+      const privateMode = (Number(file.mode) & 0o077) === 0;
 
-      if (!file.isFile() || file.size !== expectedBytes) {
+      if (
+        !file.isFile()
+        || file.size !== expectedBytes
+        || !ownedByEffectiveUser
+        || !privateMode
+      ) {
         throw new Error('Browser Audit artifact file is missing or inconsistent');
       }
       await assertPinnedDirectory(
@@ -367,7 +377,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     await this.ensureRoot();
     // Validate every caller-provided key before any reconciliation deletion.
     for (const key of validStorageKeys) {
-      this.pathForStorageKey(key);
+      this.assertValidStorageKey(key);
     }
     const valid = new Set(validStorageKeys);
     let removedFiles = 0;
@@ -524,8 +534,8 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     return path;
   }
 
-  private pathForStorageKey(storageKey: string) {
-    return this.locationForStorageKey(storageKey).path;
+  private assertValidStorageKey(storageKey: string) {
+    this.locationForStorageKey(storageKey);
   }
 
   private locationForStorageKey(storageKey: string) {

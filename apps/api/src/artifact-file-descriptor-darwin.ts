@@ -143,6 +143,7 @@ export const readDarwinDirectoryEntries = (
 
   const entries: DarwinArtifactDirectoryEntry[] = [];
   let readFailed = false;
+  let readError: unknown;
   try {
     while (true) {
       resetNativeErrno(binding);
@@ -184,16 +185,26 @@ export const readDarwinDirectoryEntries = (
     }
   } catch (error) {
     readFailed = true;
-    throw error;
-  } finally {
-    const result = binding.closedir(directory);
-    if (result !== 0 && !readFailed) {
-      throw createNativeFilesystemError(
-        binding,
-        'closedir',
-        String(directoryFd)
+    readError = error;
+  }
+
+  const result = binding.closedir(directory);
+  if (result !== 0) {
+    const closeError = createNativeFilesystemError(
+      binding,
+      'closedir',
+      String(directoryFd)
+    );
+    if (readFailed) {
+      throw new AggregateError(
+        [readError, closeError],
+        'Browser Audit artifact directory enumeration and close both failed'
       );
     }
+    throw closeError;
+  }
+  if (readFailed) {
+    throw readError;
   }
 
   return entries;

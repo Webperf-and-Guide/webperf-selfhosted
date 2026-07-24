@@ -15,7 +15,7 @@ if [[ "$profile" == "browser-audit" ]] && docker info --format '{{range .Securit
   if [[ -r /sys/kernel/security/apparmor/profiles ]] \
     && ! grep -q '^webperf-browser-audit ' /sys/kernel/security/apparmor/profiles; then
     echo "Browser Audit requires the checked-in AppArmor profile on this host." >&2
-    echo "Load it with: sudo apparmor_parser -r -W infra/docker-compose/browser-audit.apparmor" >&2
+    echo "Load it with: sudo apparmor_parser -r -W \"$root_dir/infra/docker-compose/browser-audit.apparmor\"" >&2
     exit 1
   fi
   compose_files+=(-f "$apparmor_compose_file")

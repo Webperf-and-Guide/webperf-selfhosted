@@ -10,10 +10,8 @@ profile="${COMPOSE_PROFILE:-default}"
 temp_env="$(mktemp)"
 temp_artifact="$(mktemp)"
 compose_files=(-f "$compose_file" -f "$dev_compose_file")
-apparmor_enabled=false
 
 if [[ "$profile" == "browser-audit" ]] && docker info --format '{{range .SecurityOptions}}{{println .}}{{end}}' | grep -qx 'name=apparmor'; then
-  apparmor_enabled=true
   compose_files+=(-f "$apparmor_compose_file")
 fi
 
@@ -106,13 +104,7 @@ if [[ "$profile" == "browser-audit" ]]; then
   profile_args+=(--profile browser-audit)
 fi
 
-if ! compose "${profile_args[@]}" up -d --build; then
-  if [[ "$apparmor_enabled" == "true" ]]; then
-    echo "If Docker could not apply webperf-browser-audit, load it with:" >&2
-    echo "sudo apparmor_parser -r -W \"$root_dir/infra/docker-compose/browser-audit.apparmor\"" >&2
-  fi
-  exit 1
-fi
+compose "${profile_args[@]}" up -d --build
 console_mapping="$(compose "${profile_args[@]}" port console 3000)"
 console_host_port="$(host_port_from_mapping "$console_mapping" "console")"
 console_url="http://127.0.0.1:${console_host_port}"

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
+  constants,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,6 +18,7 @@ import {
   LocalBrowserAuditArtifactStore,
   normalizeArtifactFilename
 } from '../src/browser-audit-artifact-store';
+import { openDarwinDirectoryEntry } from '../src/artifact-file-descriptor-darwin';
 import {
   issueBrowserAuditUploadToken,
   verifyBrowserAuditUploadToken
@@ -102,6 +105,40 @@ describe('Browser Audit upload tokens', () => {
 });
 
 describe('local Browser Audit artifact storage', () => {
+  test('rejects raw Darwin descriptor operations after close', async () => {
+    if (process.platform !== 'darwin') {
+      return;
+    }
+
+    const directory = createTempDirectory();
+    const directoryHandle = await open(
+      directory,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+    );
+    const fileHandle = openDarwinDirectoryEntry(
+      directoryHandle.fd,
+      'artifact_closed_handle',
+      constants.O_WRONLY
+        | constants.O_CREAT
+        | constants.O_EXCL
+        | constants.O_NOFOLLOW,
+      0o600
+    );
+
+    try {
+      await fileHandle.close();
+      await expect(fileHandle.write(Buffer.from('x'), 0, 1)).rejects.toThrow('closed');
+      await expect(fileHandle.read(Buffer.alloc(1), 0, 1, null)).rejects.toThrow('closed');
+      await expect(fileHandle.stat()).rejects.toThrow('closed');
+      await expect(fileHandle.sync()).rejects.toThrow('closed');
+      await expect(fileHandle.chmod(0o600)).rejects.toThrow('closed');
+      await fileHandle.close();
+    } finally {
+      await fileHandle.close().catch(() => undefined);
+      await directoryHandle.close();
+    }
+  });
+
   test('streams exact bytes into a private file and reconciles only orphaned entries', async () => {
     const root = join(createTempDirectory(), 'artifacts');
     const store = new LocalBrowserAuditArtifactStore(root);
@@ -288,6 +325,52 @@ describe('local Browser Audit artifact storage', () => {
     expect(await new Response(download.body).text()).toBe('pinned audit directory');
     expect(readFileSync(join(auditPath, 'artifact_directory_descriptor'), 'utf8'))
       .toBe('outside secret');
+  });
+
+  test('publishes relative to the pinned directory and rejects a write-time swap', async () => {
+    const directory = createTempDirectory();
+    const root = join(directory, 'artifacts');
+    const store = new LocalBrowserAuditArtifactStore(root);
+    const body = new TextEncoder().encode('pinned write directory');
+    let releaseStream = () => {};
+    const streamRelease = new Promise<void>((resolveRelease) => {
+      releaseStream = resolveRelease;
+    });
+    let markStreamStarted = () => {};
+    const streamStarted = new Promise<void>((resolveStarted) => {
+      markStreamStarted = resolveStarted;
+    });
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          controller.enqueue(body);
+          markStreamStarted();
+          await streamRelease;
+          controller.close();
+        }
+      },
+      { highWaterMark: 0 }
+    );
+    const write = store.write({
+      auditId: 'audit_write_descriptor',
+      artifactId: 'artifact_write_descriptor',
+      body: stream,
+      expectedBytes: body.byteLength,
+      maxBytes: 1_024
+    });
+
+    await streamStarted;
+    const auditPath = join(root, 'audit_write_descriptor');
+    const replacedPath = join(root, 'audit_write_replaced');
+    const outsidePath = join(directory, 'outside-write');
+    renameSync(auditPath, replacedPath);
+    mkdirSync(outsidePath);
+    symlinkSync(outsidePath, auditPath);
+    releaseStream();
+
+    await expect(write).rejects.toThrow('changed during write');
+    expect(await Bun.file(join(outsidePath, 'artifact_write_descriptor')).exists()).toBe(false);
+    expect(await Bun.file(join(replacedPath, 'artifact_write_descriptor')).exists()).toBe(false);
   });
 
   test('rejects an intermediate audit-directory symlink during download and delete', async () => {

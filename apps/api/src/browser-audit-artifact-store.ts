@@ -1,9 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { constants as osConstants } from 'node:os';
-import { dlopen, FFIType, ptr, read, type Pointer } from 'bun:ffi';
 import {
-  link,
   lstat,
   mkdir,
   open,
@@ -12,6 +9,12 @@ import {
   rmdir
 } from 'node:fs/promises';
 import { parse, resolve, sep } from 'node:path';
+import {
+  linkPinnedDirectoryEntries,
+  openPinnedDirectoryEntry,
+  unlinkPinnedDirectoryEntry,
+  type ArtifactFileHandle
+} from './artifact-file-descriptor';
 
 const safeStorageSegment = /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/;
 
@@ -135,18 +138,30 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         throw error;
       }
     });
-    await enforcePrivateDirectory(auditPath, 'Browser Audit artifact directory is unsafe');
-
     const storageKey = `${auditId}/${artifactId}`;
-    const destinationPath = this.pathForStorageKey(storageKey);
-    const temporaryPath = `${destinationPath}.tmp-${randomUUID()}`;
-    const handle = await open(temporaryPath, 'wx', 0o600);
+    const temporaryEntry = `${artifactId}.tmp-${randomUUID()}`;
+    const auditDirectory = await openPrivateDirectory(
+      auditPath,
+      'Browser Audit artifact directory is unsafe'
+    );
     const hash = createHash('sha256');
     let byteSize = 0;
-    let published = false;
+    let handle: ArtifactFileHandle | undefined;
+    let temporaryRemoved = false;
+    let destinationPublished = false;
+    let completed = false;
     let closed = false;
 
     try {
+      handle = await openPinnedDirectoryEntry(
+        auditDirectory,
+        temporaryEntry,
+        constants.O_WRONLY
+          | constants.O_CREAT
+          | constants.O_EXCL
+          | constants.O_NOFOLLOW,
+        0o600
+      );
       const reader = body?.getReader();
 
       if (reader) {
@@ -190,15 +205,22 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
       await handle.close();
       closed = true;
       try {
-        await link(temporaryPath, destinationPath);
+        await linkPinnedDirectoryEntries(auditDirectory, temporaryEntry, artifactId);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           throw new ArtifactStoreValidationError('Artifact already exists', 409);
         }
         throw error;
       }
-      published = true;
-      await rm(temporaryPath, { force: true });
+      destinationPublished = true;
+      await unlinkPinnedDirectoryEntry(auditDirectory, temporaryEntry);
+      temporaryRemoved = true;
+      await assertPinnedDirectory(
+        auditPath,
+        auditDirectory,
+        'Browser Audit artifact directory changed during write'
+      );
+      completed = true;
 
       return {
         storageKey,
@@ -206,12 +228,16 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         sha256: hash.digest('hex')
       };
     } finally {
-      if (!closed) {
+      if (handle && !closed) {
         await handle.close().catch(() => undefined);
       }
-      if (!published) {
-        await rm(temporaryPath, { force: true });
+      if (!temporaryRemoved) {
+        await unlinkPinnedDirectoryEntry(auditDirectory, temporaryEntry).catch(() => undefined);
       }
+      if (destinationPublished && !completed) {
+        await unlinkPinnedDirectoryEntry(auditDirectory, artifactId).catch(() => undefined);
+      }
+      await auditDirectory.close().catch(() => undefined);
     }
   }
 
@@ -220,10 +246,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
       throw new ArtifactStoreValidationError('Artifact size is invalid');
     }
     await this.ensureRoot();
-    const path = this.pathForStorageKey(storageKey);
-    const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
-    const artifactId = storageKey.split('/')[1]!;
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    const { auditId, artifactId } = this.locationForStorageKey(storageKey);
+    const auditPath = this.pathForAudit(auditId);
+    let handle: ArtifactFileHandle | undefined;
     let auditDirectory: Awaited<ReturnType<typeof open>> | undefined;
 
     try {
@@ -231,10 +256,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         auditPath,
         'Browser Audit artifact directory is unsafe'
       );
-      handle = await open(
-        process.platform === 'linux'
-          ? linuxDirectoryEntryPath(auditDirectory, artifactId)
-          : path,
+      handle = await openPinnedDirectoryEntry(
+        auditDirectory,
+        artifactId,
         constants.O_RDONLY | constants.O_NOFOLLOW
       );
       const file = await handle.stat();
@@ -270,8 +294,8 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
 
   async delete(storageKey: string) {
     await this.ensureRoot();
-    const path = this.pathForStorageKey(storageKey);
-    const auditPath = this.pathForAudit(storageKey.split('/')[0]!);
+    const { auditId, artifactId } = this.locationForStorageKey(storageKey);
+    const auditPath = this.pathForAudit(auditId);
     const auditDirectory = await openPrivateDirectory(
       auditPath,
       'Browser Audit artifact directory is unsafe'
@@ -290,10 +314,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         auditDirectory,
         'Browser Audit artifact directory changed before delete'
       );
-      await unlinkDirectoryEntry(
-        auditDirectory,
-        path.slice(auditPath.length + 1)
-      );
+      await unlinkPinnedDirectoryEntry(auditDirectory, artifactId);
       await assertPinnedDirectory(
         auditPath,
         auditDirectory,
@@ -327,6 +348,7 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     }
     const orphanCutoffMs = nowMs - minimumOrphanAgeMs;
     await this.ensureRoot();
+    // Validate every caller-provided key before any reconciliation deletion.
     for (const key of validStorageKeys) {
       this.pathForStorageKey(key);
     }
@@ -444,6 +466,10 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
   }
 
   private pathForStorageKey(storageKey: string) {
+    return this.locationForStorageKey(storageKey).path;
+  }
+
+  private locationForStorageKey(storageKey: string) {
     const parts = storageKey.split('/');
 
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
@@ -454,7 +480,11 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     assertStorageSegment(parts[1], 'artifact ID');
     const path = resolve(this.rootPath, parts[0], parts[1]);
     assertDescendant(this.rootPath, path);
-    return path;
+    return {
+      auditId: parts[0],
+      artifactId: parts[1],
+      path
+    };
   }
 }
 
@@ -544,119 +574,8 @@ const assertPinnedDirectory = async (
   }
 };
 
-const linuxDirectoryEntryPath = (
-  directoryHandle: Awaited<ReturnType<typeof open>>,
-  entryName: string
-) => {
-  assertStorageSegment(entryName, 'artifact ID');
-  return `/proc/self/fd/${directoryHandle.fd}/${entryName}`;
-};
-
-const unlinkDirectoryEntry = async (
-  directoryHandle: Awaited<ReturnType<typeof open>>,
-  entryName: string
-) => {
-  assertStorageSegment(entryName, 'artifact ID');
-
-  if (process.platform === 'linux') {
-    await rm(linuxDirectoryEntryPath(directoryHandle, entryName), { force: true });
-    return;
-  }
-  if (process.platform !== 'darwin') {
-    throw new Error(
-      `Browser Audit artifact deletion is unsupported on ${process.platform}`
-    );
-  }
-
-  const binding = getDarwinUnlinkBinding();
-  const name = Buffer.from(`${entryName}\0`);
-  const result = binding.unlinkat(directoryHandle.fd, ptr(name), 0);
-  if (result !== 0) {
-    const errnoPointer = binding.errno();
-    if (errnoPointer === null) {
-      throw new Error(
-        `Browser Audit artifact deletion could not read errno for ${entryName}`
-      );
-    }
-    handleUnlinkError(read.i32(errnoPointer, 0), entryName);
-  }
-};
-
-type DarwinUnlinkBinding = {
-  unlinkat: (directoryFd: number, path: Pointer, flags: number) => number;
-  errno: () => Pointer | null;
-};
-
-let darwinUnlinkBinding: DarwinUnlinkBinding | undefined;
-
-const getDarwinUnlinkBinding = () => {
-  darwinUnlinkBinding ??= loadDarwinUnlinkBinding();
-  return darwinUnlinkBinding;
-};
-
-const loadDarwinUnlinkBinding = (): DarwinUnlinkBinding => {
-  const unlinkat = {
-    args: [FFIType.i32, FFIType.ptr, FFIType.i32],
-    returns: FFIType.i32
-  } as const;
-  const errnoAccessor = {
-    args: [],
-    returns: FFIType.ptr
-  } as const;
-
-  return createDarwinUnlinkBinding(
-    '/usr/lib/libSystem.B.dylib',
-    '__error',
-    unlinkat,
-    errnoAccessor
-  );
-};
-
-const createDarwinUnlinkBinding = <ErrnoSymbol extends string>(
-  libraryPath: string,
-  errnoSymbol: ErrnoSymbol,
-  unlinkatDefinition: {
-    readonly args: readonly [FFIType.i32, FFIType.ptr, FFIType.i32];
-    readonly returns: FFIType.i32;
-  },
-  errnoDefinition: {
-    readonly args: readonly [];
-    readonly returns: FFIType.ptr;
-  }
-): DarwinUnlinkBinding => {
-  const definitions = {
-    unlinkat: unlinkatDefinition,
-    [errnoSymbol]: errnoDefinition
-  } as {
-    unlinkat: typeof unlinkatDefinition;
-  } & Record<ErrnoSymbol, typeof errnoDefinition>;
-  const library = dlopen(libraryPath, definitions);
-  const symbols = library.symbols as unknown as {
-    unlinkat: (directoryFd: number, path: Pointer, flags: number) => number;
-  } & Record<ErrnoSymbol, () => Pointer | null>;
-  const errno = symbols[errnoSymbol];
-
-  return {
-    unlinkat: (directoryFd, path, flags) =>
-      symbols.unlinkat(directoryFd, path, flags),
-    errno: () => errno()
-  };
-};
-
-const handleUnlinkError = (errno: number, entryName: string) => {
-  if (errno === osConstants.errno.ENOENT) {
-    return;
-  }
-
-  const error = new Error(
-    `Browser Audit artifact deletion failed for ${entryName} with errno ${errno}`
-  ) as NodeJS.ErrnoException;
-  error.errno = errno;
-  throw error;
-};
-
 const readableFileHandle = (
-  handle: Awaited<ReturnType<typeof open>>,
+  handle: ArtifactFileHandle,
   byteSize: number,
   pinnedDirectories: Array<Awaited<ReturnType<typeof open>>> = []
 ): ReadableStream<Uint8Array> => {

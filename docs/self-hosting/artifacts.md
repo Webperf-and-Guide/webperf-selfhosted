@@ -45,10 +45,11 @@ index. `bun run selfhost:maintenance` performs the same reconciliation; use
 The reconciliation root may not be a filesystem root. It does not follow
 symlinks. The API requires the root and managed audit directories to be owned
 by its effective user and makes them owner-only (`0700`). It pins a validated
-audit-directory descriptor across download and delete operations. Linux opens
-and deletes entries asynchronously through `/proc/self/fd/<directory-fd>`;
-macOS uses a cached POSIX `unlinkat` binding for deletion. Both stay relative to
-the pinned descriptor, and the store rejects a path whose directory identity
+audit-directory descriptor across write, download, and delete operations.
+Linux accesses entries asynchronously through `/proc/self/fd/<directory-fd>`;
+macOS uses cached POSIX `openat`, `linkat`, and `unlinkat` bindings. Temporary
+creation, no-replace publication, reads, and cleanup all stay relative to the
+pinned descriptor, and the store rejects a path whose directory identity
 changes during the operation. This local backend supports Linux and macOS,
 including glibc- and musl-based Linux images. Compose mounts the
 `webperf-data` volume only into the API service; executors and Browser Audit

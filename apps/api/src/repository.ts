@@ -60,9 +60,7 @@ import {
   type SqliteRetentionResult
 } from './database/operations';
 import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
-import {
-  browserAuditArtifactLimitTriggerName
-} from './database/migrations/20260722_003_browser_audit_artifacts';
+import { browserAuditArtifactLimitTriggerName } from './database/migrations/20260722_003_browser_audit_artifacts';
 
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.

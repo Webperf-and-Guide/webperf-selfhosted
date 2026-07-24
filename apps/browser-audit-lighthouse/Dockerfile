@@ -8,6 +8,8 @@ ARG DEBIAN_CHROMIUM_VERSION=146.0.7680.153-1~deb13u1
 ARG DEBIAN_CHROMIUM_SNAPSHOT=20260320T220114Z
 ARG TARGETARCH
 
+# apt-get(8) documents the arm64-only configuration key as
+# APT::Get::allow-downgrades; amd64 keeps APT's default behavior.
 RUN install_runtime_dependencies() { \
     apt-get "$@" update \
     && apt-get "$@" install -y --no-install-recommends \
@@ -53,7 +55,7 @@ RUN install_runtime_dependencies() { \
     && rm -rf /var/lib/apt/lists/* \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
     && install_runtime_dependencies \
-      -o APT::Get::allow-Downgrades=true \
+      -o APT::Get::allow-downgrades=true \
       -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list \
       -o Dir::Etc::sourceparts=- \
       -o Acquire::Check-Valid-Until=false; \

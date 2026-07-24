@@ -163,6 +163,7 @@ try {
     !debianSnapshot
     || debianSnapshotSourceDefinitionCount !== 2
     || debianSnapshotSourceUseCount < 2
+    || !browserAuditDockerfile.includes('APT::Get::allow-downgrades=true')
     || !browserAuditDockerfile.includes('--allow-downgrades --no-install-recommends')
     || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')
     || !browserAuditDockerfile.includes('"chromium-sandbox=$DEBIAN_CHROMIUM_VERSION"')

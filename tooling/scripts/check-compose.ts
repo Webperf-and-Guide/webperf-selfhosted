@@ -173,7 +173,7 @@ assertStringArrayEqual(browser.profiles?.sort(), ['browser-audit', 'debug'], 'Br
 assert((browser.ports?.length ?? 0) === 0, 'Browser Audit runner must not publish a host port');
 assert(!browser.cap_add?.includes('SYS_ADMIN'), 'Browser Audit runner must not add SYS_ADMIN');
 assertStringArrayEqual(
-  browser.cap_add,
+  [...(browser.cap_add ?? [])].sort(),
   ['SYS_CHROOT'],
   'Browser Audit runner minimal sandbox capabilities'
 );

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
+import { createServer as createNetServer, type Server } from 'node:net';
 import {
   createPinnedHttpRequest,
   OutboundHttpPolicyError,
@@ -16,6 +17,13 @@ afterEach(async () => {
 });
 
 describe('executor pinned outbound HTTP', () => {
+  test('rejects invalid factory deadlines before the first request', () => {
+    expect(() => createPinnedHttpRequest({ requestTimeoutMs: 0 }))
+      .toThrow('Outbound HTTP request timeout');
+    expect(() => createPinnedHttpRequest({ lookupTimeoutMs: 0 }))
+      .toThrow('Outbound DNS lookup timeout');
+  });
+
   test('rejects private, mixed, and IPv4-mapped DNS answers for public targets', async () => {
     for (const addresses of [
       [{ address: '10.0.0.4', family: 4 }],
@@ -119,6 +127,30 @@ describe('executor pinned outbound HTTP', () => {
       addressPolicy: 'loopback',
       maximumResponseBytes: 4
     })).rejects.toMatchObject({ code: 'ERR_RESPONSE_TOO_LARGE' });
+  });
+
+  test('settles an incomplete response stream without waiting for its deadline', async () => {
+    const server = createNetServer((socket) => {
+      socket.once('data', () => {
+        socket.end('HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial');
+      });
+    });
+    servers.add(server);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Test server did not expose a TCP port');
+    }
+
+    const request = createPinnedHttpRequest({ requestTimeoutMs: 5_000 });
+    await expect(request(new URL(`http://127.0.0.1:${address.port}/`), {
+      method: 'GET',
+      signal: new AbortController().signal,
+      addressPolicy: 'loopback'
+    })).rejects.toMatchObject({ code: 'ECONNRESET' });
   });
 
   test('limits trusted private origins to LAN space instead of all reserved addresses', async () => {

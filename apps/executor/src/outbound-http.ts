@@ -132,7 +132,7 @@ export const resolveOutboundHttpTarget = async (
   let url: URL;
 
   try {
-    url = value instanceof URL ? new URL(value) : new URL(value);
+    url = new URL(value);
   } catch {
     throw new OutboundHttpPolicyError('invalid_target', 'Outbound HTTP target is invalid');
   }
@@ -216,32 +216,29 @@ export const createPinnedHttpRequest = ({
   lookupHost?: LookupHost;
   lookupTimeoutMs?: number;
   requestTimeoutMs?: number;
-} = {}): PinnedHttpRequest => async (url, init) => {
-  if (
-    !Number.isSafeInteger(requestTimeoutMs)
-    || requestTimeoutMs < 1
-    || requestTimeoutMs > 300_000
-  ) {
-    throw new Error('Outbound HTTP request timeout must be between 1 and 300000ms');
-  }
+} = {}): PinnedHttpRequest => {
+  assertLookupTimeout(lookupTimeoutMs);
+  assertRequestTimeout(requestTimeoutMs);
 
-  const target = await resolveOutboundHttpTarget(url, {
-    addressPolicy: init.addressPolicy,
-    lookupHost,
-    lookupTimeoutMs,
-    signal: init.signal
-  });
-  const maximumResponseBytes = init.maximumResponseBytes ?? defaultMaximumResponseBytes;
+  return async (url, init) => {
+    const target = await resolveOutboundHttpTarget(url, {
+      addressPolicy: init.addressPolicy,
+      lookupHost,
+      lookupTimeoutMs,
+      signal: init.signal
+    });
+    const maximumResponseBytes = init.maximumResponseBytes ?? defaultMaximumResponseBytes;
 
-  if (
-    !Number.isSafeInteger(maximumResponseBytes)
-    || maximumResponseBytes < 0
-    || maximumResponseBytes > 16_777_216
-  ) {
-    throw new Error('Maximum outbound response bytes must be between 0 and 16777216');
-  }
+    if (
+      !Number.isSafeInteger(maximumResponseBytes)
+      || maximumResponseBytes < 0
+      || maximumResponseBytes > 16_777_216
+    ) {
+      throw new Error('Maximum outbound response bytes must be between 0 and 16777216');
+    }
 
-  return issuePinnedRequest(target, init, maximumResponseBytes, requestTimeoutMs);
+    return issuePinnedRequest(target, init, maximumResponseBytes, requestTimeoutMs);
+  };
 };
 
 export const requestPinnedHttp = createPinnedHttpRequest();
@@ -336,6 +333,14 @@ const issuePinnedRequest = (
       settleResponse(new Response(body, responseInit));
     });
     incoming.once('error', settleError);
+    incoming.once('close', () => {
+      if (!incoming.readableEnded) {
+        settleError(Object.assign(
+          new Error('Outbound HTTP response closed before completion'),
+          { code: 'ECONNRESET' }
+        ));
+      }
+    });
   }
 
   request.once('error', settleError);
@@ -352,9 +357,7 @@ const lookupHostWithDeadline = async (
   timeoutMs: number,
   signal?: AbortSignal
 ) => {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
-    throw new Error('Outbound DNS lookup timeout must be between 1 and 60000ms');
-  }
+  assertLookupTimeout(timeoutMs);
 
   let timeout: ReturnType<typeof setTimeout> | null = null;
   let abortHandler: (() => void) | null = null;
@@ -395,6 +398,18 @@ const lookupHostWithDeadline = async (
     }
   }
 };
+
+function assertLookupTimeout(timeoutMs: number) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
+    throw new Error('Outbound DNS lookup timeout must be between 1 and 60000ms');
+  }
+}
+
+function assertRequestTimeout(timeoutMs: number) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
+    throw new Error('Outbound HTTP request timeout must be between 1 and 300000ms');
+  }
+}
 
 const assertAddressPolicy = (
   rawAddress: string,

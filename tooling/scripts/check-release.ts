@@ -23,6 +23,7 @@ type WorkflowBuildEntry = {
   file: string;
   platform: string;
   arch: string;
+  runner: string;
 };
 
 type WorkflowDocument = {
@@ -65,8 +66,9 @@ if (!ciImageBuildMatrix.some(
     && entry.file === 'apps/browser-audit-lighthouse/Dockerfile'
     && entry.platform === 'linux/arm64'
     && entry.arch === 'arm64'
+    && entry.runner === 'ubuntu-24.04-arm'
 )) {
-  violations.push('ci.yml: Browser Audit image matrix must build the arm64 Dockerfile path');
+  violations.push('ci.yml: Browser Audit image matrix must build on the native arm64 runner');
 }
 
 let workflowFiles: string[] = [];
@@ -131,7 +133,7 @@ if (ciWorkflow !== undefined && ciWorkflow.includes(':latest')) {
   violations.push('ci.yml: the mutable latest tag is not part of the development channel');
 }
 for (const requiredFragment of [
-  'docker/setup-qemu-action@',
+  'runs-on: ${{ matrix.runner }}',
   'platforms: ${{ matrix.platform }}'
 ]) {
   if (ciWorkflow !== undefined && !ciWorkflow.includes(requiredFragment)) {
@@ -302,6 +304,7 @@ function parseBuildMatrix(
       && typeof entry.file === 'string'
       && typeof entry.platform === 'string'
       && typeof entry.arch === 'string'
+      && typeof entry.runner === 'string'
     )
   );
 }

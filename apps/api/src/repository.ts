@@ -1047,6 +1047,8 @@ export const createSqliteJobRepository = ({
       persistBrowserAudit(browserAudit);
     },
     saveBrowserAuditArtifact(artifact) {
+      // Writes and reads share this public-contract normalizer so malformed
+      // internal metadata can never become a persistently unreadable row.
       const validatedArtifact = normalizeBrowserAuditArtifactRecord(artifact);
       if (!validatedArtifact) {
         throw new TypeError('Browser Audit artifact metadata is invalid');

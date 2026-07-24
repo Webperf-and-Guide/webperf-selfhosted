@@ -152,6 +152,8 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
     let completed = false;
     let closed = false;
 
+    // Temporary creation, publication, and rollback must all remain relative
+    // to this pinned descriptor; the visible path is used only for identity checks.
     try {
       handle = await openPinnedDirectoryEntry(
         auditDirectory,

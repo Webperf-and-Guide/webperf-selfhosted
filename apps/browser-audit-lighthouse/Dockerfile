@@ -77,30 +77,32 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
       "chromium=$DEBIAN_CHROMIUM_VERSION" "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /tmp/chromium-snapshot.list \
-    && mkdir -p /opt/google \
-    && ln -s /usr/lib/chromium /opt/google/chrome; \
+    && mkdir -p /opt/webperf \
+    && ln -s /usr/lib/chromium /opt/webperf/chrome; \
   else \
     resolved_chrome_version="${CHROME_VERSION:-$(bun -e 'import { PUPPETEER_REVISIONS } from "puppeteer-core"; process.stdout.write(PUPPETEER_REVISIONS.chrome)')}" \
     && test -n "$resolved_chrome_version" \
     && bun x @puppeteer/browsers install "chrome@${resolved_chrome_version}" --path /opt/chrome \
     && chrome_executable="$(find /opt/chrome -type f -name chrome -perm /111 -print -quit)" \
     && test -n "$chrome_executable" \
-    && mkdir -p /opt/google/chrome \
-    && cp -a "$(dirname "$chrome_executable")/." /opt/google/chrome/ \
+    && mkdir -p /opt/webperf/chrome \
+    && cp -a "$(dirname "$chrome_executable")/." /opt/webperf/chrome/ \
     && rm -rf /opt/chrome; \
   fi
 # Production Compose uses Chromium's user-namespace sandbox together with
-# no-new-privileges. Keep packaged helpers non-setuid so alternate launch paths
-# cannot silently re-enable the privileged helper.
+# no-new-privileges. The product-specific path avoids distro AppArmor profiles
+# that target Chrome's conventional install path. Keep packaged helpers
+# non-setuid so alternate launch paths cannot silently re-enable the privileged
+# helper.
 RUN sandbox_path="$(find /opt /usr/lib -type f \( -name chrome-sandbox -o -name chrome_sandbox -o -name chromium-sandbox \) -print -quit 2>/dev/null)" \
   && test -n "$sandbox_path" \
   && chown root:root "$sandbox_path" \
   && chmod 0755 "$sandbox_path" \
-  && if [ -x /opt/google/chrome/chrome ] && [ "$sandbox_path" != "/opt/google/chrome/chrome-sandbox" ]; then cp -p "$sandbox_path" /opt/google/chrome/chrome-sandbox; fi \
-  && chown root:root /opt/google/chrome/chrome-sandbox \
-  && chmod 0755 /opt/google/chrome/chrome-sandbox \
-  && test -x /opt/google/chrome/chrome-sandbox \
-  && test ! -u /opt/google/chrome/chrome-sandbox
+  && if [ -x /opt/webperf/chrome/chrome ] && [ "$sandbox_path" != "/opt/webperf/chrome/chrome-sandbox" ]; then cp -p "$sandbox_path" /opt/webperf/chrome/chrome-sandbox; fi \
+  && chown root:root /opt/webperf/chrome/chrome-sandbox \
+  && chmod 0755 /opt/webperf/chrome/chrome-sandbox \
+  && test -x /opt/webperf/chrome/chrome-sandbox \
+  && test ! -u /opt/webperf/chrome/chrome-sandbox
 RUN chown -R bun:bun /workspace
 
 USER bun
@@ -110,7 +112,7 @@ ENV HOST=0.0.0.0
 ENV PORT=8080
 # Both architectures populate this path: amd64 copies the pinned Chrome build,
 # while arm64 links the distribution Chromium directory into it.
-ENV CHROME_INSTALL_DIR=/opt/google/chrome
+ENV CHROME_INSTALL_DIR=/opt/webperf/chrome
 
 EXPOSE 8080
 

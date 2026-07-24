@@ -104,12 +104,13 @@ profile is deliberately enabled.
 Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` when
 enabling the profile. The worker remains on its dedicated Compose network and
 does not publish a host port. On amd64, the image installs the explicitly pinned
-Chrome for Testing revision at `/opt/google/chrome/chrome`, matching Ubuntu's
-Chrome AppArmor profile path. Packaged sandbox helpers remain non-setuid and
-the runner explicitly selects Chromium's user-namespace sandbox. Compose
-applies `no-new-privileges` and a default-deny seccomp profile derived from Moby
-`seccomp/v0.2.1` with only `clone`, `setns`, and `unshare` added for Chromium's
-user-namespace sandbox; the production profile does not add `SYS_ADMIN`.
+Chrome for Testing revision under the product-specific `/opt/webperf/chrome`
+directory. This avoids host AppArmor profiles that target conventional Chrome
+installation paths while retaining Chromium's user-namespace sandbox. Packaged
+sandbox helpers remain non-setuid, and Compose applies `no-new-privileges` plus
+a default-deny seccomp profile derived from Moby `seccomp/v0.2.1` with only
+`clone`, `setns`, and `unshare` added for that sandbox; the production profile
+does not add `SYS_ADMIN` or launch Chrome with `--no-sandbox`.
 
 ## Docker Build
 

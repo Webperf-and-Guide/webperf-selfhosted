@@ -167,10 +167,18 @@ try {
   if (
     browserAuditDockerfile.includes('chmod 4755')
     || browserAuditDockerfile.includes('ENV CHROME_DEVEL_SANDBOX=')
-    || !browserAuditDockerfile.includes('test ! -u /opt/google/chrome/chrome-sandbox')
+    || !browserAuditDockerfile.includes('test ! -u /opt/webperf/chrome/chrome-sandbox')
   ) {
     violations.push(
       'browser-audit-lighthouse Dockerfile: packaged sandbox helpers must remain non-setuid'
+    );
+  }
+  if (
+    !browserAuditDockerfile.includes('ENV CHROME_INSTALL_DIR=/opt/webperf/chrome')
+    || browserAuditDockerfile.includes('/opt/google/chrome')
+  ) {
+    violations.push(
+      'browser-audit-lighthouse Dockerfile: Chrome must use the product-specific path to avoid host AppArmor profile collisions'
     );
   }
 } catch {

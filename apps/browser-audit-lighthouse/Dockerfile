@@ -9,8 +9,10 @@ ARG DEBIAN_CHROMIUM_SNAPSHOT=20260320T220114Z
 ARG TARGETARCH
 
 RUN install_runtime_dependencies() { \
-    apt-get "$@" update \
-    && apt-get "$@" install -y --allow-downgrades --no-install-recommends \
+    webperf_downgrade_option="$1" \
+    && shift \
+    && apt-get "$@" update \
+    && apt-get "$@" install -y ${webperf_downgrade_option:+"$webperf_downgrade_option"} --no-install-recommends \
       ca-certificates \
       fonts-liberation \
       libasound2 \
@@ -53,13 +55,15 @@ RUN install_runtime_dependencies() { \
     && rm -rf /var/lib/apt/lists/* \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
     && install_runtime_dependencies \
+      --allow-downgrades \
       -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list \
       -o Dir::Etc::sourceparts=- \
       -o Acquire::Check-Valid-Until=false; \
   else \
-    install_runtime_dependencies; \
+    install_runtime_dependencies ''; \
   fi \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -f /tmp/chromium-snapshot.list
 
 WORKDIR /workspace/webperf-selfhosted
 
@@ -86,6 +90,7 @@ WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     test "${DEBIAN_CHROMIUM_VERSION%%-*}" = "$CHROME_VERSION" \
+    && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
     && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false update \
     && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false install -y --allow-downgrades --no-install-recommends \
       "chromium=$DEBIAN_CHROMIUM_VERSION" "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \

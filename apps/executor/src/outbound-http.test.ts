@@ -43,6 +43,17 @@ describe('executor pinned outbound HTTP', () => {
       address: '127.42.0.8',
       family: 4
     });
+    await expect(resolveOutboundHttpTarget('http://localhost:8080/measure', {
+      addressPolicy: 'loopback',
+      lookupHost: async () => [{ address: '::1', family: 6 }]
+    })).resolves.toMatchObject({
+      address: '::1',
+      family: 6
+    });
+    await expect(resolveOutboundHttpTarget('http://localhost:8080/measure', {
+      addressPolicy: 'loopback',
+      lookupHost: async () => [{ address: '0:0:0:0:0:0:0:1', family: 6 }]
+    })).resolves.toMatchObject({ family: 6 });
 
     await expect(resolveOutboundHttpTarget('http://localhost:8080/measure', {
       addressPolicy: 'loopback',

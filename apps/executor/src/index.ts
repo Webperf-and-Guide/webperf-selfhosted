@@ -141,6 +141,7 @@ const main = async () => {
   if (
     runtime.SELFHOST_BROWSER_AUDIT_BASE_URL
     && runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP
+    && new URL(runtime.SELFHOST_BROWSER_AUDIT_BASE_URL).protocol === 'http:'
   ) {
     console.warn(JSON.stringify({
       service: 'webperf-executor',

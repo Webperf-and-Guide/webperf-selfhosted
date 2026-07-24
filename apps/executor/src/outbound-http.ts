@@ -102,7 +102,6 @@ for (const [network, prefix] of [
   blockedAddresses.addSubnet(network, prefix, 'ipv6');
 }
 
-
 for (const [network, prefix] of [
   ['::', 96],
   ['64:ff9b::', 96],
@@ -432,11 +431,10 @@ const isLoopbackAddress = (address: string) => {
     return address.split('.')[0] === '127';
   }
   if (family === 6) {
-    try {
-      return new URL(`http://[${address}]/`).hostname === '[::1]';
-    } catch {
-      return false;
-    }
+    const words = parseIpv6Words(address);
+    return words !== null
+      && words.slice(0, 7).every((word) => word === 0)
+      && words[7] === 1;
   }
   return false;
 };

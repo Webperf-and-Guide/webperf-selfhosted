@@ -190,10 +190,14 @@ try {
   if (
     !debianSnapshot
     || debianSnapshotSourceDefinitionCount !== 1
-    || debianSnapshotSourceUseCount < 2
+    || debianSnapshotSourceUseCount < 5
     || !browserAuditDockerfile.includes(debianSnapshotPreferenceDefinition)
     || !browserAuditDockerfile.includes('Dir::Etc::preferences=/tmp/chromium-snapshot.pref')
-    || browserAuditDockerfile.includes('Dir::Etc::sourceparts=-')
+    || !browserAuditDockerfile.includes('for package in chromium chromium-common chromium-sandbox')
+    || !browserAuditDockerfile.includes('Dir::Etc::sourceparts=-')
+    || !browserAuditDockerfile.includes('/tmp/chromium-debs/*.deb')
+    || !browserAuditDockerfile.includes('dpkg --unpack /tmp/chromium-debs/*.deb')
+    || !browserAuditDockerfile.includes("dpkg-query -W -f='${Version}'")
     || browserAuditDockerfile.includes('allow-downgrades')
     || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')
     || !browserAuditDockerfile.includes('"chromium-common=$DEBIAN_CHROMIUM_VERSION"')

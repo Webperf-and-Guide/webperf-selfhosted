@@ -70,20 +70,35 @@ COPY . /workspace/webperf-selfhosted
 
 WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
-# Resolve the exact arm64 browser packages from an immutable snapshot while
-# leaving the base image's Debian sources enabled. APT can then retain current
-# security-sensitive runtime libraries instead of downgrading the whole image.
+# Download the exact arm64 browser packages with the immutable snapshot as the
+# only source. Install those local packages after restoring the base image's
+# Debian sources, with the snapshot retained only as a low-priority fallback for
+# transitive packages unavailable from the current repositories.
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     test "${DEBIAN_CHROMIUM_VERSION%%-*}" = "$CHROME_VERSION" \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
     && printf 'Package: *\nPin: origin "snapshot.debian.org"\nPin-Priority: 100\n\nPackage: chromium chromium-common chromium-sandbox\nPin: version %s\nPin-Priority: 1001\n' "$DEBIAN_CHROMIUM_VERSION" > /tmp/chromium-snapshot.pref \
-    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Acquire::Check-Valid-Until=false update \
-    && apt-cache -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::preferences=/tmp/chromium-snapshot.pref policy chromium | grep -Fq "Candidate: $DEBIAN_CHROMIUM_VERSION" \
-    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::preferences=/tmp/chromium-snapshot.pref -o Acquire::Check-Valid-Until=false install -y --no-install-recommends \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false update \
+    && for package in chromium chromium-common chromium-sandbox; do \
+      apt-cache -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- policy "$package" \
+        | grep -Fq "Candidate: $DEBIAN_CHROMIUM_VERSION" || exit 1; \
+    done \
+    && install -d -o _apt -g root -m 0755 /tmp/chromium-debs \
+    && cd /tmp/chromium-debs \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false download \
       "chromium=$DEBIAN_CHROMIUM_VERSION" \
       "chromium-common=$DEBIAN_CHROMIUM_VERSION" \
       "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \
+    && test "$(find /tmp/chromium-debs -maxdepth 1 -type f -name '*.deb' | wc -l)" -eq 3 \
+    && cd / \
+    && dpkg --unpack /tmp/chromium-debs/*.deb \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Acquire::Check-Valid-Until=false update \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::preferences=/tmp/chromium-snapshot.pref -o Acquire::Check-Valid-Until=false --fix-broken install -y --no-install-recommends \
+    && for package in chromium chromium-common chromium-sandbox; do \
+      test "$(dpkg-query -W -f='${Version}' "$package")" = "$DEBIAN_CHROMIUM_VERSION" || exit 1; \
+    done \
     && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/chromium-debs \
     && rm -f /tmp/chromium-snapshot.list /tmp/chromium-snapshot.pref \
     && mkdir -p /opt/webperf \
     && ln -s /usr/lib/chromium /opt/webperf/chrome; \

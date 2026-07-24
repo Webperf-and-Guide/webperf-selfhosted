@@ -372,13 +372,9 @@ export class LocalBrowserAuditArtifactStore implements BrowserAuditArtifactStore
         continue;
       }
 
-      if (!auditEntry.isDirectory() || auditEntry.isSymbolicLink()) {
+      if (!auditEntry.isDirectory()) {
         await rm(auditPath, { recursive: true, force: true });
-        if (auditEntry.isDirectory()) {
-          removedDirectories += 1;
-        } else {
-          removedFiles += 1;
-        }
+        removedFiles += 1;
         continue;
       }
 

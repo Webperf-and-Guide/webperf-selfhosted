@@ -24,6 +24,7 @@ import {
   browserAuditArtifactLimit,
   browserAuditArtifactLocatorSchema,
   browserAuditArtifactRefSchema,
+  browserAuditArtifactRegistryVersion,
   browserAuditResourceSchema,
   checkProfileSchema,
   checkProfileRunSchema,
@@ -255,7 +256,7 @@ const normalizeBrowserAuditArtifactRecord = (
   if (
     !locator.success
     || !reference.success
-    || artifact.registryVersion !== 'v1'
+    || artifact.registryVersion !== browserAuditArtifactRegistryVersion
     || reference.data.filename === null
     || reference.data.byteSize === null
     || reference.data.sha256 === null

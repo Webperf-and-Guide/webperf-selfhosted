@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   constants,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -427,23 +428,28 @@ describe('local Browser Audit artifact storage', () => {
 
   test('preserves root entries outside the managed artifact-ID namespace', async () => {
     const root = join(createTempDirectory(), 'artifacts');
+    const outside = createTempDirectory();
     mkdirSync(join(root, 'lost+found'), { recursive: true });
+    writeFileSync(join(outside, 'outside-marker'), 'preserve');
     writeFileSync(join(root, 'lost+found', 'filesystem-marker'), 'preserve');
     writeFileSync(join(root, '.gitkeep'), 'preserve');
     writeFileSync(join(root, 'managed_conflict'), 'remove');
+    symlinkSync(outside, join(root, 'audit_link'));
     const store = new LocalBrowserAuditArtifactStore(root);
 
     expect(await store.reconcile(new Set(), {
       allowImmediateOrphanDeletion: true,
       minimumOrphanAgeMs: 0
     })).toEqual({
-      removedFiles: 1,
+      removedFiles: 2,
       removedDirectories: 0
     });
     expect(readFileSync(join(root, 'lost+found', 'filesystem-marker'), 'utf8'))
       .toBe('preserve');
     expect(readFileSync(join(root, '.gitkeep'), 'utf8')).toBe('preserve');
     expect(await Bun.file(join(root, 'managed_conflict')).exists()).toBe(false);
+    expect(existsSync(join(root, 'audit_link'))).toBe(false);
+    expect(readFileSync(join(outside, 'outside-marker'), 'utf8')).toBe('preserve');
   });
 });
 

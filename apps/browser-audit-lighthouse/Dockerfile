@@ -76,13 +76,15 @@ WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     test "${DEBIAN_CHROMIUM_VERSION%%-*}" = "$CHROME_VERSION" \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
+    && printf 'Package: *\nPin: origin "snapshot.debian.org"\nPin-Priority: 100\n\nPackage: chromium chromium-common chromium-sandbox\nPin: version %s\nPin-Priority: 1001\n' "$DEBIAN_CHROMIUM_VERSION" > /tmp/chromium-snapshot.pref \
     && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Acquire::Check-Valid-Until=false update \
-    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Acquire::Check-Valid-Until=false install -y --no-install-recommends \
+    && apt-cache -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::preferences=/tmp/chromium-snapshot.pref policy chromium | grep -Fq "Candidate: $DEBIAN_CHROMIUM_VERSION" \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::preferences=/tmp/chromium-snapshot.pref -o Acquire::Check-Valid-Until=false install -y --no-install-recommends \
       "chromium=$DEBIAN_CHROMIUM_VERSION" \
       "chromium-common=$DEBIAN_CHROMIUM_VERSION" \
       "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \
     && rm -rf /var/lib/apt/lists/* \
-    && rm -f /tmp/chromium-snapshot.list \
+    && rm -f /tmp/chromium-snapshot.list /tmp/chromium-snapshot.pref \
     && mkdir -p /opt/webperf \
     && ln -s /usr/lib/chromium /opt/webperf/chrome; \
   else \

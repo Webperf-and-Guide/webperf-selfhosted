@@ -89,7 +89,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=ci-probe
 
   images:
-    name: Image ${{ matrix.name }} (linux/amd64)
+    name: Image ${{ matrix.name }} (${{ matrix.platform }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -98,26 +98,44 @@ jobs:
         include:
           - name: console
             file: apps/console/Dockerfile
+            platform: linux/amd64
+            arch: amd64
           - name: api
             file: apps/api/Dockerfile
+            platform: linux/amd64
+            arch: amd64
           - name: scheduler
             file: apps/scheduler/Dockerfile
+            platform: linux/amd64
+            arch: amd64
           - name: executor
             file: apps/executor/Dockerfile
+            platform: linux/amd64
+            arch: amd64
           - name: browser-audit-lighthouse
             file: apps/browser-audit-lighthouse/Dockerfile
+            platform: linux/amd64
+            arch: amd64
+          - name: browser-audit-lighthouse
+            file: apps/browser-audit-lighthouse/Dockerfile
+            platform: linux/arm64
+            arch: arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        if: ${{ matrix.arch == 'arm64' }}
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ${{ matrix.file }}
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: false
           outputs: type=cacheonly
-          cache-from: type=gha,scope=ci-${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=ci-${{ matrix.name }}
+          cache-from: type=gha,scope=ci-${{ matrix.name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.name }}-${{ matrix.arch }}
 
   integration:
     name: Compose smoke (${{ matrix.profile }})

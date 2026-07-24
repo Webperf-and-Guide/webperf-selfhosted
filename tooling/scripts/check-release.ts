@@ -18,6 +18,13 @@ type WorkflowImageEntry = {
   image: string;
 };
 
+type WorkflowBuildEntry = {
+  name: string;
+  file: string;
+  platform: string;
+  arch: string;
+};
+
 type WorkflowDocument = {
   jobs?: Record<string, {
     strategy?: {
@@ -51,6 +58,16 @@ const developmentImageMatrix = parseImageMatrix(
   'ci.yml',
   'publish-dev-images'
 );
+const ciImageBuildMatrix = parseBuildMatrix(ciWorkflow, 'ci.yml', 'images');
+
+if (!ciImageBuildMatrix.some(
+  (entry) => entry.name === 'browser-audit-lighthouse'
+    && entry.file === 'apps/browser-audit-lighthouse/Dockerfile'
+    && entry.platform === 'linux/arm64'
+    && entry.arch === 'arm64'
+)) {
+  violations.push('ci.yml: Browser Audit image matrix must build the arm64 Dockerfile path');
+}
 
 let workflowFiles: string[] = [];
 try {
@@ -113,6 +130,14 @@ if (
 if (ciWorkflow !== undefined && ciWorkflow.includes(':latest')) {
   violations.push('ci.yml: the mutable latest tag is not part of the development channel');
 }
+for (const requiredFragment of [
+  'docker/setup-qemu-action@',
+  'platforms: ${{ matrix.platform }}'
+]) {
+  if (ciWorkflow !== undefined && !ciWorkflow.includes(requiredFragment)) {
+    violations.push(`ci.yml: missing arm64 build invariant ${requiredFragment}`);
+  }
+}
 
 try {
   const browserAuditDockerfile = readFileSync(
@@ -125,6 +150,7 @@ try {
   const debianSnapshot = browserAuditDockerfile
     .match(/^ARG DEBIAN_CHROMIUM_SNAPSHOT=(\d{8}T\d{6}Z)$/m)?.[1];
   const debianSnapshotSourceDefinition = `printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list`;
+  const debianSnapshotPreferenceDefinition = `printf 'Package: *\\nPin: origin "snapshot.debian.org"\\nPin-Priority: 100\\n\\nPackage: chromium chromium-common chromium-sandbox\\nPin: version %s\\nPin-Priority: 1001\\n' "$DEBIAN_CHROMIUM_VERSION" > /tmp/chromium-snapshot.pref`;
   const debianSnapshotSourceDefinitionCount = browserAuditDockerfile
     .split(debianSnapshotSourceDefinition).length - 1;
   const debianSnapshotSourceUseCount = browserAuditDockerfile
@@ -163,6 +189,8 @@ try {
     !debianSnapshot
     || debianSnapshotSourceDefinitionCount !== 1
     || debianSnapshotSourceUseCount < 2
+    || !browserAuditDockerfile.includes(debianSnapshotPreferenceDefinition)
+    || !browserAuditDockerfile.includes('Dir::Etc::preferences=/tmp/chromium-snapshot.pref')
     || browserAuditDockerfile.includes('Dir::Etc::sourceparts=-')
     || browserAuditDockerfile.includes('allow-downgrades')
     || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')
@@ -255,6 +283,34 @@ function parseImageMatrix(
   file: string,
   jobId: string
 ): WorkflowImageEntry[] {
+  return parseMatrixInclude(content, file, jobId).filter(
+    (entry): entry is WorkflowImageEntry => (
+      typeof entry.name === 'string'
+      && typeof entry.image === 'string'
+    )
+  );
+}
+
+function parseBuildMatrix(
+  content: string | undefined,
+  file: string,
+  jobId: string
+): WorkflowBuildEntry[] {
+  return parseMatrixInclude(content, file, jobId).filter(
+    (entry): entry is WorkflowBuildEntry => (
+      typeof entry.name === 'string'
+      && typeof entry.file === 'string'
+      && typeof entry.platform === 'string'
+      && typeof entry.arch === 'string'
+    )
+  );
+}
+
+function parseMatrixInclude(
+  content: string | undefined,
+  file: string,
+  jobId: string
+): Record<string, unknown>[] {
   if (content === undefined) {
     return [];
   }
@@ -274,15 +330,13 @@ function parseImageMatrix(
 
   const include = (document as WorkflowDocument).jobs?.[jobId]?.strategy?.matrix?.include;
   if (!Array.isArray(include)) {
-    violations.push(`${file}: ${jobId} image matrix include list is missing`);
+    violations.push(`${file}: ${jobId} matrix include list is missing`);
     return [];
   }
 
   return include.filter(
-    (entry): entry is WorkflowImageEntry => (
+    (entry): entry is Record<string, unknown> => (
       Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
-      && typeof (entry as Record<string, unknown>).name === 'string'
-      && typeof (entry as Record<string, unknown>).image === 'string'
     )
   );
 }

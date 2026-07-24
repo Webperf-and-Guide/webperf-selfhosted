@@ -66,10 +66,12 @@ expansions. Use them only with isolated networks and documented ownership.
 The optional runner uses Chromium's user-namespace sandbox with
 `no-new-privileges`, no executable temporary mounts, and no default
 `SYS_ADMIN`. On AppArmor 4 hosts, load the bundled `browser-audit.apparmor`
-profile and use `compose.apparmor.yml`; this preserves Moby's default container
-restrictions while granting the sandbox's `userns` permission. Do not disable
-AppArmor globally or add a public port. Treat a no-sandbox exception as a
-degraded, isolated runtime with no access to sensitive workloads.
+profile and use `compose.apparmor.yml`; this selects Chromium's recommended
+unconfined `userns` allowlist for only that service without disabling AppArmor
+globally. Default-deny seccomp, cap-drop ALL, the read-only filesystem, private
+networking, and Chromium's own sandbox remain enforced. Do not add a public
+port. Treat a no-sandbox exception as a degraded, isolated runtime with no
+access to sensitive workloads.
 
 ## Operational controls
 

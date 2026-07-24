@@ -43,8 +43,12 @@ production profile uses Chromium's user-namespace sandbox, a non-root runtime,
 default `SYS_ADMIN`, and one in-flight audit per worker. Packaged setuid helpers
 are kept non-setuid and the runner explicitly disables the setuid sandbox path;
 do not replace that policy with `--no-sandbox` in a production deployment. The
-AppArmor overlay derives from Moby's default container profile and adds only
-the explicit `userns` permission; it does not make the container unconfined.
+AppArmor overlay follows Chromium's AppArmor 4 guidance: it selects an
+unconfined profile with the explicit `userns` permission only for this service
+instead of disabling the host restriction globally. The container remains
+bounded by its default-deny seccomp policy, dropped capabilities,
+no-new-privileges, read-only filesystem, private network, and Chromium's own
+sandbox.
 The amd64 image pins its exact Chrome for Testing revision in the Dockerfile,
 keeps it aligned with the locked `puppeteer-core` package, and never follows
 the mutable `stable` channel.

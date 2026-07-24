@@ -1,45 +1,17 @@
-# Derived from the Apache-2.0 Moby default AppArmor profile at
-# moby/profiles commit 9ab5a6f7e286e9c0b56733abb95876c2d1815beb.
-# WebPerf adds only the AppArmor 4 user-namespace permission required by
-# Chromium's non-setuid sandbox and an explicit Unix-socket network rule for
-# the AppArmor 4 ABI.
+# Ubuntu 24.04 restricts unprivileged user namespaces unless the executable is
+# covered by an AppArmor 4 profile that grants `userns`. Chromium recommends an
+# unconfined, path-scoped allowlist profile for downloaded Chrome builds rather
+# than disabling the host restriction globally. Docker selects this profile by
+# name only for the Browser Audit container; the runtime remains bounded by its
+# non-root UID, read-only filesystem, cap-drop ALL, no-new-privileges, custom
+# default-deny seccomp policy, private network, and Chromium's own sandbox.
+#
+# Reference:
+# https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
 abi <abi/4.0>,
 
 #include <tunables/global>
 
-profile "webperf-browser-audit" flags=(attach_disconnected,mediate_deleted) {
-  network,
-  network unix,
-  deny network alg,
-  capability,
-  file,
-  umount,
+profile "webperf-browser-audit" flags=(unconfined) {
   userns,
-
-  # Host runtimes must be able to stop the container, and processes within
-  # the container must be able to signal one another.
-  signal (receive) peer=unconfined,
-  signal (receive) peer=runc,
-  signal (receive) peer=crun,
-  signal (send,receive) peer="webperf-browser-audit",
-
-  deny @{PROC}/* w,
-  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
-  deny @{PROC}/sys/[^k]** w,
-  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
-  deny @{PROC}/sysrq-trigger rwklx,
-  deny @{PROC}/kcore rwklx,
-
-  deny mount,
-
-  deny /sys/[^f]*/** wklx,
-  deny /sys/f[^s]*/** wklx,
-  deny /sys/fs/[^c]*/** wklx,
-  deny /sys/fs/c[^g]*/** wklx,
-  deny /sys/fs/cg[^r]*/** wklx,
-  deny /sys/firmware/** rwklx,
-  deny /sys/devices/virtual/powercap/** rwklx,
-  deny /sys/kernel/security/** rwklx,
-
-  ptrace (trace,tracedby,read,readby) peer="webperf-browser-audit",
 }

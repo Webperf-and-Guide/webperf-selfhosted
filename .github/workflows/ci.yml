@@ -153,11 +153,11 @@ jobs:
         if: ${{ failure() && matrix.profile == 'browser-audit' }}
         run: |
           set -o pipefail
-          if sudo journalctl --dmesg --no-pager --since '-20 minutes' > /tmp/webperf-kernel.log 2>/dev/null; then
-            grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' /tmp/webperf-kernel.log | tail -n 200 || true
-          else
-            sudo dmesg 2>/dev/null | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 200 || true
-          fi
+          {
+            sudo journalctl --dmesg --no-pager --since '-20 minutes' 2>/dev/null || true
+            sudo dmesg 2>/dev/null || true
+            sudo tail -n 2000 /var/log/kern.log /var/log/syslog 2>/dev/null || true
+          } | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 200 || true
 
   required:
     name: Required CI

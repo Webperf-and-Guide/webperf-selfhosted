@@ -71,11 +71,12 @@ enabled without adding `SYS_ADMIN`. Compose applies the checked-in
 default profile and adds only the `clone`, `setns`, and `unshare` permissions
 recommended for a non-root Chromium user-namespace sandbox. The vendored
 Apache-2.0 source is Moby `default.json` blob
-`ea5a494afb8d64898fa0f4f47ae0c4f5ba9cbbc9`. The AppArmor profile derives
-from the Apache-2.0 Moby default profile at commit
-`9ab5a6f7e286e9c0b56733abb95876c2d1815beb`, keeps those container restrictions,
-and adds only AppArmor 4's `userns` permission plus the ABI's explicit Unix
-socket rule.
+`ea5a494afb8d64898fa0f4f47ae0c4f5ba9cbbc9`. Following Chromium's AppArmor 4
+guidance, the host overlay selects an unconfined profile with the explicit
+`userns` permission only for this service. It does not disable AppArmor
+globally; runtime confinement remains enforced by the default-deny seccomp
+profile, non-root UID, dropped capabilities, no-new-privileges, read-only
+filesystem, private network, and Chromium's own sandbox.
 
 ## Loopback Debug Profile
 

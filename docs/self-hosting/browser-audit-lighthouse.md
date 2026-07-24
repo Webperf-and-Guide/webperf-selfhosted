@@ -116,9 +116,12 @@ docker compose \
   up -d
 ```
 
-The AppArmor profile derives from Moby's default container policy, remains
-confined, and adds the explicit `userns` permission required by Chromium. Omit
-the overlay on hosts without AppArmor user-namespace restrictions.
+The AppArmor profile follows Chromium's AppArmor 4 guidance: it is an
+unconfined `userns` allowlist selected only for the Browser Audit service. It
+does not disable the host restriction globally. Default-deny seccomp, the
+non-root UID, cap-drop ALL, no-new-privileges, read-only filesystem, private
+network, and Chromium's own sandbox remain the runtime boundaries. Omit the
+overlay on hosts without AppArmor user-namespace restrictions.
 
 Set `SELFHOST_BROWSER_AUDIT_BASE_URL=http://browser-audit-lighthouse:8080` when
 enabling the profile. The worker remains on its dedicated Compose network and

@@ -417,10 +417,9 @@ function assertBrowserAppArmorProfile() {
     'Browser AppArmor profile must explicitly allow user namespaces under the AppArmor 4 ABI'
   );
   assert(
-    /^\s*deny mount,$/m.test(profile)
-      && !profile.includes('flags=(unconfined)')
+    profile.includes('flags=(unconfined)')
       && !profile.includes('capability sys_admin'),
-    'Browser AppArmor profile must retain container confinement without SYS_ADMIN'
+    'Browser AppArmor profile must use Chromium\'s selective userns allowlist without SYS_ADMIN'
   );
 }
 

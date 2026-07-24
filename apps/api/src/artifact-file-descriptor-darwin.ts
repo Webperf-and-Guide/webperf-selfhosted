@@ -81,83 +81,126 @@ export const unlinkDarwinDirectoryEntry = (
 };
 
 const createRawArtifactFileHandle = (descriptor: number): DarwinArtifactFileHandle => {
-  let closed = false;
+  let state: 'open' | 'closing' | 'closed' = 'open';
+  let closePromise: Promise<void> | null = null;
+  const pendingOperations = new Set<Promise<unknown>>();
+
+  const assertOpen = () => {
+    if (state !== 'open') {
+      throw new Error('Browser Audit artifact file handle is closed');
+    }
+  };
+
+  const track = <Result>(operation: Promise<Result>) => {
+    pendingOperations.add(operation);
+    void operation.finally(() => pendingOperations.delete(operation)).catch(() => undefined);
+    return operation;
+  };
 
   return {
     fd: descriptor,
-    write: (buffer, offset, length) => new Promise((resolveWrite, rejectWrite) => {
-      writeFileDescriptor(
-        descriptor,
-        buffer,
-        offset,
-        length,
-        null,
-        (error, bytesWritten) => {
+    write: (buffer, offset, length) => {
+      assertOpen();
+      return track(new Promise((resolveWrite, rejectWrite) => {
+        writeFileDescriptor(
+          descriptor,
+          buffer,
+          offset,
+          length,
+          null,
+          (error, bytesWritten) => {
+            if (error) {
+              rejectWrite(error);
+              return;
+            }
+            resolveWrite({ bytesWritten });
+          }
+        );
+      }));
+    },
+    read: (buffer, offset, length, position) => {
+      assertOpen();
+      return track(new Promise((resolveRead, rejectRead) => {
+        readFileDescriptor(
+          descriptor,
+          buffer,
+          offset,
+          length,
+          position,
+          (error, bytesRead) => {
+            if (error) {
+              rejectRead(error);
+              return;
+            }
+            resolveRead({ bytesRead });
+          }
+        );
+      }));
+    },
+    stat: () => {
+      assertOpen();
+      return track(new Promise((resolveStat, rejectStat) => {
+        fstat(descriptor, (error, stats) => {
           if (error) {
-            rejectWrite(error);
+            rejectStat(error);
             return;
           }
-          resolveWrite({ bytesWritten });
-        }
-      );
-    }),
-    read: (buffer, offset, length, position) => new Promise((resolveRead, rejectRead) => {
-      readFileDescriptor(
-        descriptor,
-        buffer,
-        offset,
-        length,
-        position,
-        (error, bytesRead) => {
+          resolveStat(stats);
+        });
+      }));
+    },
+    sync: () => {
+      assertOpen();
+      return track(new Promise((resolveSync, rejectSync) => {
+        fsync(descriptor, (error) => {
           if (error) {
-            rejectRead(error);
+            rejectSync(error);
             return;
           }
-          resolveRead({ bytesRead });
-        }
-      );
-    }),
-    stat: () => new Promise((resolveStat, rejectStat) => {
-      fstat(descriptor, (error, stats) => {
-        if (error) {
-          rejectStat(error);
-          return;
-        }
-        resolveStat(stats);
-      });
-    }),
-    sync: () => new Promise((resolveSync, rejectSync) => {
-      fsync(descriptor, (error) => {
-        if (error) {
-          rejectSync(error);
-          return;
-        }
-        resolveSync();
-      });
-    }),
-    chmod: (mode) => new Promise((resolveChmod, rejectChmod) => {
-      fchmod(descriptor, mode, (error) => {
-        if (error) {
-          rejectChmod(error);
-          return;
-        }
-        resolveChmod();
-      });
-    }),
+          resolveSync();
+        });
+      }));
+    },
+    chmod: (mode) => {
+      assertOpen();
+      return track(new Promise((resolveChmod, rejectChmod) => {
+        fchmod(descriptor, mode, (error) => {
+          if (error) {
+            rejectChmod(error);
+            return;
+          }
+          resolveChmod();
+        });
+      }));
+    },
     close: () => {
-      if (closed) {
+      if (state === 'closed') {
         return Promise.resolve();
       }
-      closed = true;
-      return new Promise((resolveClose, rejectClose) => {
-        closeFileDescriptor(descriptor, (error) => {
-          if (error) {
-            rejectClose(error);
-            return;
-          }
-          resolveClose();
-        });
-      });
+      if (closePromise) {
+        return closePromise;
+      }
+
+      state = 'closing';
+      closePromise = (async () => {
+        await Promise.allSettled([...pendingOperations]);
+        try {
+          await new Promise<void>((resolveClose, rejectClose) => {
+            closeFileDescriptor(descriptor, (error) => {
+              if (error) {
+                rejectClose(error);
+                return;
+              }
+              resolveClose();
+            });
+          });
+        } finally {
+          // POSIX leaves descriptor state unspecified after a close error.
+          // Retrying could close a newly reused fd, so fail closed permanently.
+          state = 'closed';
+        }
+      })();
+      return closePromise;
     }
   };
 };
@@ -214,10 +257,10 @@ const loadDarwinDirectoryBinding = (): DarwinDirectoryBinding => {
   };
 
   return {
-    openat: (...arguments_) => symbols.openat(...arguments_),
-    linkat: (...arguments_) => symbols.linkat(...arguments_),
-    unlinkat: (...arguments_) => symbols.unlinkat(...arguments_),
-    errno: () => symbols.__error()
+    openat: symbols.openat,
+    linkat: symbols.linkat,
+    unlinkat: symbols.unlinkat,
+    errno: symbols.__error
   };
 };
 

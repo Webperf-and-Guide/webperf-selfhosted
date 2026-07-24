@@ -215,6 +215,8 @@ export const redactUrlsInText = (value: string) =>
   value.replace(/https?:\/\/[^\s"'<>,;)}\]|]+/gi, (candidate) => redactUrlQuery(candidate));
 
 const redactDiagnosticText = (value: string) => {
+  // Preserve safe operator context while replacing only values attached to a
+  // credential cue; generic messages that merely mention a secret stay useful.
   return redactUrlsInText(value)
     .replace(diagnosticBearerPattern, `$1${redactedValue}`)
     .replace(diagnosticAssignmentPattern, `$1${redactedValue}`)

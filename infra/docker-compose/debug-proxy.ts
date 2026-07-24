@@ -6,6 +6,8 @@ import {
   stripHopByHopHeaders
 } from './debug-proxy-policy';
 
+const debugProxyUpstreamTimeoutMs = 30_000;
+
 function readTarget() {
   const value = process.env.DEBUG_PROXY_TARGET?.trim();
 
@@ -68,7 +70,10 @@ Bun.serve({
         headers,
         body,
         redirect: 'manual',
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)])
+        signal: AbortSignal.any([
+          request.signal,
+          AbortSignal.timeout(debugProxyUpstreamTimeoutMs)
+        ])
       });
       const responseHeaders = new Headers(upstreamResponse.headers);
       stripHopByHopHeaders(responseHeaders);

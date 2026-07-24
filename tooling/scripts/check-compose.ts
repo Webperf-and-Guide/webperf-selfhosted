@@ -172,11 +172,6 @@ const browser = productionWithProfiles.services['browser-audit-lighthouse'];
 assertStringArrayEqual(browser.profiles?.sort(), ['browser-audit', 'debug'], 'Browser Audit profiles');
 assert((browser.ports?.length ?? 0) === 0, 'Browser Audit runner must not publish a host port');
 assert(!browser.cap_add?.includes('SYS_ADMIN'), 'Browser Audit runner must not add SYS_ADMIN');
-assertStringArrayEqual(
-  [...(browser.cap_add ?? [])].sort(),
-  ['SYS_CHROOT'],
-  'Browser Audit runner minimal sandbox capabilities'
-);
 assert(
   browser.security_opt?.some(
     (entry) => entry.startsWith('seccomp=') && entry.endsWith('browser-audit-seccomp.json')

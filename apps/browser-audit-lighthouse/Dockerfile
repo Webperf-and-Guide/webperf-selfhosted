@@ -9,10 +9,8 @@ ARG DEBIAN_CHROMIUM_SNAPSHOT=20260320T220114Z
 ARG TARGETARCH
 
 RUN install_runtime_dependencies() { \
-    webperf_downgrade_option="$1" \
-    && shift \
-    && apt-get "$@" update \
-    && apt-get "$@" install -y ${webperf_downgrade_option:+"$webperf_downgrade_option"} --no-install-recommends \
+    apt-get "$@" update \
+    && apt-get "$@" install -y --no-install-recommends \
       ca-certificates \
       fonts-liberation \
       libasound2 \
@@ -55,12 +53,12 @@ RUN install_runtime_dependencies() { \
     && rm -rf /var/lib/apt/lists/* \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
     && install_runtime_dependencies \
-      --allow-downgrades \
+      -o APT::Get::allow-Downgrades=true \
       -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list \
       -o Dir::Etc::sourceparts=- \
       -o Acquire::Check-Valid-Until=false; \
   else \
-    install_runtime_dependencies ''; \
+    install_runtime_dependencies; \
   fi \
   && rm -rf /var/lib/apt/lists/* \
   && rm -f /tmp/chromium-snapshot.list

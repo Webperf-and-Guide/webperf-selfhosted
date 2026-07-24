@@ -124,6 +124,9 @@ try {
     .match(/^ARG DEBIAN_CHROMIUM_VERSION=(\S+)$/m)?.[1];
   const debianSnapshot = browserAuditDockerfile
     .match(/^ARG DEBIAN_CHROMIUM_SNAPSHOT=(\d{8}T\d{6}Z)$/m)?.[1];
+  const debianSnapshotSourceDefinition = `printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list`;
+  const debianSnapshotSourceDefinitionCount = browserAuditDockerfile
+    .split(debianSnapshotSourceDefinition).length - 1;
   const debianSnapshotSourceUseCount = browserAuditDockerfile
     .match(/Dir::Etc::sourcelist=\/tmp\/chromium-snapshot\.list/g)?.length ?? 0;
   let puppeteerChromeVersion: string | undefined;
@@ -158,12 +161,7 @@ try {
   }
   if (
     !debianSnapshot
-    || !browserAuditDockerfile.includes(
-      'snapshot.debian.org/archive/debian/%s/'
-    )
-    || !browserAuditDockerfile.includes(
-      'snapshot.debian.org/archive/debian-security/%s/'
-    )
+    || debianSnapshotSourceDefinitionCount !== 2
     || debianSnapshotSourceUseCount < 2
     || !browserAuditDockerfile.includes('--allow-downgrades --no-install-recommends')
     || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')

@@ -1,5 +1,8 @@
 import type { SqliteMigration } from './types';
 
+export const browserAuditArtifactLimitTriggerName =
+  'browser_audit_artifacts_limit_before_insert';
+
 export const browserAuditArtifactsMigration: SqliteMigration = {
   id: '20260722_003_browser_audit_artifacts',
   up(database) {
@@ -22,7 +25,7 @@ export const browserAuditArtifactsMigration: SqliteMigration = {
 
       -- Keep this immutable threshold aligned with
       -- maximumBrowserAuditArtifactsPerAudit in apps/api/src/repository.ts.
-      CREATE TRIGGER IF NOT EXISTS browser_audit_artifacts_limit_before_insert
+      CREATE TRIGGER IF NOT EXISTS ${browserAuditArtifactLimitTriggerName}
       BEFORE INSERT ON browser_audit_artifacts
       WHEN (
         SELECT COUNT(*)

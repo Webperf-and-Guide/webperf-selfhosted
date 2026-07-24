@@ -549,6 +549,36 @@ describe('Browser Audit artifact indexes', () => {
     expect(isBrowserAuditArtifactLimitConstraint(null)).toBe(false);
   });
 
+  test('rejects a persisted artifact-limit trigger that drifts from the contract', () => {
+    const databasePath = join(createTempDirectory(), 'webperf.sqlite');
+    createSqliteJobRepository({
+      databasePath,
+      encryptionSecret: 'artifact-trigger-encryption-secret'
+    }).close();
+    const database = new Database(databasePath);
+    database.exec(`
+      DROP TRIGGER browser_audit_artifacts_limit_before_insert;
+      CREATE TRIGGER browser_audit_artifacts_limit_before_insert
+      BEFORE INSERT ON browser_audit_artifacts
+      WHEN (
+        SELECT COUNT(*)
+        FROM browser_audit_artifacts
+        WHERE audit_id = NEW.audit_id
+      ) >= 49
+      BEGIN
+        SELECT RAISE(ABORT, 'browser_audit_artifact_limit');
+      END;
+    `);
+    database.close();
+
+    expect(() => createSqliteJobRepository({
+      databasePath,
+      encryptionSecret: 'artifact-trigger-encryption-secret'
+    })).toThrow('must enforce exactly 50 artifacts per audit');
+    const reopened = new Database(databasePath);
+    reopened.close();
+  });
+
   test('persists metadata in SQLite without storing binary payloads', () => {
     const databasePath = join(createTempDirectory(), 'webperf.sqlite');
     const repository = createSqliteJobRepository({

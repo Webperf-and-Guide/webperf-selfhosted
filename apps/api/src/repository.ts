@@ -45,6 +45,7 @@ import {
   regionPackSchema,
   routeSetSchema
 } from '@webperf/contracts';
+import type { Database } from 'bun:sqlite';
 import { existsSync, statSync } from 'node:fs';
 import {
   createStorageCrypto,
@@ -59,11 +60,41 @@ import {
   type SqliteRetentionResult
 } from './database/operations';
 import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
+import {
+  browserAuditArtifactLimitTriggerName
+} from './database/migrations/20260722_003_browser_audit_artifacts';
 
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.
 const maximumBrowserAuditArtifactsPerAudit = browserAuditArtifactLimit;
 const browserAuditArtifactLimitConstraintMarker = 'browser_audit_artifact_limit';
+export const executionExhaustionFinalizationBatchSize = 50;
+
+const assertBrowserAuditArtifactLimitTrigger = (database: Database) => {
+  const definition = database.query<{ sql: string | null }, [string]>(`
+    SELECT sql
+    FROM sqlite_master
+    WHERE type = 'trigger' AND name = ?
+    LIMIT 1
+  `).get(browserAuditArtifactLimitTriggerName)?.sql;
+  const triggerSql = definition ?? '';
+  const threshold = triggerSql.match(
+    /where\s+audit_id\s*=\s*new\.audit_id\s*\)\s*>=\s*(\d+)/i
+  )?.[1];
+  const valid = /before\s+insert\s+on\s+browser_audit_artifacts/i.test(triggerSql)
+    && new RegExp(
+      `raise\\s*\\(\\s*abort\\s*,\\s*['"]${browserAuditArtifactLimitConstraintMarker}['"]\\s*\\)`,
+      'i'
+    ).test(triggerSql)
+    && Number(threshold) === maximumBrowserAuditArtifactsPerAudit;
+
+  if (!valid) {
+    throw new Error(
+      'Browser Audit artifact limit trigger must enforce exactly '
+      + `${maximumBrowserAuditArtifactsPerAudit} artifacts per audit`
+    );
+  }
+};
 
 export const isBrowserAuditArtifactLimitConstraint = (error: unknown) => {
   const candidate = error as { code?: unknown; message?: unknown } | null;
@@ -326,6 +357,7 @@ export const createSqliteJobRepository = ({
           }
         : undefined
     );
+    assertBrowserAuditArtifactLimitTrigger(db);
   } catch (error) {
     db.close();
     throw error;
@@ -483,7 +515,8 @@ export const createSqliteJobRepository = ({
     string,
     string,
     string,
-    string
+    string,
+    number
   ]>(`
     UPDATE execution_jobs
     SET status = 'failed',
@@ -492,10 +525,16 @@ export const createSqliteJobRepository = ({
         error_json = ?,
         updated_at = ?,
         completed_at = ?
-    WHERE attempt_count >= max_attempts
-      AND (
-        (status = 'queued' AND available_at <= ?)
-        OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
+    WHERE id IN (
+      SELECT id
+      FROM execution_jobs
+      WHERE attempt_count >= max_attempts
+        AND (
+          (status = 'queued' AND available_at <= ?)
+          OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
+        )
+      ORDER BY available_at ASC, created_at ASC, id ASC
+      LIMIT ?
       )
     RETURNING *
   `);
@@ -1175,7 +1214,8 @@ export const createSqliteJobRepository = ({
           nowIso,
           nowIso,
           nowIso,
-          nowIso
+          nowIso,
+          executionExhaustionFinalizationBatchSize
         );
         for (const row of exhaustedRows) {
           const executionJob = parseExecutionJob(row);

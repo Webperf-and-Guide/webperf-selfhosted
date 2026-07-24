@@ -12,7 +12,10 @@ import {
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSqliteJobRepository } from '../src/repository';
+import {
+  createSqliteJobRepository,
+  executionExhaustionFinalizationBatchSize
+} from '../src/repository';
 
 const tempDirs: string[] = [];
 const encryptionSecret = 'execution-repository-test-secret';
@@ -289,6 +292,59 @@ describe('durable execution repository', () => {
     expect(failed?.status).toBe('failed');
     expect(failed?.error?.code).toBe('lease_attempts_exhausted');
     expect(failed?.completedAt).toBe('2026-07-22T00:00:04.000Z');
+
+    repository.close();
+  });
+
+  test('bounds exhausted-job finalization without blocking an eligible claim', () => {
+    const databasePath = createTempDatabasePath();
+    let repository = createRepository(databasePath);
+    const queuedAt = new Date('2026-07-22T00:00:00.000Z');
+    const exhaustedCount = executionExhaustionFinalizationBatchSize + 5;
+
+    for (let index = 0; index < exhaustedCount; index += 1) {
+      const auditId = `audit_exhausted_${String(index).padStart(3, '0')}`;
+      repository.enqueueExecutionJob({
+        id: `exec_${auditId}`,
+        kind: 'browser_audit',
+        resourceId: auditId,
+        maxAttempts: 1,
+        payload: { version: 'v1', auditId }
+      }, queuedAt);
+    }
+    repository.enqueueExecutionJob({
+      id: 'exec_audit_eligible_after_exhausted',
+      kind: 'browser_audit',
+      resourceId: 'audit_eligible_after_exhausted',
+      maxAttempts: 1,
+      payload: {
+        version: 'v1',
+        auditId: 'audit_eligible_after_exhausted'
+      }
+    }, queuedAt);
+    repository.close();
+
+    const database = new Database(databasePath);
+    database.query(`
+      UPDATE execution_jobs
+      SET attempt_count = max_attempts
+      WHERE id LIKE 'exec_audit_exhausted_%'
+    `).run();
+    database.close();
+
+    repository = createRepository(databasePath);
+    expect(repository.claimExecutionJob(
+      { leaseOwner: 'executor-bounded', leaseDurationMs: 10_000 },
+      queuedAt
+    )?.id).toBe('exec_audit_eligible_after_exhausted');
+    expect(repository.listExecutionJobs().filter((job) => job.status === 'failed'))
+      .toHaveLength(executionExhaustionFinalizationBatchSize);
+    expect(repository.claimExecutionJob(
+      { leaseOwner: 'executor-next-batch', leaseDurationMs: 10_000 },
+      queuedAt
+    )).toBeNull();
+    expect(repository.listExecutionJobs().filter((job) => job.status === 'failed'))
+      .toHaveLength(exhaustedCount);
 
     repository.close();
   });

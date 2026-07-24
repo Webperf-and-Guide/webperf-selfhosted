@@ -88,6 +88,8 @@ COPY . /workspace/webperf-selfhosted
 
 WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
+# Keep this source definition aligned with the runtime-dependency RUN above.
+# Recreating it here keeps the Chromium install layer self-contained.
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     test "${DEBIAN_CHROMIUM_VERSION%%-*}" = "$CHROME_VERSION" \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \

@@ -136,12 +136,13 @@ downloaded through the authenticated API/console. The size and upload lifetime
 can be tuned with `SELFHOST_MAX_ARTIFACT_BYTES` and
 `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`.
 The profile uses Chrome's user-namespace sandbox with `no-new-privileges`,
-non-executable temporary mounts, and no `SYS_ADMIN`. The AppArmor overlay keeps
-the host restriction enabled globally while selecting Chromium's recommended
-unconfined `userns` allowlist only for the Browser Audit service. The container
-remains bounded by its default-deny seccomp policy, dropped capabilities,
-read-only filesystem, private network, and Chrome sandbox. One runner accepts
-at most one in-flight audit.
+non-executable temporary mounts, and no `SYS_ADMIN`. Compose drops all Linux
+capabilities and restores only `SYS_CHROOT`, which Chromium needs to enter its
+sandbox root. The AppArmor overlay keeps the host restriction enabled globally
+while selecting Chromium's recommended unconfined `userns` allowlist only for
+the Browser Audit service. The container remains bounded by its default-deny
+seccomp policy, read-only filesystem, private network, and Chrome sandbox. One
+runner accepts at most one in-flight audit.
 
 For direct API debugging only, start the loopback proxy and then send an
 administrator-authenticated request:

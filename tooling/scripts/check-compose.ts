@@ -51,6 +51,9 @@ const expectedImages: Record<string, string> = {
   scheduler: 'webperf-scheduler',
   'browser-audit-lighthouse': 'webperf-browser-audit-lighthouse'
 };
+const expectedCapabilityAdditions: Record<string, string[]> = {
+  'browser-audit-lighthouse': ['SYS_CHROOT']
+};
 const nonRootNumericUserPattern = /^[1-9]\d*(?::[1-9]\d*)?$/;
 
 assert(nonRootNumericUserPattern.test('1000'), 'numeric non-root UID must be accepted');
@@ -106,7 +109,11 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
     service.cap_drop?.includes('ALL'),
     `${name} must drop all Linux capabilities`
   );
-  assert((service.cap_add?.length ?? 0) === 0, `${name} must not add Linux capabilities`);
+  assertStringArrayEqual(
+    [...(service.cap_add ?? [])].sort(),
+    [...(expectedCapabilityAdditions[name] ?? [])].sort(),
+    `${name} capability additions`
+  );
   assert(service.privileged !== true, `${name} must not run privileged`);
   assert(
     privilegeOptions.length === 1 && privilegeOptions[0] === 'no-new-privileges:true',
@@ -165,6 +172,11 @@ const browser = productionWithProfiles.services['browser-audit-lighthouse'];
 assertStringArrayEqual(browser.profiles?.sort(), ['browser-audit', 'debug'], 'Browser Audit profiles');
 assert((browser.ports?.length ?? 0) === 0, 'Browser Audit runner must not publish a host port');
 assert(!browser.cap_add?.includes('SYS_ADMIN'), 'Browser Audit runner must not add SYS_ADMIN');
+assertStringArrayEqual(
+  browser.cap_add,
+  ['SYS_CHROOT'],
+  'Browser Audit runner minimal sandbox capabilities'
+);
 assert(
   browser.security_opt?.some(
     (entry) => entry.startsWith('seccomp=') && entry.endsWith('browser-audit-seccomp.json')

@@ -40,15 +40,16 @@ user-namespace restrictions.
 The runner remains on its dedicated internal network with no host port. The
 production profile uses Chromium's user-namespace sandbox, a non-root runtime,
 `no-new-privileges`, non-executable temporary mounts, 1 GiB of `/dev/shm`, no
-default `SYS_ADMIN`, and one in-flight audit per worker. Packaged setuid helpers
-are kept non-setuid and the runner explicitly disables the setuid sandbox path;
-do not replace that policy with `--no-sandbox` in a production deployment. The
-AppArmor overlay follows Chromium's AppArmor 4 guidance: it selects an
-unconfined profile with the explicit `userns` permission only for this service
-instead of disabling the host restriction globally. The container remains
-bounded by its default-deny seccomp policy, dropped capabilities,
-no-new-privileges, read-only filesystem, private network, and Chromium's own
-sandbox.
+default `SYS_ADMIN`, and one in-flight audit per worker. Compose drops all Linux
+capabilities and restores only `SYS_CHROOT`, which Chromium needs to enter its
+sandbox root. Packaged setuid helpers are kept non-setuid and the runner
+explicitly disables the setuid sandbox path; do not replace that policy with
+`--no-sandbox` in a production deployment. The AppArmor overlay follows
+Chromium's AppArmor 4 guidance: it selects an unconfined profile with the
+explicit `userns` permission only for this service instead of disabling the
+host restriction globally. The container remains bounded by its default-deny
+seccomp policy, no-new-privileges, read-only filesystem, private network, and
+Chromium's own sandbox.
 The amd64 image pins its exact Chrome for Testing revision in the Dockerfile,
 keeps it aligned with the locked `puppeteer-core` package, and never follows
 the mutable `stable` channel.

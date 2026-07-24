@@ -93,9 +93,11 @@ command. The [Browser Audits guide](docs/users/browser-audits.md) has the
 persistent host setup.
 
 The runner has no public host port, keeps Chrome sandboxing enabled, uses 1 GiB
-of shared memory, and accepts one audit at a time. Audits are queued through
-the durable executor; result contracts remain engine-neutral so another
-compatible runner can be added without changing public report shapes.
+of shared memory, and accepts one audit at a time. Compose drops all Linux
+capabilities and restores only `SYS_CHROOT`, which Chromium needs to enter its
+sandbox root; `SYS_ADMIN` remains absent. Audits are queued through the durable
+executor; result contracts remain engine-neutral so another compatible runner
+can be added without changing public report shapes.
 
 See [Browser Audits](docs/users/browser-audits.md) and
 [artifact storage](docs/users/artifacts.md).

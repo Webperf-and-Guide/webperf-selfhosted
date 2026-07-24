@@ -119,7 +119,8 @@ docker compose \
 The AppArmor profile follows Chromium's AppArmor 4 guidance: it is an
 unconfined `userns` allowlist selected only for the Browser Audit service. It
 does not disable the host restriction globally. Default-deny seccomp, the
-non-root UID, cap-drop ALL, no-new-privileges, read-only filesystem, private
+non-root UID, `cap_drop: ALL` with only `SYS_CHROOT` restored for Chromium's
+sandbox-root transition, no-new-privileges, read-only filesystem, private
 network, and Chromium's own sandbox remain the runtime boundaries. Omit the
 overlay on hosts without AppArmor user-namespace restrictions.
 
@@ -132,7 +133,8 @@ installation paths while the WebPerf container profile explicitly permits the
 user-namespace sandbox. Packaged sandbox helpers remain non-setuid, and Compose
 applies `no-new-privileges` plus a default-deny seccomp profile derived from
 Moby `seccomp/v0.2.1` with only `clone`, `setns`, and `unshare` added for that
-sandbox; the production profile does not add `SYS_ADMIN` or launch Chrome with
+sandbox. Compose restores only `SYS_CHROOT` after dropping all capabilities;
+the production profile does not add `SYS_ADMIN` or launch Chrome with
 `--no-sandbox`.
 
 ## Docker Build
@@ -228,6 +230,8 @@ Recommended Docker runtime settings for local validation:
   and home tmpfs mounts, plus at least 1 GiB of `/dev/shm`
 - preserve `no-new-privileges` and ensure the selected AppArmor profile permits
   unprivileged user namespaces for the container runtime
+- drop all capabilities and restore only `SYS_CHROOT`, which Chromium needs to
+  enter the sandbox root
 - do not grant `SYS_ADMIN`; if a host policy blocks the bundled sandbox, fix
   user-namespace support instead
 - only as a documented last resort, opt into

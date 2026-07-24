@@ -54,6 +54,41 @@ const sensitiveHeaderNameStemPattern = new RegExp(
   `(?:^|[-_])(?:${sensitiveHeaderNameStems.join('|')})(?:$|[-_])`
 );
 const sensitiveHeaderNameStemSet = new Set<string>(sensitiveHeaderNameStems);
+const sensitivePropertySegments = new Set([
+  'authorization',
+  'bearer',
+  'credential',
+  'credentials',
+  'passwd',
+  'password',
+  'secret',
+  'token'
+]);
+const sensitiveKeyQualifiers = new Set([
+  'access',
+  'api',
+  'auth',
+  'bearer',
+  'client',
+  'csrf',
+  'encryption',
+  'private',
+  'secret',
+  'session',
+  'signing'
+]);
+const diagnosticCredentialNamePattern =
+  '(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|credentials?|passwd|password|secret|token)';
+const diagnosticCredentialValuePattern = `(?:"[^"]*"|'[^']*'|[^\\s"',;)}\\]|]+)`;
+const diagnosticAssignmentPattern = new RegExp(
+  `\\b((${diagnosticCredentialNamePattern})\\s*(?::|=|\\bis\\b)\\s*)${diagnosticCredentialValuePattern}`,
+  'gi'
+);
+const diagnosticForCredentialPattern = new RegExp(
+  `\\b(for\\s+${diagnosticCredentialNamePattern}\\s+)${diagnosticCredentialValuePattern}`,
+  'gi'
+);
+const diagnosticBearerPattern = /\b(Bearer\s+)[^\s"',;)}\]|]+/gi;
 
 export const isSensitiveHeaderName = (name: string) => {
   const normalized = name.trim().toLowerCase();
@@ -70,10 +105,29 @@ export const isSensitiveHeaderName = (name: string) => {
     );
 };
 
-const isSensitivePropertyName = (name: string) =>
-  isSensitiveHeaderName(name)
-  || /(?:token|secret|password|passwd|credentials?|authorization)$/i.test(name)
-  || /^(?:api|secret|private|signing|encryption)[-_]?key$/i.test(name);
+const propertyNameSegments = (name: string) => name
+  .trim()
+  .replace(/([A-Z]+)([A-Z][a-z])/g, '$1-$2')
+  .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+  .toLowerCase()
+  .split(/[^a-z0-9]+/)
+  .filter(Boolean);
+
+const isSensitivePropertyName = (name: string) => {
+  if (isSensitiveHeaderName(name)) {
+    return true;
+  }
+
+  const segments = propertyNameSegments(name);
+  if (segments.some((segment) => sensitivePropertySegments.has(segment))) {
+    return true;
+  }
+
+  const keyIndex = segments.indexOf('key');
+  return keyIndex === 0
+    ? segments[1] !== 'version'
+    : keyIndex > 0 && sensitiveKeyQualifiers.has(segments[keyIndex - 1]!);
+};
 
 const isUrlPropertyName = (name: string) =>
   /url$/i.test(name) || /^(?:href|uri|endpoint|callback|redirect|webhook|target)$/i.test(name);
@@ -124,11 +178,11 @@ const redactSensitiveDataAtDepth = (
   try {
     for (const [key, item] of Object.entries(source)) {
       if (typeof item === 'string' && (key === 'error' || key === 'message')) {
-        result[key] = redactUrlsInText(item);
+        result[key] = redactDiagnosticText(item);
         continue;
       }
 
-      if (typeof item === 'string' && isSensitivePropertyName(key)) {
+      if (isSensitivePropertyName(key)) {
         result[key] = redactedValue;
         continue;
       }
@@ -143,6 +197,11 @@ const redactSensitiveDataAtDepth = (
         continue;
       }
 
+      if (typeof item === 'string') {
+        result[key] = redactUrlsInText(item);
+        continue;
+      }
+
       result[key] = redactSensitiveDataAtDepth(item, key, depth + 1, ancestors);
     }
   } finally {
@@ -154,6 +213,13 @@ const redactSensitiveDataAtDepth = (
 
 export const redactUrlsInText = (value: string) =>
   value.replace(/https?:\/\/[^\s"'<>,;)}\]|]+/gi, (candidate) => redactUrlQuery(candidate));
+
+const redactDiagnosticText = (value: string) => {
+  return redactUrlsInText(value)
+    .replace(diagnosticBearerPattern, `$1${redactedValue}`)
+    .replace(diagnosticAssignmentPattern, `$1${redactedValue}`)
+    .replace(diagnosticForCredentialPattern, `$1${redactedValue}`);
+};
 
 export const redactUrlQuery = (value: string) => {
   try {
@@ -213,16 +279,12 @@ export const redactJsonResponse = async (response: Response) => {
 const readBoundedResponseText = async (response: Response, maxBytes: number) => {
   const contentLengthHeader = response.headers.get('content-length');
   const normalizedContentLength = contentLengthHeader?.trim() ?? '';
-  const declaredBytes = /^(?:0|[1-9]\d*)$/.test(normalizedContentLength)
-    ? Number(normalizedContentLength)
-    : Number.NaN;
-
-  if (
-    (Number.isFinite(declaredBytes) && declaredBytes > maxBytes)
-    || declaredBytes === Number.POSITIVE_INFINITY
-  ) {
-    await response.body?.cancel().catch(() => {});
-    return null;
+  if (/^(?:0|[1-9]\d*)$/.test(normalizedContentLength)) {
+    const declaredBytes = Number(normalizedContentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
   }
 
   if (!response.body) {

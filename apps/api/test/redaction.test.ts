@@ -72,7 +72,12 @@ describe('API secret redaction', () => {
         github_token: 'private-github-token',
         slack_token: 'private-slack-token',
         api_token: 'private-api-token',
+        tokenData: { value: 'private-token-data' },
+        secretConfig: 'private-secret-config',
+        passwordHash: 'private-password-hash',
+        keyStore: 'private-key-store',
         privateKey: 'private-key',
+        publicKey: 'public-key-identifier',
         keyVersion: 'current'
       })
     ).toEqual({
@@ -90,8 +95,33 @@ describe('API secret redaction', () => {
       github_token: redactedValue,
       slack_token: redactedValue,
       api_token: redactedValue,
+      tokenData: redactedValue,
+      secretConfig: redactedValue,
+      passwordHash: redactedValue,
+      keyStore: redactedValue,
       privateKey: redactedValue,
+      publicKey: 'public-key-identifier',
       keyVersion: 'current'
+    });
+  });
+
+  test('fails closed for credential-bearing error and message text', () => {
+    expect(redactSensitiveData({
+      error: 'Authentication failed for token sk-abc123',
+      message: 'Access denied for password admin123',
+      safeMessage: 'Probe timed out',
+      detail: 'Failed for https://example.com/path?token=private#fragment'
+    })).toEqual({
+      error: `Authentication failed for token ${redactedValue}`,
+      message: `Access denied for password ${redactedValue}`,
+      safeMessage: 'Probe timed out',
+      detail: 'Failed for https://example.com/path?redacted'
+    });
+
+    expect(redactSensitiveData({
+      error: 'Failed for https://example.com/path?token=private#fragment'
+    })).toEqual({
+      error: 'Failed for https://example.com/path?redacted'
     });
   });
 
@@ -135,6 +165,17 @@ describe('API secret redaction', () => {
     }));
     expect(oversized.status).toBe(500);
     expect(await oversized.json()).toEqual({
+      error: 'Response exceeded the safe redaction byte limit'
+    });
+
+    const overflowingLength = await redactJsonResponse(new Response('{"ok":true}', {
+      headers: {
+        'content-type': 'application/json',
+        'content-length': '9'.repeat(400)
+      }
+    }));
+    expect(overflowingLength.status).toBe(500);
+    expect(await overflowingLength.json()).toEqual({
       error: 'Response exceeded the safe redaction byte limit'
     });
 

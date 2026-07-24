@@ -21,8 +21,9 @@ Current tested quartet:
 - amd64 browser: Chrome for Testing `146.0.7680.153`, pinned as the Docker
   `CHROME_VERSION` default and kept aligned with `puppeteer-core` `24.40.0`
 - arm64 browser: Debian Chromium `146.0.7680.153-1~deb13u1`, installed from
-  the immutable `20260320T220114Z` Debian main and security snapshots and
-  checked against the same `CHROME_VERSION`
+  the immutable `20260320T220114Z` Debian main and security snapshots, checked
+  against the same `CHROME_VERSION`, and combined with current Debian runtime
+  libraries from the base image's configured repositories
 - Puppeteer: `24.40.0`
 - Lighthouse: `13.1.0`
 

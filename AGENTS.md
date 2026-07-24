@@ -65,7 +65,7 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-07-22:
+Current repo state as of 2026-07-24:
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
@@ -147,7 +147,7 @@ Current repo state as of 2026-07-22:
 - the consolidated CI workflow now caches Bun dependencies for documentation checks, annotates the pinned Rust toolchain action, and bounds the required aggregate gate with an explicit one-minute timeout
 - SQLite startup now verifies its synchronous durability mode and identifies failed migrations, retention tolerates intentionally restored partial schemas, and restore performs fail-closed encrypted-payload verification under an operator-adjustable 100,000-row bound while preserving the documented stopped-writer requirement
 - bounded JSON parsing now cancels and unlocks request streams on transport failures as well as byte-limit rejection, while encrypted envelope parsing expresses its post-length-check segment invariant without misleading fallback values
-- the Lighthouse image now pins arm64 Chromium and its Debian dependencies to matching immutable main/security snapshots aligned with the locked Puppeteer revision, and every artifact upload consumes only the remaining shared audit deadline (also bounded by upload-token expiry) instead of starting a fresh total timeout
+- the Lighthouse image now pins the arm64 Chromium packages to matching immutable main/security snapshots aligned with the locked Puppeteer revision while retaining current Debian runtime libraries from the base image repositories, and every artifact upload consumes only the remaining shared audit deadline (also bounded by upload-token expiry) instead of starting a fresh total timeout
 - executor probe and webhook delivery now share a DNS-pinned outbound transport that preserves the original Host/SNI identity, rejects untrusted private or mixed public/private answers, narrowly permits RFC 1918/ULA only for explicit container/LAN probe origins while still blocking metadata and reserved ranges, bounds response reads and deadlines, and never follows webhook redirects; webhook signatures also carry a signed timestamp for receiver-side freshness checks
 - descriptor-backed artifact downloads now expose their verified size through `X-WebPerf-Artifact-Bytes`, since Bun intentionally uses chunked transfer encoding for the O_NOFOLLOW-backed stream
 - Rust probe configuration now redacts current and rotation secrets from `Debug`, rejects whitespace-only rotation keys with diagnostics that explain its trimmed byte requirement, and explicitly keeps negotiated TLS metadata nullable instead of synthesizing it from the request URL

@@ -161,15 +161,16 @@ try {
   }
   if (
     !debianSnapshot
-    || debianSnapshotSourceDefinitionCount !== 2
+    || debianSnapshotSourceDefinitionCount !== 1
     || debianSnapshotSourceUseCount < 2
-    || !browserAuditDockerfile.includes('APT::Get::allow-downgrades=true')
-    || !browserAuditDockerfile.includes('--allow-downgrades --no-install-recommends')
+    || browserAuditDockerfile.includes('Dir::Etc::sourceparts=-')
+    || browserAuditDockerfile.includes('allow-downgrades')
     || !browserAuditDockerfile.includes('"chromium=$DEBIAN_CHROMIUM_VERSION"')
+    || !browserAuditDockerfile.includes('"chromium-common=$DEBIAN_CHROMIUM_VERSION"')
     || !browserAuditDockerfile.includes('"chromium-sandbox=$DEBIAN_CHROMIUM_VERSION"')
   ) {
     violations.push(
-      'browser-audit-lighthouse Dockerfile: arm64 Chromium must use pinned Debian main/security snapshots and package versions'
+      'browser-audit-lighthouse Dockerfile: arm64 browser packages must use pinned Debian snapshots without downgrading current runtime libraries'
     );
   }
   if (

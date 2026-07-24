@@ -8,62 +8,44 @@ ARG DEBIAN_CHROMIUM_VERSION=146.0.7680.153-1~deb13u1
 ARG DEBIAN_CHROMIUM_SNAPSHOT=20260320T220114Z
 ARG TARGETARCH
 
-# apt-get(8) documents the arm64-only configuration key as
-# APT::Get::allow-downgrades; amd64 keeps APT's default behavior.
-RUN install_runtime_dependencies() { \
-    apt-get "$@" update \
-    && apt-get "$@" install -y --no-install-recommends \
-      ca-certificates \
-      fonts-liberation \
-      libasound2 \
-      libatk-bridge2.0-0 \
-      libatk1.0-0 \
-      libc6 \
-      libcairo2 \
-      libcups2 \
-      libdbus-1-3 \
-      libexpat1 \
-      libfontconfig1 \
-      libgbm1 \
-      libgcc1 \
-      libglib2.0-0 \
-      libgtk-3-0 \
-      libnspr4 \
-      libnss3 \
-      libpango-1.0-0 \
-      libpangocairo-1.0-0 \
-      libstdc++6 \
-      libx11-6 \
-      libx11-xcb1 \
-      libxcb1 \
-      libxcomposite1 \
-      libxcursor1 \
-      libxdamage1 \
-      libxext6 \
-      libxfixes3 \
-      libxi6 \
-      libxrandr2 \
-      libxrender1 \
-      libxshmfence1 \
-      libxss1 \
-      libxtst6 \
-      xdg-utils; \
-  }; \
-  if [ "$TARGETARCH" = "arm64" ]; then \
-    apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
-    && install_runtime_dependencies \
-      -o APT::Get::allow-downgrades=true \
-      -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list \
-      -o Dir::Etc::sourceparts=- \
-      -o Acquire::Check-Valid-Until=false; \
-  else \
-    install_runtime_dependencies; \
-  fi \
-  && rm -rf /var/lib/apt/lists/* \
-  && rm -f /tmp/chromium-snapshot.list
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxshmfence1 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/webperf-selfhosted
 
@@ -88,14 +70,17 @@ COPY . /workspace/webperf-selfhosted
 
 WORKDIR /workspace/webperf-selfhosted/apps/browser-audit-lighthouse
 
-# Keep this source definition aligned with the runtime-dependency RUN above.
-# Recreating it here keeps the Chromium install layer self-contained.
+# Resolve the exact arm64 browser packages from an immutable snapshot while
+# leaving the base image's Debian sources enabled. APT can then retain current
+# security-sensitive runtime libraries instead of downgrading the whole image.
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     test "${DEBIAN_CHROMIUM_VERSION%%-*}" = "$CHROME_VERSION" \
     && printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ trixie main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ trixie-security main\n' "$DEBIAN_CHROMIUM_SNAPSHOT" "$DEBIAN_CHROMIUM_SNAPSHOT" > /tmp/chromium-snapshot.list \
-    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false update \
-    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Dir::Etc::sourceparts=- -o Acquire::Check-Valid-Until=false install -y --allow-downgrades --no-install-recommends \
-      "chromium=$DEBIAN_CHROMIUM_VERSION" "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Acquire::Check-Valid-Until=false update \
+    && apt-get -o Dir::Etc::sourcelist=/tmp/chromium-snapshot.list -o Acquire::Check-Valid-Until=false install -y --no-install-recommends \
+      "chromium=$DEBIAN_CHROMIUM_VERSION" \
+      "chromium-common=$DEBIAN_CHROMIUM_VERSION" \
+      "chromium-sandbox=$DEBIAN_CHROMIUM_VERSION" \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /tmp/chromium-snapshot.list \
     && mkdir -p /opt/webperf \

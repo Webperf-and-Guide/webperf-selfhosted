@@ -6,6 +6,8 @@ on:
     paths:
       - '.sampo/changesets/**'
       - '.sampo/config.toml'
+      - 'VERSION'
+      - 'CHANGELOG.md'
       - 'package.json'
       - 'bun.lock'
       - 'packages/**/package.json'
@@ -25,6 +27,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Require main release preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo 'Release preparation may run only from main.' >&2
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -47,6 +57,9 @@ jobs:
           else
             echo 'pending=false' >> "$GITHUB_OUTPUT"
           fi
+      - name: Prepare repository version and changelog
+        if: ${{ steps.changesets.outputs.pending == 'true' }}
+        run: bun tooling/scripts/release-bundle.ts prepare-repository-release
       - name: Apply pending Sampo changesets
         if: ${{ steps.changesets.outputs.pending == 'true' }}
         env:
@@ -74,13 +87,14 @@ jobs:
           base: main
           branch: release/sampo
           delete-branch: true
-          commit-message: 'chore(release): prepare package versions'
-          title: 'chore(release): prepare package versions'
+          commit-message: 'chore(release): prepare WebPerf version'
+          title: 'chore(release): prepare WebPerf version'
           body: |
             Sampo-generated release preparation.
 
             - consumes every pending `.sampo/changesets/*.md`
             - updates affected public package versions and changelogs
+            - advances the independent repository `VERSION` and root changelog
             - leaves registry publication to the protected WebPerf release workflow
 
             Merge only after Required CI passes. The merge will dispatch the matching
@@ -138,6 +152,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
+            echo 'The checked-out release commit does not match the triggering main commit.' >&2
+            exit 1
+          fi
           version="$(
             bun tooling/scripts/release-bundle.ts repository-version \
               | jq -er '.version'
@@ -149,11 +168,16 @@ jobs:
             echo 'dispatch=true' >> "$GITHUB_OUTPUT"
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
       - name: Dispatch protected formal release
         if: ${{ steps.release.outputs.dispatch == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
           VERSION: ${{ steps.release.outputs.version }}
         # workflow_dispatch is explicit because GITHUB_TOKEN-authored tag pushes
         # do not recursively start another release workflow.
-        run: gh workflow run release.yml --ref main -f "version=${VERSION}"
+        run: >-
+          gh workflow run release.yml --ref main
+          -f "version=${VERSION}"
+          -f "source_sha=${SOURCE_SHA}"

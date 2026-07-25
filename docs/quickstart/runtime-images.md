@@ -13,19 +13,20 @@ self-hosted product:
 ## Formal releases
 
 Merging a Sampo-generated release PR dispatches the
-[release workflow](../../.github/workflows/release.yml) for the highest public
-package version. The workflow runs the same required CI used by pull requests
-and waits for the protected `release` GitHub Environment. Once approved, it
-creates or verifies the matching `v0.x.y` repository tag, publishes all six
-images with version and source-SHA tags, generates SPDX SBOMs and provenance
-attestations, and creates a GitHub Release. A manually pushed `v0.x.y` tag
-enters the same protected path.
+[release workflow](../../.github/workflows/release.yml) for the independent root
+`VERSION` and exact release-PR merge commit. The workflow runs the same required
+CI used by pull requests against that pinned source and waits for the protected
+`release` GitHub Environment. Once approved, it creates or verifies the matching
+`v0.x.y` repository tag, publishes all six images with version and source-SHA
+tags, generates SPDX SBOMs and provenance attestations, and creates a GitHub
+Release. A manually pushed `v0.x.y` tag enters the same protected path.
 
 The downloadable release bundle contains a `compose.yml` in which every image
 is pinned by OCI digest. It also contains:
 
 - `runtime-metadata.json`, with the version, source commit, image tags, and
   digests;
+- root `VERSION`;
 - one SPDX JSON SBOM per image;
 - `browser-audit-seccomp.json`, kept beside `compose.yml` for the optional
   Chromium runtime;
@@ -57,7 +58,8 @@ not publish a `:latest` channel.
 Sampo changesets are the source for JS/TS package versions and release notes.
 Feature PRs add changesets but do not consume them. After those PRs merge,
 [`release-pr.yml`](../../.github/workflows/release-pr.yml) creates or refreshes
-`release/sampo` with the generated versions and changelogs.
+`release/sampo` with generated package versions and changelogs plus an
+independently advanced root `VERSION` and matching root changelog entry.
 
 ```sh
 gh pr view --repo Webperf-and-Guide/webperf-selfhosted
@@ -69,12 +71,14 @@ The release PR merge automatically dispatches the formal workflow when the
 matching tag is absent. To retry safely:
 
 ```sh
-gh workflow run release.yml --ref main -f version=0.x.y
+gh workflow run release.yml --ref main \
+  -f version=0.x.y \
+  -f source_sha="$(git rev-parse origin/main)"
 ```
 
 The workflow refuses pending changesets, a source outside `main` history, a
-version that does not match the highest Sampo-managed package version, or an
-existing tag that points elsewhere.
+version that does not match root `VERSION`, a checkout that does not match the
+requested source commit, or an existing tag that points elsewhere.
 
 ## Local image builds
 

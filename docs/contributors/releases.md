@@ -1,8 +1,9 @@
 # Contributor release guide
 
 Sampo changesets are the authoring source for public JS/TS package versions and
-release notes. Repository releases use a protected `v0.x.y` tag, all six GHCR
-images, and a digest-pinned Compose bundle.
+release notes. The root `VERSION` advances independently for whole-repository
+releases, which use a protected `v0.x.y` tag, all six GHCR images, and a
+digest-pinned Compose bundle.
 
 ## Add release metadata
 
@@ -23,18 +24,25 @@ managed-cloud behavior into the OSS release.
 Every push to `main` that carries pending changesets starts
 [`release-pr.yml`](../../.github/workflows/release-pr.yml). It uses the exact
 Sampo version locked in `bun.lock` to consume all pending changesets on the
-`release/sampo` branch, synchronizes the lockfile, then creates or refreshes one
-release PR. Feature PRs do not consume their own changesets. Because GitHub
+`release/sampo` branch. Before Sampo consumes them, the workflow uses their
+largest bump to advance root `VERSION` and generate a matching root
+`CHANGELOG.md` entry. Package `minor` and `major` changes both advance the
+repository minor while WebPerf remains in public beta; an all-patch set advances
+the repository patch. The generated changelog entry carries a hidden changeset
+fingerprint so an interrupted local preparation can safely finish or rerun
+without advancing twice. It synchronizes the lockfile, then creates or refreshes
+one release PR. Feature PRs do not consume their own changesets. Because GitHub
 suppresses ordinary workflow events caused by its built-in token, the
 preparation workflow ensures Required CI runs against the generated branch. A
 manual retry reuses a successful or still-running check for the same commit and
 dispatches a fresh run only when the previous check failed, was cancelled, or
 never started.
 
-Review the generated package versions and changelogs, and merge only after
-Required CI passes. When that PR reaches `main`, the same workflow resolves the
-highest public `@webperf/*` version. If `v<version>` does not exist, it dispatches
-the protected formal release.
+Review the generated repository version, root changelog, package versions, and
+package changelogs, and merge only after Required CI passes. When that PR
+reaches `main`, the same workflow resolves root `VERSION`. If `v<version>` does
+not exist, it dispatches the protected formal release pinned to that exact merge
+commit.
 
 The release-preparation workflow never runs `sampo publish`; npm publication is
 a separate future concern. Sampo remains the version/changelog source, while
@@ -46,7 +54,8 @@ bundle.
 The dispatched release validates that:
 
 - every changeset was consumed;
-- the requested version matches the highest public package version;
+- the requested version matches root `VERSION`;
+- the checked-out source exactly matches the prepared commit;
 - the source commit belongs to `main`; and
 - an existing `v<version>` tag, if present, points to that exact commit.
 
@@ -59,7 +68,9 @@ For recovery or an intentionally manual release, dispatch the same idempotent
 workflow:
 
 ```sh
-gh workflow run release.yml --ref main -f version=0.x.y
+gh workflow run release.yml --ref main \
+  -f version=0.x.y \
+  -f source_sha="$(git rev-parse origin/main)"
 ```
 
 A manually pushed `v0.x.y` tag remains supported and enters the same validation,

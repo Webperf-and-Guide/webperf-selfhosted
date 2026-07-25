@@ -1,6 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { releaseImages } from './release-bundle';
+import {
+  isRepositoryReleaseSuccessor,
+  releaseImages,
+  repositoryReleaseVersion
+} from './release-bundle';
 import { retiredReleasePaths } from './retired-release-paths';
 import {
   containsMutableContainerTag,
@@ -113,6 +117,9 @@ for (const definition of releaseImages) {
 for (const requiredFragment of [
   'workflow_dispatch:',
   'uses: ./.github/workflows/ci.yml',
+  'source_sha:',
+  "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}",
+  'source_sha: ${{ needs.prepare.outputs.source_sha }}',
   'sbom: true',
   'provenance: mode=max',
   'actions/attest@',
@@ -133,7 +140,10 @@ for (const requiredFragment of [
   'actions: write',
   'contents: write',
   'pull-requests: write',
+  'Require main release preparation',
+  "refs/heads/main",
   'SAMPO_RELEASE_BRANCH: main',
+  'prepare-repository-release',
   'bun run sampo:release',
   'bun install --lockfile-only',
   'peter-evans/create-pull-request@',
@@ -141,7 +151,9 @@ for (const requiredFragment of [
   'gh run list',
   'gh workflow run ci.yml --ref',
   'repository-version',
-  'gh workflow run release.yml --ref main -f'
+  'source_sha="$(git rev-parse HEAD)"',
+  'gh workflow run release.yml --ref main',
+  '-f "source_sha=${SOURCE_SHA}"'
 ]) {
   if (releasePrWorkflow !== undefined && !releasePrWorkflow.includes(requiredFragment)) {
     violations.push(`release-pr.yml: missing release preparation invariant ${requiredFragment}`);
@@ -162,6 +174,50 @@ for (const requiredFragment of [
   if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
     violations.push(`release.yml: missing dispatch release invariant ${requiredFragment}`);
   }
+}
+
+for (const requiredFragment of [
+  'workflow_call:',
+  'source_sha:',
+  'ref: ${{ inputs.source_sha || github.sha }}'
+]) {
+  if (ciWorkflow !== undefined && !ciWorkflow.includes(requiredFragment)) {
+    violations.push(`ci.yml: missing source-pinned reusable CI invariant ${requiredFragment}`);
+  }
+}
+if (ciWorkflow !== undefined) {
+  const checkoutCount = ciWorkflow.match(/uses: actions\/checkout@/g)?.length ?? 0;
+  const sourcePinnedCheckoutCount = ciWorkflow
+    .match(/ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/g)?.length ?? 0;
+  if (checkoutCount === 0 || checkoutCount !== sourcePinnedCheckoutCount) {
+    violations.push('ci.yml: every checkout must honor the reusable source_sha input');
+  }
+}
+
+try {
+  const repositoryVersion = repositoryReleaseVersion(root);
+  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
+  const latestChangelogVersion = changelog.match(/^## \[([^\]]+)\]/m)?.[1];
+  const latestReleaseEntry = changelog
+    .slice(changelog.search(/^## \[/m))
+    .split(/\n(?=## \[)/, 1)[0];
+  const preparedFromVersion = latestReleaseEntry.match(
+    /^<!-- webperf-release: from=(\S+); changesets=sha256:[a-f0-9]{64} -->$/m
+  )?.[1];
+  const recoverablePreparation = (
+    preparedFromVersion === repositoryVersion
+    && latestChangelogVersion !== undefined
+    && isRepositoryReleaseSuccessor(repositoryVersion, latestChangelogVersion)
+  );
+  if (latestChangelogVersion !== repositoryVersion && !recoverablePreparation) {
+    violations.push(
+      `CHANGELOG.md: latest entry ${latestChangelogVersion ?? '(unreadable)'} does not match repository VERSION ${repositoryVersion}`
+    );
+  }
+} catch (error) {
+  violations.push(
+    `VERSION/CHANGELOG: ${error instanceof Error ? error.message : 'repository version or changelog is unreadable'}`
+  );
 }
 
 for (const requiredFragment of [

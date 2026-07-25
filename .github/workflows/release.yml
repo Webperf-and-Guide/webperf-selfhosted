@@ -10,6 +10,10 @@ on:
         description: 'Public beta version to release (for example, 0.2.0)'
         required: true
         type: string
+      source_sha:
+        description: 'Exact prepared main commit to release'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -31,16 +35,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Validate tag, ancestry, and Sampo state
         id: release
         shell: bash
         env:
+          REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
           if [[ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ]]; then
             test "$GITHUB_REF" = 'refs/heads/main'
+            if [[ ! "$REQUESTED_SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+              echo 'source_sha must be a full lowercase Git commit ID.' >&2
+              exit 1
+            fi
+            if [[ "$source_sha" != "$REQUESTED_SOURCE_SHA" ]]; then
+              echo 'The checked-out release source does not match source_sha.' >&2
+              exit 1
+            fi
             version="$REQUESTED_VERSION"
             tag="v${version}"
           else
@@ -50,7 +65,6 @@ jobs:
           fi
           bun tooling/scripts/release-bundle.ts validate-repository-version "$version"
           git fetch --no-tags origin main:refs/remotes/origin/main
-          source_sha="$(git rev-parse HEAD)"
           git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main
           if find .sampo/changesets -maxdepth 1 -type f -name '*.md' -print -quit | grep -q .; then
             echo "Apply and commit every pending Sampo changeset before tagging a release." >&2
@@ -67,6 +81,8 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
 
   authorize:
     name: Authorize protected release

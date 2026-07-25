@@ -4,7 +4,9 @@ Tagged `v0.x.y` releases are created only by `.github/workflows/release.yml`
 after the reusable CI workflow succeeds and the protected `release` GitHub
 Environment authorizes publication. `.github/workflows/release-pr.yml`
 consumes pending Sampo changesets in a generated PR and dispatches that formal
-workflow after the release PR merges.
+workflow after the release PR merges. Root `VERSION` is the independent
+repository-release version; the preparation workflow advances it and generates
+the corresponding root changelog entry from the pending changesets.
 
 Each release contains:
 
@@ -12,6 +14,7 @@ Each release contains:
 - OCI-native SBOM and max-mode provenance attestations;
 - GitHub provenance and SPDX SBOM attestations bound to each image digest;
 - a tarball whose `compose.yml` pins all six image repositories by digest;
+- the root `VERSION` released by the tag;
 - the `browser-audit-seccomp.json` referenced by that Compose file;
 - `runtime-metadata.json` following `runtime-metadata.schema.json`;
 - one SPDX JSON SBOM per image and SHA-256 checksums.
@@ -22,8 +25,9 @@ specific GitHub Release. It must not infer runtime identity from `main`,
 
 Before creating a release tag, merge the generated Sampo release PR. The
 workflow rejects tags outside `main` history, repositories with pending
-changeset Markdown files, version mismatches, and existing tags that point to a
-different commit.
+changeset Markdown files, versions that differ from root `VERSION`, dispatches
+whose checkout differs from the requested source commit, and existing tags that
+point to a different commit.
 
 Repository administrators must configure the `release` Environment with a
 required reviewer and deployment rules limited to the `main` branch plus

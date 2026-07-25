@@ -16,3 +16,4 @@ apps/probe-rs/target
 apps/console/build
 apps/api/data
 output
+.webperf-release-*.tmp

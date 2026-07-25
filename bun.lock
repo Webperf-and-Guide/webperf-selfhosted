@@ -107,7 +107,7 @@
     },
     "packages/config": {
       "name": "@webperf/config",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "zod": "^4.1.12",
       },
@@ -117,7 +117,7 @@
     },
     "packages/contracts": {
       "name": "@webperf/contracts",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@orpc/contract": "^1.13.14",
         "zod": "^4.1.12",
@@ -128,7 +128,7 @@
     },
     "packages/domain-core": {
       "name": "@webperf/domain-core",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@webperf/contracts": "workspace:*",
         "zod": "^4.1.12",
@@ -139,7 +139,7 @@
     },
     "packages/report-core": {
       "name": "@webperf/report-core",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@webperf/contracts": "workspace:*",
       },

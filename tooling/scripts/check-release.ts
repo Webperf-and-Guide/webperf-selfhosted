@@ -10,13 +10,18 @@ import { retiredReleasePaths } from './retired-release-paths';
 import {
   containsMutableContainerTag,
   extractWorkflowActionReferences,
-  isImmutableActionReference
+  hasExactPermissions,
+  isImmutableActionReference,
+  parseWorkflowYaml,
+  workflowJobPermissions,
+  type WorkflowPolicyDocument
 } from './release-policy';
 
 const root = process.cwd();
 const workflowsDirectory = join(root, '.github/workflows');
 const violations: string[] = [];
 const workflowCache = new Map<string, string | undefined>();
+const workflowDocumentCache = new Map<string, WorkflowPolicyDocument | undefined>();
 
 type WorkflowImageEntry = {
   name: string;
@@ -29,16 +34,6 @@ type WorkflowBuildEntry = {
   platform: string;
   arch: string;
   runner: string;
-};
-
-type WorkflowDocument = {
-  jobs?: Record<string, {
-    strategy?: {
-      matrix?: {
-        include?: unknown;
-      };
-    };
-  }>;
 };
 
 function readWorkflow(file: string): string | undefined {
@@ -72,6 +67,26 @@ const developmentImageMatrix = parseImageMatrix(
   'publish-dev-images'
 );
 const ciImageBuildMatrix = parseBuildMatrix(ciWorkflow, 'ci.yml', 'images');
+const releaseCiPermissionsResult = parseJobPermissions(
+  releaseWorkflow,
+  'release.yml',
+  'ci'
+);
+
+if (releaseCiPermissionsResult.parsed) {
+  if (releaseCiPermissionsResult.permissions === undefined) {
+    violations.push(
+      'release.yml: reusable CI caller must declare permissions with contents: read and packages: write'
+    );
+  } else if (!hasExactPermissions(releaseCiPermissionsResult.permissions, {
+    contents: 'read',
+    packages: 'write'
+  })) {
+    violations.push(
+      'release.yml: reusable CI caller must allow exactly contents: read and packages: write'
+    );
+  }
+}
 
 if (!ciImageBuildMatrix.some(
   (entry) => entry.name === 'browser-audit-lighthouse'
@@ -474,29 +489,35 @@ function parseBuildMatrix(
   );
 }
 
+function parseJobPermissions(
+  content: string | undefined,
+  file: string,
+  jobId: string
+):
+  | { parsed: false }
+  | { parsed: true; permissions: unknown } {
+  const document = parseWorkflowDocument(content, file);
+  if (document === undefined) {
+    return { parsed: false };
+  }
+
+  return {
+    parsed: true,
+    permissions: workflowJobPermissions(document, jobId)
+  };
+}
+
 function parseMatrixInclude(
   content: string | undefined,
   file: string,
   jobId: string
 ): Record<string, unknown>[] {
-  if (content === undefined) {
+  const document = parseWorkflowDocument(content, file);
+  if (document === undefined) {
     return [];
   }
 
-  let document: unknown;
-  try {
-    document = Bun.YAML.parse(content);
-  } catch {
-    violations.push(`${file}: workflow YAML is invalid`);
-    return [];
-  }
-
-  if (document === null || typeof document !== 'object' || Array.isArray(document)) {
-    violations.push(`${file}: workflow YAML is not a valid mapping`);
-    return [];
-  }
-
-  const include = (document as WorkflowDocument).jobs?.[jobId]?.strategy?.matrix?.include;
+  const include = document.jobs?.[jobId]?.strategy?.matrix?.include;
   if (!Array.isArray(include)) {
     violations.push(`${file}: ${jobId} matrix include list is missing`);
     return [];
@@ -507,4 +528,31 @@ function parseMatrixInclude(
       Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
     )
   );
+}
+
+function parseWorkflowDocument(
+  content: string | undefined,
+  file: string
+): WorkflowPolicyDocument | undefined {
+  if (workflowDocumentCache.has(file)) {
+    return workflowDocumentCache.get(file);
+  }
+  if (content === undefined) {
+    workflowDocumentCache.set(file, undefined);
+    return undefined;
+  }
+
+  const parsed = parseWorkflowYaml(content);
+  if (!parsed.ok) {
+    violations.push(
+      `${file}: workflow YAML is ${
+        parsed.reason === 'invalid_yaml' ? 'invalid' : 'not a valid mapping'
+      }`
+    );
+    workflowDocumentCache.set(file, undefined);
+    return undefined;
+  }
+
+  workflowDocumentCache.set(file, parsed.document);
+  return parsed.document;
 }

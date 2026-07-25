@@ -100,6 +100,9 @@ jobs:
     needs: prepare
     permissions:
       contents: read
+      # GitHub validates permission ceilings for every job in a reusable
+      # workflow, including the conditionally skipped dev-image publisher.
+      packages: write
     uses: ./.github/workflows/ci.yml
     with:
       source_sha: ${{ needs.prepare.outputs.source_sha }}

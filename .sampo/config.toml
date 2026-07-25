@@ -5,9 +5,7 @@ version = 1
 default_branch = "main"
 
 [github]
-# By default, Sampo tries to infer the repository from the git remote.
-# You can override or clarify it here if needed.
-# repository = "owner/repo"
+repository = "Webperf-and-Guide/webperf-selfhosted"
 
 [changelog]
 # Options for release notes generation.

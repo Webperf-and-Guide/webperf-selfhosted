@@ -1,6 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { releaseImages } from './release-bundle';
+import {
+  composeEnvironmentVersion,
+  isRepositoryReleaseSuccessor,
+  releaseImages,
+  repositoryReleaseVersion
+} from './release-bundle';
 import { retiredReleasePaths } from './retired-release-paths';
 import {
   containsMutableContainerTag,
@@ -52,7 +57,14 @@ function readWorkflow(file: string): string | undefined {
 }
 
 const releaseWorkflow = readWorkflow('release.yml');
+const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
+let releaseTagScript: string | undefined;
+try {
+  releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
+} catch {
+  violations.push('tooling/scripts/release-tag.sh: script is missing or unreadable');
+}
 const releaseImageMatrix = parseImageMatrix(releaseWorkflow, 'release.yml', 'images');
 const developmentImageMatrix = parseImageMatrix(
   ciWorkflow,
@@ -104,7 +116,14 @@ for (const definition of releaseImages) {
 }
 
 for (const requiredFragment of [
+  'workflow_dispatch:',
   'uses: ./.github/workflows/ci.yml',
+  'source_sha:',
+  'run-name: release ${{',
+  "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}",
+  'source_sha: ${{ needs.prepare.outputs.source_sha }}',
+  'git rev-list --first-parent refs/remotes/origin/main',
+  'Release source must be the main commit that changed VERSION.',
   'sbom: true',
   'provenance: mode=max',
   'actions/attest@',
@@ -117,6 +136,132 @@ for (const requiredFragment of [
 ]) {
   if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
     violations.push(`release.yml: missing release invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'workflow_dispatch:',
+  'actions: write',
+  'contents: write',
+  'pull-requests: write',
+  'Require main release preparation',
+  "refs/heads/main",
+  'infra/docker-compose/.env.example',
+  'SAMPO_RELEASE_BRANCH: main',
+  'prepare-repository-release',
+  'bun run sampo:release',
+  'bun install --lockfile-only',
+  'peter-evans/create-pull-request@',
+  'branch: release/sampo',
+  'gh run list',
+  'RELEASE_RUN_TITLE',
+  'gh workflow run ci.yml --ref',
+  'repository-version',
+  'source_sha="$(git rev-list --first-parent -1 HEAD -- VERSION)"',
+  'if git diff --quiet "${source_sha}^1" "$source_sha" -- VERSION; then',
+  'gh workflow run release.yml --ref main',
+  '-f "source_sha=${SOURCE_SHA}"'
+]) {
+  if (releasePrWorkflow !== undefined && !releasePrWorkflow.includes(requiredFragment)) {
+    violations.push(`release-pr.yml: missing release preparation invariant ${requiredFragment}`);
+  }
+}
+if (releasePrWorkflow !== undefined && releasePrWorkflow.includes('sampo:publish')) {
+  violations.push('release-pr.yml: container release preparation must not publish npm packages');
+}
+if (releasePrWorkflow !== undefined) {
+  const reconcileIndex = releasePrWorkflow.indexOf('Resolve current repository release');
+  const changesetIndex = releasePrWorkflow.indexOf('Detect pending Sampo changesets');
+  if (
+    reconcileIndex === -1
+    || changesetIndex === -1
+    || reconcileIndex >= changesetIndex
+  ) {
+    violations.push(
+      'release-pr.yml: the current repository release must be reconciled before newer changesets'
+    );
+  }
+}
+
+for (const requiredFragment of [
+  'Publish immutable release tag',
+  'release-tag.sh verify',
+  'publish "$RELEASE_TAG" "$SOURCE_SHA" "$VERSION"',
+  'source_sha',
+  'ref: ${{ needs.prepare.outputs.source_sha }}',
+  'RELEASE_TAG: ${{ needs.prepare.outputs.tag }}'
+]) {
+  if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
+    violations.push(`release.yml: missing dispatch release invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'workflow_call:',
+  'source_sha:',
+  'ref: ${{ inputs.source_sha || github.sha }}'
+]) {
+  if (ciWorkflow !== undefined && !ciWorkflow.includes(requiredFragment)) {
+    violations.push(`ci.yml: missing source-pinned reusable CI invariant ${requiredFragment}`);
+  }
+}
+if (ciWorkflow !== undefined) {
+  const checkoutCount = ciWorkflow.match(/uses: actions\/checkout@/g)?.length ?? 0;
+  const sourcePinnedCheckoutCount = ciWorkflow
+    .match(/ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/g)?.length ?? 0;
+  if (checkoutCount === 0 || checkoutCount !== sourcePinnedCheckoutCount) {
+    violations.push('ci.yml: every checkout must honor the reusable source_sha input');
+  }
+}
+
+try {
+  const repositoryVersion = repositoryReleaseVersion(root);
+  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
+  const latestChangelogVersion = changelog.match(/^## \[([^\]]+)\]/m)?.[1];
+  const latestReleaseEntry = changelog
+    .slice(changelog.search(/^## \[/m))
+    .split(/\n(?=## \[)/, 1)[0];
+  const preparedFromVersion = latestReleaseEntry.match(
+    /^<!-- webperf-release: from=(\S+); changesets=sha256:[a-f0-9]{64} -->$/m
+  )?.[1];
+  const recoverablePreparation = (
+    preparedFromVersion === repositoryVersion
+    && latestChangelogVersion !== undefined
+    && isRepositoryReleaseSuccessor(repositoryVersion, latestChangelogVersion)
+  );
+  if (latestChangelogVersion !== repositoryVersion && !recoverablePreparation) {
+    violations.push(
+      `CHANGELOG.md: latest entry ${latestChangelogVersion ?? '(unreadable)'} does not match repository VERSION ${repositoryVersion}`
+    );
+  }
+  const composeVersion = composeEnvironmentVersion(
+    readFileSync(join(root, 'infra/docker-compose/.env.example'), 'utf8')
+  );
+  if (
+    composeVersion !== repositoryVersion
+    && !(recoverablePreparation && composeVersion === latestChangelogVersion)
+  ) {
+    violations.push(
+      `infra/docker-compose/.env.example: WEBPERF_VERSION ${composeVersion} does not match repository release state`
+    );
+  }
+} catch (error) {
+  violations.push(
+    `repository release state: ${error instanceof Error ? error.message : 'release metadata is unreadable'}`
+  );
+}
+
+for (const requiredFragment of [
+  'bun "$validator" validate-version "$version"',
+  'verify_remote_tag',
+  'git ls-remote --exit-code --tags origin "$tag_ref" "${tag_ref}^{}"',
+  'Existing release tag must be annotated.',
+  'git tag -a -f "$tag" "$source_sha"',
+  'if git push origin "$tag_ref"; then',
+  'A concurrent release may have won the push race.'
+]) {
+  if (releaseTagScript !== undefined && !releaseTagScript.includes(requiredFragment)) {
+    violations.push(`release-tag.sh: missing immutable-tag invariant ${requiredFragment}`);
   }
 }
 
@@ -133,12 +278,28 @@ if (ciWorkflow !== undefined && ciWorkflow.includes(':latest')) {
   violations.push('ci.yml: the mutable latest tag is not part of the development channel');
 }
 for (const requiredFragment of [
+  'workflow_dispatch:',
   'runs-on: ${{ matrix.runner }}',
   'platforms: ${{ matrix.platform }}'
 ]) {
   if (ciWorkflow !== undefined && !ciWorkflow.includes(requiredFragment)) {
     violations.push(`ci.yml: missing arm64 build invariant ${requiredFragment}`);
   }
+}
+
+try {
+  const rootManifest = JSON.parse(
+    readFileSync(join(root, 'package.json'), 'utf8')
+  ) as { devDependencies?: Record<string, unknown> };
+  const sampoVersion = rootManifest.devDependencies?.sampo;
+  if (
+    typeof sampoVersion !== 'string'
+    || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(sampoVersion)
+  ) {
+    violations.push('package.json: Sampo must be an exact pinned development dependency');
+  }
+} catch {
+  violations.push('package.json: root manifest is missing, unreadable, or malformed');
 }
 
 try {

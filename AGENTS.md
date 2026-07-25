@@ -89,9 +89,15 @@ Current repo state as of 2026-07-24:
 - `packages/contracts` now also defines browser-audit policy, flow DSL, result, artifact, toolchain, and worker request/response schemas as public-safe source-of-truth types
 - `apps/browser-audit-lighthouse` is optional: it is not part of the default `bun run dev` or default Compose stack, but it can be run directly or via the `browser-audit` Compose profile
 - tagged releases now publish digest-bearing `runtime-metadata.json` as the managed runtime handoff, replacing mutable checked-in image refs
+- pending Sampo changesets now produce one generated `release/sampo` PR, and merging that PR dispatches an idempotent protected release that creates the immutable `v0.x.y` tag before publishing versioned GHCR images
+- repository releases now advance an independent root `VERSION` and generate a fingerprint-backed, interruption-safe root changelog entry from pending Sampo changesets, while formal dispatches pin checkout and reusable CI to the exact prepared main commit
+- coalesced release-preparation runs now reconcile the current untagged version before newer changesets, resolve its source from the main first-parent commit that changed `VERSION`, keep the source Compose image version synchronized, and require annotated manual tags
+- formal release preparation and tag publication now share one tested immutable-tag helper, so existing-tag identity checks cannot drift between the preflight and post-approval jobs
+- the initial public-beta changeset set is now consumed into `@webperf/config`, `@webperf/contracts`, and `@webperf/domain-core` `0.2.0` plus `@webperf/report-core` `0.1.1`, with package changelogs and a repository-level `0.2.0` release summary
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 - root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
 - required CI now gates shared development-channel publishing for all six runtime images, so workspace dependency changes cannot leave only part of the runtime set stale
+- the GitHub `release` Environment requires `imjlk` approval and accepts only `main` workflow dispatches or `v*.*.*` tags before formal publication
 - the console IA now has a real route split around `/`, `/resources`, `/checks`, `/reports`, and `/regions`, backed by a shared workspace component and route-loader helper
 - `packages/ui` now drives a shared token/theme system for both OSS and cloud apps, with Tailwind v4 entrypoints and minimal shadcn-compatible primitive exports
 - `packages/ui` now also acts as the canonical shared shadcn surface for both repos, with `tabs`, `scroll-area`, `dialog`, `popover`, `tooltip`, `checkbox`, `switch`, and `table` joined by jsrepo-managed `underline-tabs`, `field-set`, `number-field`, `tags-input`, and `copy-button`

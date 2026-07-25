@@ -1,14 +1,19 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
+  closeSync,
   copyFileSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   writeFileSync
 } from 'node:fs';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 
 export const releaseImages = [
   { name: 'console', image: 'ghcr.io/webperf-and-guide/webperf-console' },
@@ -41,6 +46,7 @@ const prereleaseIdentifier = '(?:0|[1-9]\\d*|[A-Za-z-][0-9A-Za-z-]*|[0-9A-Za-z-]
 const versionPattern = new RegExp(
   `^0\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-${prereleaseIdentifier}(?:\\.${prereleaseIdentifier})*)?$`
 );
+const changesetBumpPattern = /^([^:\s][^:]*):\s*(patch|minor|major)$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const commitPattern = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const metadataKeys = [
@@ -62,36 +68,184 @@ export function validateReleaseVersion(version: string) {
   return version;
 }
 
-export function validateRepositoryReleaseVersion(version: string) {
+export function repositoryReleaseVersion(root = repositoryRoot) {
+  const versionFile = join(root, 'VERSION');
+  const contents = readFileSync(versionFile, 'utf8');
+  const version = contents.endsWith('\n') ? contents.slice(0, -1) : contents;
+  if (version.includes('\n') || version.trim() !== version || contents !== `${version}\n`) {
+    throw new Error('VERSION must contain one canonical release version followed by a newline');
+  }
+  return validateReleaseVersion(version);
+}
+
+export function validateRepositoryReleaseVersion(version: string, root = repositoryRoot) {
   validateReleaseVersion(version);
-  const packageManifests = readdirSync(join(repositoryRoot, 'packages'), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(repositoryRoot, 'packages', entry.name, 'package.json'))
-    .filter(existsSync)
-    .map((path) => JSON.parse(readFileSync(path, 'utf8')) as { name?: unknown; version?: unknown });
-  const publicPackages = packageManifests.filter(
-    (manifest): manifest is { name: string; version?: unknown } =>
-      typeof manifest.name === 'string' && manifest.name.startsWith('@webperf/')
-  );
-  for (const manifest of publicPackages) {
-    if (typeof manifest.version !== 'string') {
-      throw new Error(`Public package ${manifest.name} has no release version`);
-    }
-  }
-  const packageVersions = publicPackages as Array<{ name: string; version: string }>;
-  if (packageVersions.length === 0) {
-    throw new Error('No public @webperf package versions were found');
-  }
-  const releaseVersion = parseReleaseVersion(version);
-  const highestVersion = packageVersions
-    .map(({ version: packageVersion, name }) => ({ name, version: parseReleaseVersion(packageVersion) }))
-    .sort((left, right) => compareReleaseVersions(right.version, left.version))[0];
-  if (compareReleaseVersions(releaseVersion, highestVersion.version) !== 0) {
+  const repositoryVersion = repositoryReleaseVersion(root);
+  if (version !== repositoryVersion) {
     throw new Error(
-      `Release ${version} must match the highest Sampo-managed public package version ${highestVersion.version.raw} (${highestVersion.name})`
+      `Release ${version} must match the repository VERSION ${repositoryVersion}`
     );
   }
   return version;
+}
+
+export function isRepositoryReleaseSuccessor(currentVersion: string, nextVersion: string) {
+  const current = parseReleaseVersion(currentVersion);
+  const next = parseReleaseVersion(nextVersion);
+  if (current.prerelease.length > 0 || next.prerelease.length > 0) {
+    return false;
+  }
+  return (
+    next.major === current.major
+    && (
+      (next.minor === current.minor && next.patch === current.patch + 1)
+      || (next.minor === current.minor + 1 && next.patch === 0)
+    )
+  );
+}
+
+type ChangesetBump = 'patch' | 'minor' | 'major';
+
+type PendingChangeset = {
+  bump: ChangesetBump;
+  description: string;
+  file: string;
+  source: string;
+};
+
+export function prepareRepositoryRelease({
+  root = repositoryRoot,
+  date = new Date().toISOString().slice(0, 10)
+}: {
+  root?: string;
+  date?: string;
+} = {}) {
+  const parsedDate = new Date(`${date}T00:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date)
+    || Number.isNaN(parsedDate.valueOf())
+    || parsedDate.toISOString().slice(0, 10) !== date
+  ) {
+    throw new Error(`Release date must use YYYY-MM-DD: ${date}`);
+  }
+  const changesets = readPendingChangesets(root);
+  if (changesets.length === 0) {
+    throw new Error('Repository release preparation requires at least one pending Sampo changeset');
+  }
+
+  const packageBump = highestChangesetBump(changesets.map(({ bump }) => bump));
+  const repositoryBump = packageBump === 'patch' ? 'patch' : 'minor';
+  const fingerprint = fingerprintChangesets(changesets);
+  const currentVersion = repositoryReleaseVersion(root);
+  const changelogFile = join(root, 'CHANGELOG.md');
+  const composeEnvironmentFile = join(root, 'infra/docker-compose/.env.example');
+  const composeEnvironment = readFileSync(composeEnvironmentFile, 'utf8');
+  const composeVersion = composeEnvironmentVersion(composeEnvironment);
+  const changelog = readFileSync(changelogFile, 'utf8');
+  const firstReleaseHeading = changelog.search(/^## \[/m);
+  if (firstReleaseHeading === -1) {
+    throw new Error('CHANGELOG.md has no repository release heading');
+  }
+  const releaseHistory = changelog.slice(firstReleaseHeading);
+  const nextReleaseOffset = releaseHistory.slice(1).search(/^## \[/m);
+  const latestReleaseEntry = nextReleaseOffset === -1
+    ? releaseHistory
+    : releaseHistory.slice(0, nextReleaseOffset + 1);
+  const latestChangelogVersion = latestReleaseEntry.match(/^## \[([^\]]+)\]/)?.[1];
+  const marker = latestReleaseEntry.match(
+    /^<!-- webperf-release: from=(\S+); changesets=(sha256:[a-f0-9]{64}) -->$/m
+  );
+  if (marker?.[2] === fingerprint && latestChangelogVersion) {
+    const preparedFromVersion = validateReleaseVersion(marker[1]);
+    const preparedVersion = bumpRepositoryReleaseVersion(preparedFromVersion, packageBump);
+    if (preparedVersion !== latestChangelogVersion) {
+      throw new Error('The latest CHANGELOG.md release marker has an invalid version transition');
+    }
+    if (currentVersion === preparedFromVersion) {
+      if (composeVersion !== preparedFromVersion && composeVersion !== preparedVersion) {
+        throw new Error(
+          `Compose environment version ${composeVersion} does not match the recoverable repository release`
+        );
+      }
+      if (composeVersion !== preparedVersion) {
+        writeTextFileAtomically(
+          composeEnvironmentFile,
+          renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
+        );
+      }
+      writeTextFileAtomically(join(root, 'VERSION'), `${preparedVersion}\n`);
+    } else if (currentVersion !== preparedVersion) {
+      throw new Error(
+        `The latest CHANGELOG.md release marker does not match VERSION ${currentVersion}`
+      );
+    } else if (composeVersion !== preparedVersion) {
+      if (composeVersion !== preparedFromVersion) {
+        throw new Error(
+          `Compose environment version ${composeVersion} does not match the prepared repository release`
+        );
+      }
+      writeTextFileAtomically(
+        composeEnvironmentFile,
+        renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
+      );
+    }
+    return repositoryReleaseResult({
+      currentVersion: preparedFromVersion,
+      nextVersion: preparedVersion,
+      bump: repositoryBump,
+      changesets
+    });
+  }
+  if (latestChangelogVersion !== currentVersion) {
+    throw new Error(
+      `The latest CHANGELOG.md entry ${latestChangelogVersion ?? '(unreadable)'} must match VERSION ${currentVersion}`
+    );
+  }
+  if (composeVersion !== currentVersion) {
+    throw new Error(
+      `Compose environment version ${composeVersion} must match VERSION ${currentVersion}`
+    );
+  }
+  const nextVersion = bumpRepositoryReleaseVersion(currentVersion, packageBump);
+  const nextHeading = new RegExp(`^## \\[${escapeRegExp(nextVersion)}\\](?:\\s|$)`, 'm');
+  if (nextHeading.test(changelog)) {
+    throw new Error(`CHANGELOG.md already contains the next repository version ${nextVersion}`);
+  }
+  if (changelog.includes(`\n[${nextVersion}]:`)) {
+    throw new Error(`CHANGELOG.md already contains a link for ${nextVersion}`);
+  }
+
+  const descriptions = changesets.map(({ description }) => `- ${description}`).join('\n');
+  const entry = [
+    `## [${nextVersion}] — ${date}`,
+    '',
+    '### Changes',
+    '',
+    descriptions,
+    '',
+    `<!-- webperf-release: from=${currentVersion}; changesets=${fingerprint} -->`
+  ].join('\n');
+  const introduction = changelog.slice(0, firstReleaseHeading).trimEnd();
+  const priorReleases = changelog.slice(firstReleaseHeading).trim();
+  const releaseLink = `[${nextVersion}]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v${nextVersion}`;
+  const nextChangelog = `${introduction}\n\n${entry}\n\n${priorReleases}\n${releaseLink}\n`;
+
+  // Each replacement is atomic. Writing the changelog first is intentional:
+  // its release marker lets a retry recognize and finish any cross-file
+  // partial state without incrementing the version twice.
+  writeTextFileAtomically(changelogFile, nextChangelog);
+  writeTextFileAtomically(
+    composeEnvironmentFile,
+    renderComposeEnvironmentVersion(composeEnvironment, nextVersion)
+  );
+  writeTextFileAtomically(join(root, 'VERSION'), `${nextVersion}\n`);
+
+  return repositoryReleaseResult({
+    currentVersion,
+    nextVersion,
+    bump: repositoryBump,
+    changesets
+  });
 }
 
 export function writeReleaseImageMetadata({
@@ -225,7 +379,7 @@ export function renderReleaseBundle({
     `${JSON.stringify(runtimeMetadata, null, 2)}\n`
   );
 
-  for (const file of ['LICENSE', 'CHANGELOG.md', 'SECURITY.md']) {
+  for (const file of ['LICENSE', 'VERSION', 'CHANGELOG.md', 'SECURITY.md']) {
     copyFileSync(join(repositoryRoot, file), join(outputDirectory, file));
   }
   writeFileSync(join(outputDirectory, 'README.md'), releaseReadme(version));
@@ -350,6 +504,9 @@ function parseReleaseVersion(version: string): ParsedReleaseVersion {
   const core = prereleaseSeparator === -1 ? version : version.slice(0, prereleaseSeparator);
   const prerelease = prereleaseSeparator === -1 ? '' : version.slice(prereleaseSeparator + 1);
   const [major, minor, patch] = core.split('.').map(Number);
+  if (![major, minor, patch].every(Number.isSafeInteger)) {
+    throw new Error(`Release version components must be safe integers: ${version}`);
+  }
   return {
     raw: version,
     major,
@@ -359,42 +516,149 @@ function parseReleaseVersion(version: string): ParsedReleaseVersion {
   };
 }
 
-function compareReleaseVersions(left: ParsedReleaseVersion, right: ParsedReleaseVersion) {
-  for (const key of ['major', 'minor', 'patch'] as const) {
-    if (left[key] !== right[key]) {
-      return left[key] - right[key];
-    }
+function readPendingChangesets(root: string): PendingChangeset[] {
+  const changesetsDirectory = join(root, '.sampo/changesets');
+  if (!existsSync(changesetsDirectory) || !lstatSync(changesetsDirectory).isDirectory()) {
+    throw new Error(
+      `Sampo changesets directory is missing or invalid: ${changesetsDirectory}`
+    );
   }
-  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-    if (left.prerelease.length === right.prerelease.length) {
-      return 0;
-    }
-    if (left.prerelease.length === 0) {
-      return 1;
-    }
-    return -1;
+  return readdirSync(changesetsDirectory)
+    .filter((file) => file.endsWith('.md'))
+    .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
+    .map((file) => {
+      const contents = readFileSync(join(changesetsDirectory, file), 'utf8')
+        .replaceAll('\r\n', '\n');
+      const match = contents.match(/^---\n([\s\S]*?)\n---\n+([\s\S]*?)\s*$/);
+      if (!match) {
+        throw new Error(`Invalid Sampo changeset structure: ${file}`);
+      }
+      const declarations = match[1].split('\n').filter((line) => line.trim().length > 0);
+      if (declarations.length === 0) {
+        throw new Error(`Sampo changeset has no package bumps: ${file}`);
+      }
+      const bumps = declarations.map((declaration) => {
+        const declarationMatch = declaration.match(changesetBumpPattern);
+        if (!declarationMatch) {
+          throw new Error(`Invalid Sampo package bump in ${file}: ${declaration}`);
+        }
+        return declarationMatch[2] as ChangesetBump;
+      });
+      const body = match[2].trim().replace(/\s+/g, ' ');
+      if (!body) {
+        throw new Error(`Sampo changeset has no release description: ${file}`);
+      }
+      if (
+        /^#{1,6}\s/.test(body)
+        || body.includes('<!-- webperf-release:')
+        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(body)
+      ) {
+        throw new Error(`Sampo changeset has an unsafe release description: ${file}`);
+      }
+      return {
+        bump: highestChangesetBump(bumps),
+        description: body,
+        file,
+        source: contents
+      };
+    });
+}
+
+function changesetBumpRank(bump: ChangesetBump) {
+  return { patch: 0, minor: 1, major: 2 }[bump];
+}
+
+function highestChangesetBump(bumps: ChangesetBump[]) {
+  return bumps.reduce<ChangesetBump>(
+    (highest, bump) => (
+      changesetBumpRank(bump) > changesetBumpRank(highest) ? bump : highest
+    ),
+    'patch'
+  );
+}
+
+function bumpRepositoryReleaseVersion(version: string, bump: ChangesetBump) {
+  const parsed = parseReleaseVersion(version);
+  if (parsed.prerelease.length > 0) {
+    throw new Error(`Automated repository releases require a stable VERSION: ${version}`);
   }
-  const length = Math.max(left.prerelease.length, right.prerelease.length);
-  for (let index = 0; index < length; index += 1) {
-    const leftIdentifier = left.prerelease[index];
-    const rightIdentifier = right.prerelease[index];
-    if (leftIdentifier === undefined || rightIdentifier === undefined) {
-      return leftIdentifier === undefined ? -1 : 1;
-    }
-    if (leftIdentifier === rightIdentifier) {
-      continue;
-    }
-    const leftNumeric = /^\d+$/.test(leftIdentifier);
-    const rightNumeric = /^\d+$/.test(rightIdentifier);
-    if (leftNumeric && rightNumeric) {
-      return Number(leftIdentifier) - Number(rightIdentifier);
-    }
-    if (leftNumeric !== rightNumeric) {
-      return leftNumeric ? -1 : 1;
-    }
-    return leftIdentifier < rightIdentifier ? -1 : 1;
+  if (bump === 'patch') {
+    return parseReleaseVersion(
+      `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`
+    ).raw;
   }
-  return 0;
+  // Until v1, package minor and major changes both advance the repository
+  // minor so breaking public-beta releases remain inside the v0 channel.
+  return parseReleaseVersion(`${parsed.major}.${parsed.minor + 1}.0`).raw;
+}
+
+function fingerprintChangesets(changesets: PendingChangeset[]) {
+  const hash = createHash('sha256');
+  for (const { file, source } of changesets) {
+    hash.update(file);
+    hash.update('\0');
+    hash.update(source);
+    hash.update('\0');
+  }
+  return `sha256:${hash.digest('hex')}`;
+}
+
+function repositoryReleaseResult({
+  currentVersion,
+  nextVersion,
+  bump,
+  changesets
+}: {
+  currentVersion: string;
+  nextVersion: string;
+  bump: 'patch' | 'minor';
+  changesets: PendingChangeset[];
+}) {
+  return {
+    currentVersion,
+    nextVersion,
+    bump,
+    changesets: changesets.map(({ file }) => file)
+  };
+}
+
+export function composeEnvironmentVersion(environment: string) {
+  const versions = environment
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('WEBPERF_VERSION='))
+    .map((line) => line.slice('WEBPERF_VERSION='.length));
+  if (versions.length !== 1) {
+    throw new Error('Compose environment must contain exactly one WEBPERF_VERSION');
+  }
+  return validateReleaseVersion(versions[0]);
+}
+
+function renderComposeEnvironmentVersion(environment: string, version: string) {
+  validateReleaseVersion(version);
+  composeEnvironmentVersion(environment);
+  return environment.replace(
+    /^WEBPERF_VERSION=.*$/m,
+    `WEBPERF_VERSION=${version}`
+  );
+}
+
+function writeTextFileAtomically(file: string, contents: string) {
+  const temporaryFile = join(
+    dirname(file),
+    `.webperf-release-${basename(file)}-${randomUUID()}.tmp`
+  );
+  try {
+    const descriptor = openSync(temporaryFile, 'wx', 0o644);
+    try {
+      writeFileSync(descriptor, contents);
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+    renameSync(temporaryFile, file);
+  } finally {
+    rmSync(temporaryFile, { force: true });
+  }
 }
 
 function writeChecksums(outputDirectory: string) {
@@ -462,9 +726,13 @@ if (import.meta.main) {
       console.log(
         JSON.stringify({ ok: true, version: validateRepositoryReleaseVersion(args[0]) })
       );
+    } else if (command === 'repository-version' && args.length === 0) {
+      console.log(JSON.stringify({ ok: true, version: repositoryReleaseVersion() }));
+    } else if (command === 'prepare-repository-release' && args.length === 0) {
+      console.log(JSON.stringify({ ok: true, ...prepareRepositoryRelease() }));
     } else {
       throw new Error(
-        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version>'
+        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version> | repository-version | prepare-repository-release'
       );
     }
   } catch (error) {

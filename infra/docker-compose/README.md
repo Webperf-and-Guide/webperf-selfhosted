@@ -25,6 +25,10 @@ docker compose \
   up -d
 ```
 
+`selfhost:init` copies the checked-in template whose `WEBPERF_VERSION` is
+validated against root `VERSION`; automated release preparation advances both
+together.
+
 Open `http://localhost:5173`. The persistent volume `webperf-data` owns both
 the SQLite database and Browser Audit artifacts below `/data`.
 

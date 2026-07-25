@@ -62,6 +62,7 @@
     "jsrepo": "^3.7.0",
     "playwright": "^1.54.2",
     "runed": "^0.37.1",
+    "sampo": "0.19.0",
     "shadcn-svelte": "^1.2.7",
     "svelte-toolbelt": "^0.10.6",
     "tailwind-merge": "^3.5.0",

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+  composeEnvironmentVersion,
   isRepositoryReleaseSuccessor,
   releaseImages,
   renderReleaseBundle,
@@ -31,6 +32,10 @@ describe('release bundle generation', () => {
     expect(isRepositoryReleaseSuccessor('0.2.7', '0.3.0')).toBeTrue();
     expect(isRepositoryReleaseSuccessor('0.2.7', '0.4.0')).toBeFalse();
     expect(isRepositoryReleaseSuccessor('0.2.7', '0.2.9')).toBeFalse();
+    expect(composeEnvironmentVersion('WEBPERF_VERSION=0.2.0\n')).toBe('0.2.0');
+    expect(() => composeEnvironmentVersion(
+      'WEBPERF_VERSION=0.2.0\nWEBPERF_VERSION=0.2.1\n'
+    )).toThrow('exactly one WEBPERF_VERSION');
   });
 
   test('advances an independent repository patch and root changelog', () => {
@@ -56,6 +61,10 @@ Keep report comparison output deterministic across equivalent inputs.
       expectedResult
     );
     expect(readFileSync(join(root, 'VERSION'), 'utf8')).toBe('0.2.1\n');
+    expect(readFileSync(
+      join(root, 'infra/docker-compose/.env.example'),
+      'utf8'
+    )).toContain('WEBPERF_VERSION=0.2.1');
     const preparedChangelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
     expect(preparedChangelog).toContain(
       '## [0.2.1] — 2026-07-26\n\n### Changes\n\n'
@@ -72,11 +81,19 @@ Keep report comparison output deterministic across equivalent inputs.
     // A retry repairs the only cross-file partial state and does not bump
     // again after both files have already reached the prepared version.
     writeFileSync(join(root, 'VERSION'), '0.2.0\n');
+    writeFileSync(
+      join(root, 'infra/docker-compose/.env.example'),
+      'WEBPERF_VERSION=0.2.0\nUNCHANGED=value\n'
+    );
     expect(prepareRepositoryRelease({ root, date: '2026-07-27' })).toEqual(
       expectedResult
     );
     expect(readFileSync(join(root, 'VERSION'), 'utf8')).toBe('0.2.1\n');
     expect(readFileSync(join(root, 'CHANGELOG.md'), 'utf8')).toBe(preparedChangelog);
+    expect(composeEnvironmentVersion(readFileSync(
+      join(root, 'infra/docker-compose/.env.example'),
+      'utf8'
+    ))).toBe('0.2.1');
     expect(prepareRepositoryRelease({ root, date: '2026-07-27' })).toEqual(
       expectedResult
     );
@@ -286,8 +303,14 @@ function writeRepositoryReleaseFixture({
 }) {
   const root = makeTemporaryDirectory();
   const changesetsDirectory = join(root, '.sampo/changesets');
+  const composeDirectory = join(root, 'infra/docker-compose');
   mkdirSync(changesetsDirectory, { recursive: true });
+  mkdirSync(composeDirectory, { recursive: true });
   writeFileSync(join(root, 'VERSION'), `${version}\n`);
+  writeFileSync(
+    join(composeDirectory, '.env.example'),
+    `WEBPERF_VERSION=${version}\nUNCHANGED=value\n`
+  );
   writeFileSync(
     join(root, 'CHANGELOG.md'),
     `# Changelog\n\nRepository release history.\n\n## [${version}] — 2026-07-25\n\nInitial release.\n\n[${version}]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v${version}\n`

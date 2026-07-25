@@ -6,7 +6,8 @@ Environment authorizes publication. `.github/workflows/release-pr.yml`
 consumes pending Sampo changesets in a generated PR and dispatches that formal
 workflow after the release PR merges. Root `VERSION` is the independent
 repository-release version; the preparation workflow advances it and generates
-the corresponding root changelog entry from the pending changesets.
+the corresponding root changelog entry from the pending changesets while
+synchronizing the source Compose `WEBPERF_VERSION`.
 
 Each release contains:
 
@@ -27,7 +28,8 @@ Before creating a release tag, merge the generated Sampo release PR. The
 workflow rejects tags outside `main` history, repositories with pending
 changeset Markdown files, versions that differ from root `VERSION`, dispatches
 whose checkout differs from the requested source commit, and existing tags that
-point to a different commit.
+point to a different commit. The source must be the main first-parent commit
+that changed `VERSION`, and operator-pushed tags must be annotated.
 
 Repository administrators must configure the `release` Environment with a
 required reviewer and deployment rules limited to the `main` branch plus

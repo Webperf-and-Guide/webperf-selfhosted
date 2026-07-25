@@ -138,6 +138,9 @@ export function prepareRepositoryRelease({
   const fingerprint = fingerprintChangesets(changesets);
   const currentVersion = repositoryReleaseVersion(root);
   const changelogFile = join(root, 'CHANGELOG.md');
+  const composeEnvironmentFile = join(root, 'infra/docker-compose/.env.example');
+  const composeEnvironment = readFileSync(composeEnvironmentFile, 'utf8');
+  const composeVersion = composeEnvironmentVersion(composeEnvironment);
   const changelog = readFileSync(changelogFile, 'utf8');
   const firstReleaseHeading = changelog.search(/^## \[/m);
   if (firstReleaseHeading === -1) {
@@ -159,10 +162,31 @@ export function prepareRepositoryRelease({
       throw new Error('The latest CHANGELOG.md release marker has an invalid version transition');
     }
     if (currentVersion === preparedFromVersion) {
+      if (composeVersion !== preparedFromVersion && composeVersion !== preparedVersion) {
+        throw new Error(
+          `Compose environment version ${composeVersion} does not match the recoverable repository release`
+        );
+      }
+      if (composeVersion !== preparedVersion) {
+        writeTextFileAtomically(
+          composeEnvironmentFile,
+          renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
+        );
+      }
       writeTextFileAtomically(join(root, 'VERSION'), `${preparedVersion}\n`);
     } else if (currentVersion !== preparedVersion) {
       throw new Error(
         `The latest CHANGELOG.md release marker does not match VERSION ${currentVersion}`
+      );
+    } else if (composeVersion !== preparedVersion) {
+      if (composeVersion !== preparedFromVersion) {
+        throw new Error(
+          `Compose environment version ${composeVersion} does not match the prepared repository release`
+        );
+      }
+      writeTextFileAtomically(
+        composeEnvironmentFile,
+        renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
       );
     }
     return repositoryReleaseResult({
@@ -175,6 +199,11 @@ export function prepareRepositoryRelease({
   if (latestChangelogVersion !== currentVersion) {
     throw new Error(
       `The latest CHANGELOG.md entry ${latestChangelogVersion ?? '(unreadable)'} must match VERSION ${currentVersion}`
+    );
+  }
+  if (composeVersion !== currentVersion) {
+    throw new Error(
+      `Compose environment version ${composeVersion} must match VERSION ${currentVersion}`
     );
   }
   const nextVersion = bumpRepositoryReleaseVersion(currentVersion, packageBump);
@@ -202,9 +231,13 @@ export function prepareRepositoryRelease({
   const nextChangelog = `${introduction}\n\n${entry}\n\n${priorReleases}\n${releaseLink}\n`;
 
   // Each replacement is atomic. Writing the changelog first is intentional:
-  // its release marker lets a retry recognize and finish the only possible
-  // cross-file partial state without incrementing the version twice.
+  // its release marker lets a retry recognize and finish any cross-file
+  // partial state without incrementing the version twice.
   writeTextFileAtomically(changelogFile, nextChangelog);
+  writeTextFileAtomically(
+    composeEnvironmentFile,
+    renderComposeEnvironmentVersion(composeEnvironment, nextVersion)
+  );
   writeTextFileAtomically(join(root, 'VERSION'), `${nextVersion}\n`);
 
   return repositoryReleaseResult({
@@ -587,6 +620,26 @@ function repositoryReleaseResult({
     bump,
     changesets: changesets.map(({ file }) => file)
   };
+}
+
+export function composeEnvironmentVersion(environment: string) {
+  const versions = environment
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('WEBPERF_VERSION='))
+    .map((line) => line.slice('WEBPERF_VERSION='.length));
+  if (versions.length !== 1) {
+    throw new Error('Compose environment must contain exactly one WEBPERF_VERSION');
+  }
+  return validateReleaseVersion(versions[0]);
+}
+
+function renderComposeEnvironmentVersion(environment: string, version: string) {
+  validateReleaseVersion(version);
+  composeEnvironmentVersion(environment);
+  return environment.replace(
+    /^WEBPERF_VERSION=.*$/m,
+    `WEBPERF_VERSION=${version}`
+  );
 }
 
 function writeTextFileAtomically(file: string, contents: string) {

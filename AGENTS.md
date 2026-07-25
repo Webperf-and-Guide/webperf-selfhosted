@@ -91,6 +91,7 @@ Current repo state as of 2026-07-24:
 - tagged releases now publish digest-bearing `runtime-metadata.json` as the managed runtime handoff, replacing mutable checked-in image refs
 - pending Sampo changesets now produce one generated `release/sampo` PR, and merging that PR dispatches an idempotent protected release that creates the immutable `v0.x.y` tag before publishing versioned GHCR images
 - repository releases now advance an independent root `VERSION` and generate a fingerprint-backed, interruption-safe root changelog entry from pending Sampo changesets, while formal dispatches pin checkout and reusable CI to the exact prepared main commit
+- coalesced release-preparation runs now reconcile the current untagged version before newer changesets, resolve its source from the main first-parent commit that changed `VERSION`, keep the source Compose image version synchronized, and require annotated manual tags
 - formal release preparation and tag publication now share one tested immutable-tag helper, so existing-tag identity checks cannot drift between the preflight and post-approval jobs
 - the initial public-beta changeset set is now consumed into `@webperf/config`, `@webperf/contracts`, and `@webperf/domain-core` `0.2.0` plus `@webperf/report-core` `0.1.1`, with package changelogs and a repository-level `0.2.0` release summary
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows

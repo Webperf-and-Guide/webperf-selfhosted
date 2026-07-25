@@ -19,7 +19,8 @@ CI used by pull requests against that pinned source and waits for the protected
 `release` GitHub Environment. Once approved, it creates or verifies the matching
 `v0.x.y` repository tag, publishes all six images with version and source-SHA
 tags, generates SPDX SBOMs and provenance attestations, and creates a GitHub
-Release. A manually pushed `v0.x.y` tag enters the same protected path.
+Release. A manually pushed annotated `v0.x.y` tag enters the same protected
+path.
 
 The downloadable release bundle contains a `compose.yml` in which every image
 is pinned by OCI digest. It also contains:
@@ -59,7 +60,11 @@ Sampo changesets are the source for JS/TS package versions and release notes.
 Feature PRs add changesets but do not consume them. After those PRs merge,
 [`release-pr.yml`](../../.github/workflows/release-pr.yml) creates or refreshes
 `release/sampo` with generated package versions and changelogs plus an
-independently advanced root `VERSION` and matching root changelog entry.
+independently advanced root `VERSION`, matching root changelog entry, and
+synchronized source Compose image version. Before preparing newer changesets,
+each run reconciles any untagged current repository version from the exact main
+first-parent commit where `VERSION` changed, so coalesced workflow events do not
+drop a release.
 
 ```sh
 gh pr view --repo Webperf-and-Guide/webperf-selfhosted
@@ -71,14 +76,24 @@ The release PR merge automatically dispatches the formal workflow when the
 matching tag is absent. To retry safely:
 
 ```sh
+git fetch origin main
+source_sha="$(git rev-list --first-parent -1 origin/main -- VERSION)"
+version="$(git show "${source_sha}:VERSION")"
 gh workflow run release.yml --ref main \
-  -f version=0.x.y \
-  -f source_sha="$(git rev-parse origin/main)"
+  -f version="$version" \
+  -f source_sha="$source_sha"
 ```
 
 The workflow refuses pending changesets, a source outside `main` history, a
 version that does not match root `VERSION`, a checkout that does not match the
-requested source commit, or an existing tag that points elsewhere.
+requested source commit, a source that did not change `VERSION` on main's
+first-parent history, or an existing tag that points elsewhere. A manually
+pushed tag must be annotated:
+
+```sh
+git tag -a "v${version}" "$source_sha" -m "WebPerf ${version}"
+git push origin "refs/tags/v${version}"
+```
 
 ## Local image builds
 

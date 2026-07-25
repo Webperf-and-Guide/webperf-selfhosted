@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  composeEnvironmentVersion,
   isRepositoryReleaseSuccessor,
   releaseImages,
   repositoryReleaseVersion
@@ -118,8 +119,11 @@ for (const requiredFragment of [
   'workflow_dispatch:',
   'uses: ./.github/workflows/ci.yml',
   'source_sha:',
+  'run-name: release ${{',
   "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}",
   'source_sha: ${{ needs.prepare.outputs.source_sha }}',
+  'git rev-list --first-parent refs/remotes/origin/main',
+  'Release source must be the main commit that changed VERSION.',
   'sbom: true',
   'provenance: mode=max',
   'actions/attest@',
@@ -142,6 +146,7 @@ for (const requiredFragment of [
   'pull-requests: write',
   'Require main release preparation',
   "refs/heads/main",
+  'infra/docker-compose/.env.example',
   'SAMPO_RELEASE_BRANCH: main',
   'prepare-repository-release',
   'bun run sampo:release',
@@ -149,9 +154,11 @@ for (const requiredFragment of [
   'peter-evans/create-pull-request@',
   'branch: release/sampo',
   'gh run list',
+  'RELEASE_RUN_TITLE',
   'gh workflow run ci.yml --ref',
   'repository-version',
-  'source_sha="$(git rev-parse HEAD)"',
+  'source_sha="$(git rev-list --first-parent -1 HEAD -- VERSION)"',
+  'if git diff --quiet "${source_sha}^1" "$source_sha" -- VERSION; then',
   'gh workflow run release.yml --ref main',
   '-f "source_sha=${SOURCE_SHA}"'
 ]) {
@@ -161,6 +168,19 @@ for (const requiredFragment of [
 }
 if (releasePrWorkflow !== undefined && releasePrWorkflow.includes('sampo:publish')) {
   violations.push('release-pr.yml: container release preparation must not publish npm packages');
+}
+if (releasePrWorkflow !== undefined) {
+  const reconcileIndex = releasePrWorkflow.indexOf('Resolve current repository release');
+  const changesetIndex = releasePrWorkflow.indexOf('Detect pending Sampo changesets');
+  if (
+    reconcileIndex === -1
+    || changesetIndex === -1
+    || reconcileIndex >= changesetIndex
+  ) {
+    violations.push(
+      'release-pr.yml: the current repository release must be reconciled before newer changesets'
+    );
+  }
 }
 
 for (const requiredFragment of [
@@ -214,9 +234,20 @@ try {
       `CHANGELOG.md: latest entry ${latestChangelogVersion ?? '(unreadable)'} does not match repository VERSION ${repositoryVersion}`
     );
   }
+  const composeVersion = composeEnvironmentVersion(
+    readFileSync(join(root, 'infra/docker-compose/.env.example'), 'utf8')
+  );
+  if (
+    composeVersion !== repositoryVersion
+    && !(recoverablePreparation && composeVersion === latestChangelogVersion)
+  ) {
+    violations.push(
+      `infra/docker-compose/.env.example: WEBPERF_VERSION ${composeVersion} does not match repository release state`
+    );
+  }
 } catch (error) {
   violations.push(
-    `VERSION/CHANGELOG: ${error instanceof Error ? error.message : 'repository version or changelog is unreadable'}`
+    `repository release state: ${error instanceof Error ? error.message : 'release metadata is unreadable'}`
   );
 }
 

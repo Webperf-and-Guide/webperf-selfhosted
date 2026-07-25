@@ -8,12 +8,15 @@ on:
       - '.sampo/config.toml'
       - 'VERSION'
       - 'CHANGELOG.md'
+      - 'infra/docker-compose/.env.example'
       - 'package.json'
       - 'bun.lock'
       - 'packages/**/package.json'
   workflow_dispatch:
 
 concurrency:
+  # Runs are intentionally coalescible: every surviving run reconciles the
+  # current VERSION and its first-parent source before preparing newer changes.
   group: release-pr-main
   cancel-in-progress: false
 
@@ -47,6 +50,71 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
+      - name: Resolve current repository release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(
+            bun tooling/scripts/release-bundle.ts repository-version \
+              | jq -er '.version'
+          )"
+          source_sha="$(git rev-list --first-parent -1 HEAD -- VERSION)"
+          if [[ ! "$source_sha" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            echo 'Cannot resolve the main commit that prepared VERSION.' >&2
+            exit 1
+          fi
+          if [[ "$(git show "${source_sha}:VERSION")" != "$version" ]]; then
+            echo 'The prepared release source does not contain the current VERSION.' >&2
+            exit 1
+          fi
+          if git diff --quiet "${source_sha}^1" "$source_sha" -- VERSION; then
+            echo 'The prepared release source did not change VERSION.' >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          dispatch=true
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            dispatch=false
+          else
+            export RELEASE_RUN_TITLE="release ${tag}"
+            active_release_count="$(
+              gh run list \
+                --workflow release.yml \
+                --limit 100 \
+                --json displayTitle,status \
+                --jq '
+                  map(
+                    select(
+                      .displayTitle == env.RELEASE_RUN_TITLE
+                      and .status != "completed"
+                    )
+                  ) | length
+                '
+            )"
+            if [[ "$active_release_count" != '0' ]]; then
+              dispatch=false
+            fi
+          fi
+
+          echo "dispatch=${dispatch}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+      - name: Dispatch protected formal release
+        if: ${{ steps.release.outputs.dispatch == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
+          VERSION: ${{ steps.release.outputs.version }}
+        # workflow_dispatch is explicit because GITHUB_TOKEN-authored tag pushes
+        # do not recursively start another release workflow.
+        run: >-
+          gh workflow run release.yml --ref main
+          -f "version=${VERSION}"
+          -f "source_sha=${SOURCE_SHA}"
       - name: Detect pending Sampo changesets
         id: changesets
         shell: bash
@@ -146,38 +214,3 @@ jobs:
               ;;
           esac
           gh workflow run ci.yml --ref "$RELEASE_PR_BRANCH"
-      - name: Resolve undispatched repository release
-        if: ${{ steps.changesets.outputs.pending == 'false' }}
-        id: release
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_sha="$(git rev-parse HEAD)"
-          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
-            echo 'The checked-out release commit does not match the triggering main commit.' >&2
-            exit 1
-          fi
-          version="$(
-            bun tooling/scripts/release-bundle.ts repository-version \
-              | jq -er '.version'
-          )"
-          tag="v${version}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
-            echo 'dispatch=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'dispatch=true' >> "$GITHUB_OUTPUT"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
-      - name: Dispatch protected formal release
-        if: ${{ steps.release.outputs.dispatch == 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
-          VERSION: ${{ steps.release.outputs.version }}
-        # workflow_dispatch is explicit because GITHUB_TOKEN-authored tag pushes
-        # do not recursively start another release workflow.
-        run: >-
-          gh workflow run release.yml --ref main
-          -f "version=${VERSION}"
-          -f "source_sha=${SOURCE_SHA}"

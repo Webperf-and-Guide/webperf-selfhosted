@@ -26,23 +26,31 @@ Every push to `main` that carries pending changesets starts
 Sampo version locked in `bun.lock` to consume all pending changesets on the
 `release/sampo` branch. Before Sampo consumes them, the workflow uses their
 largest bump to advance root `VERSION` and generate a matching root
-`CHANGELOG.md` entry. Package `minor` and `major` changes both advance the
-repository minor while WebPerf remains in public beta; an all-patch set advances
-the repository patch. The generated changelog entry carries a hidden changeset
-fingerprint so an interrupted local preparation can safely finish or rerun
-without advancing twice. It synchronizes the lockfile, then creates or refreshes
-one release PR. Feature PRs do not consume their own changesets. Because GitHub
+`CHANGELOG.md` entry, and keeps the source Compose `WEBPERF_VERSION` aligned.
+Package `minor` and `major` changes both advance the repository minor while
+WebPerf remains in public beta; an all-patch set advances the repository patch.
+The generated changelog entry carries a hidden changeset fingerprint so an
+interrupted local preparation can safely finish or rerun without advancing
+twice. It synchronizes the lockfile, then creates or refreshes one release PR.
+Feature PRs do not consume their own changesets. Because GitHub
 suppresses ordinary workflow events caused by its built-in token, the
 preparation workflow ensures Required CI runs against the generated branch. A
 manual retry reuses a successful or still-running check for the same commit and
 dispatches a fresh run only when the previous check failed, was cancelled, or
 never started.
 
+Before it prepares any newer changesets, every surviving workflow run
+reconciles the current root version. It resolves the exact commit where
+`VERSION` last changed on main's first-parent history and dispatches that source
+when its tag and an active matching release run are both absent. This makes
+GitHub concurrency coalescing safe: a later main event can replace a queued
+event without losing the already prepared repository release.
+
 Review the generated repository version, root changelog, package versions, and
 package changelogs, and merge only after Required CI passes. When that PR
 reaches `main`, the same workflow resolves root `VERSION`. If `v<version>` does
-not exist, it dispatches the protected formal release pinned to that exact merge
-commit.
+not exist, it dispatches the protected formal release pinned to the main commit
+that changed that version.
 
 The release-preparation workflow never runs `sampo publish`; npm publication is
 a separate future concern. Sampo remains the version/changelog source, while
@@ -56,7 +64,7 @@ The dispatched release validates that:
 - every changeset was consumed;
 - the requested version matches root `VERSION`;
 - the checked-out source exactly matches the prepared commit;
-- the source commit belongs to `main`; and
+- the source commit changed `VERSION` on main's first-parent history; and
 - an existing `v<version>` tag, if present, points to that exact commit.
 
 It then runs Required CI and waits on the protected `release` GitHub
@@ -68,13 +76,24 @@ For recovery or an intentionally manual release, dispatch the same idempotent
 workflow:
 
 ```sh
+git fetch origin main
+source_sha="$(git rev-list --first-parent -1 origin/main -- VERSION)"
+version="$(git show "${source_sha}:VERSION")"
 gh workflow run release.yml --ref main \
-  -f version=0.x.y \
-  -f source_sha="$(git rev-parse origin/main)"
+  -f version="$version" \
+  -f source_sha="$source_sha"
 ```
 
-A manually pushed `v0.x.y` tag remains supported and enters the same validation,
-approval, image, and bundle jobs.
+Alternatively, a manually pushed tag remains supported, but it must be an
+annotated tag at that same prepared source:
+
+```sh
+git tag -a "v${version}" "$source_sha" -m "WebPerf ${version}"
+git push origin "refs/tags/v${version}"
+```
+
+That tag enters the same validation, approval, image, and bundle jobs. A
+lightweight `git tag v0.x.y` is rejected.
 
 ## Automated release gates
 

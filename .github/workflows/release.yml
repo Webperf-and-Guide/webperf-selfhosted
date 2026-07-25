@@ -1,4 +1,5 @@
 name: release
+run-name: release ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
 
 on:
   push:
@@ -66,6 +67,25 @@ jobs:
           bun tooling/scripts/release-bundle.ts validate-repository-version "$version"
           git fetch --no-tags origin main:refs/remotes/origin/main
           git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main
+          first_parent_match="$(
+            git rev-list --first-parent refs/remotes/origin/main \
+              | awk -v expected="$source_sha" '
+                  $0 == expected { found = 1 }
+                  END { if (found) print expected }
+                '
+          )"
+          if [[ "$first_parent_match" != "$source_sha" ]]; then
+            echo 'Release source must be on the main first-parent history.' >&2
+            exit 1
+          fi
+          if ! git rev-parse "${source_sha}^1" >/dev/null 2>&1; then
+            echo 'Release source must have a main parent.' >&2
+            exit 1
+          fi
+          if git diff --quiet "${source_sha}^1" "$source_sha" -- VERSION; then
+            echo 'Release source must be the main commit that changed VERSION.' >&2
+            exit 1
+          fi
           if find .sampo/changesets -maxdepth 1 -type f -name '*.md' -print -quit | grep -q .; then
             echo "Apply and commit every pending Sampo changeset before tagging a release." >&2
             exit 1

@@ -2,8 +2,20 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
-import type { BrowserAuditWorkerRequest } from '@webperf/contracts';
-import { appContract, opsContract, publicContract } from '@webperf/contracts';
+import type {
+  AnalysisResource,
+  BrowserAuditWorkerRequest,
+  ComparisonResource,
+  CreateAnalysisInput,
+  CreateComparisonInput
+} from '@webperf/contracts';
+import {
+  analysisResourceSchema,
+  appContract,
+  comparisonResourceSchema,
+  opsContract,
+  publicContract
+} from '@webperf/contracts';
 import { controlContract } from '@webperf/contracts/control-contract';
 import type { CheckProfileReportResponse } from '@webperf/contracts';
 import { createBrowserAuditSignature } from '@webperf/domain-core';
@@ -660,11 +672,56 @@ describe('api service monitoring expansion', () => {
       expect(filteredChecksPayload.pageInfo.filter).toBe('uptime');
       expect(filteredChecksPayload.checks[0]?.name).toBe('Profile uptime');
 
+      probe.setScenario({
+        latencyMs: 800,
+        statusCode: 200,
+        success: true,
+        error: null
+      });
       await runCheckProfile(harness.baseUrl, thresholdProfile.id);
       await drainExecutions(harness.baseUrl, probe.port);
       const runs = await waitForRuns(harness.baseUrl, thresholdProfile.id, 2);
       const latestRun = runs[0]!;
       const previousRun = runs[1]!;
+      const regressedRun = runs.find((run) => run.evaluation?.worstLatencyMs === 800);
+      const comparisonRun = runs.find((run) => run.evaluation?.worstLatencyMs === 650);
+
+      if (!regressedRun || !comparisonRun) {
+        const observedLatencies = runs.map((run) => run.evaluation?.worstLatencyMs);
+        throw new Error(
+          `Expected deterministic probe latencies (800ms, 650ms), got ${JSON.stringify(observedLatencies)}`
+        );
+      }
+
+      const setBaselineResponse = await fetch(
+        `${harness.baseUrl}/v1/checks/${thresholdProfile.id}/baseline`,
+        {
+          method: 'PUT',
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({ runId: previousRun.id })
+        }
+      );
+      const setBaselinePayload = await setBaselineResponse.json() as {
+        check: { baseline: { runId: string } | null };
+        baselineRun: { id: string } | null;
+      };
+      expect(setBaselineResponse.status).toBe(200);
+      expect(setBaselinePayload.check.baseline?.runId).toBe(previousRun.id);
+      expect(setBaselinePayload.baselineRun?.id).toBe(previousRun.id);
+
+      const getBaselineResponse = await fetch(
+        `${harness.baseUrl}/v1/checks/${thresholdProfile.id}/baseline`
+      );
+      const getBaselinePayload = await getBaselineResponse.json() as {
+        check: { id: string; baseline: { runId: string } | null };
+        baselineRun: { id: string } | null;
+      };
+      expect(getBaselineResponse.status).toBe(200);
+      expect(getBaselinePayload.check.id).toBe(thresholdProfile.id);
+      expect(getBaselinePayload.check.baseline?.runId).toBe(previousRun.id);
+      expect(getBaselinePayload.baselineRun?.id).toBe(previousRun.id);
 
       const checkRunsPageResponse = await fetch(`${harness.baseUrl}/v1/checks/${thresholdProfile.id}/runs?pageSize=1`);
       const checkRunsPagePayload = await checkRunsPageResponse.json() as {
@@ -699,33 +756,31 @@ describe('api service monitoring expansion', () => {
       expect(runDetailPayload.run.id).toBe(latestRun.id);
       expect(runDetailPayload.jobs.length).toBeGreaterThan(0);
 
-      const comparisonResponse = await fetch(`${harness.baseUrl}/v1/comparisons`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          checkId: thresholdProfile.id,
-          runId: latestRun.id,
-          target: { type: 'latest_previous' }
-        })
+      const comparison = await createComparison(harness.baseUrl, {
+        checkId: thresholdProfile.id,
+        runId: latestRun.id,
+        target: { type: 'latest_previous' }
       });
-      const comparison = await comparisonResponse.json() as { id: string };
-      expect(comparisonResponse.status).toBe(201);
+      const customComparison = await createComparison(harness.baseUrl, {
+        checkId: thresholdProfile.id,
+        runId: latestRun.id,
+        target: { type: 'run', runId: previousRun.id }
+      });
+      const baselineComparison = await createComparison(harness.baseUrl, {
+        checkId: thresholdProfile.id,
+        runId: latestRun.id,
+        target: { type: 'baseline' }
+      });
+      expect(baselineComparison.mode).toBe('baseline');
+      expect(baselineComparison.currentRun.id).toBe(latestRun.id);
+      expect(baselineComparison.comparedRun?.id).toBe(previousRun.id);
 
-      const customComparisonResponse = await fetch(`${harness.baseUrl}/v1/comparisons`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          checkId: thresholdProfile.id,
-          runId: latestRun.id,
-          target: { type: 'run', runId: previousRun.id }
-        })
+      const regressionComparison = await createComparison(harness.baseUrl, {
+        checkId: thresholdProfile.id,
+        runId: regressedRun.id,
+        target: { type: 'run', runId: comparisonRun.id }
       });
-      const customComparison = await customComparisonResponse.json() as { id: string };
-      expect(customComparisonResponse.status).toBe(201);
+      expect(regressionComparison.summary.regressed).toBeGreaterThan(0);
 
       const comparisonsPageResponse = await fetch(`${harness.baseUrl}/v1/comparisons?pageSize=1`);
       const comparisonsPagePayload = await comparisonsPageResponse.json() as {
@@ -733,7 +788,7 @@ describe('api service monitoring expansion', () => {
         pageInfo: { totalCount: number; nextPageToken: string | null };
       };
       expect(comparisonsPageResponse.status).toBe(200);
-      expect(comparisonsPagePayload.pageInfo.totalCount).toBe(2);
+      expect(comparisonsPagePayload.pageInfo.totalCount).toBe(4);
       expect(comparisonsPagePayload.pageInfo.nextPageToken).not.toBeNull();
 
       const filteredComparisonsResponse = await fetch(`${harness.baseUrl}/v1/comparisons?pageSize=5&filter=custom`);
@@ -742,9 +797,11 @@ describe('api service monitoring expansion', () => {
         pageInfo: { totalCount: number; filter: string | null };
       };
       expect(filteredComparisonsResponse.status).toBe(200);
-      expect(filteredComparisonsPayload.pageInfo.totalCount).toBe(1);
+      expect(filteredComparisonsPayload.pageInfo.totalCount).toBe(2);
       expect(filteredComparisonsPayload.pageInfo.filter).toBe('custom');
-      expect(filteredComparisonsPayload.comparisons[0]?.id).toBe(customComparison.id);
+      expect(filteredComparisonsPayload.comparisons.map(({ id }) => id)).toEqual(
+        expect.arrayContaining([customComparison.id, regressionComparison.id])
+      );
 
       const exportJsonResponse = await fetch(`${harness.baseUrl}/v1/exports`, {
         method: 'POST',
@@ -789,29 +846,69 @@ describe('api service monitoring expansion', () => {
       expect(filteredExportsPayload.pageInfo.filter).toBe('csv');
       expect(filteredExportsPayload.exports[0]?.format).toBe('csv');
 
-      const analysisFromComparisonResponse = await fetch(`${harness.baseUrl}/v1/analyses`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          source: { type: 'comparison', comparisonId: comparison.id },
-          kind: 'regression_summary'
-        })
+      const analysisFromComparison = await createAnalysis(harness.baseUrl, {
+        source: { type: 'comparison', comparisonId: comparison.id },
+        kind: 'regression_summary'
       });
-      expect(analysisFromComparisonResponse.status).toBe(201);
+      expect(analysisFromComparison.generator).toEqual({
+        type: 'rule_engine',
+        version: 'v1'
+      });
+      expect(analysisFromComparison.status).toBe('succeeded');
 
-      const analysisFromRunResponse = await fetch(`${harness.baseUrl}/v1/analyses`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          source: { type: 'run', runId: latestRun.id, checkId: thresholdProfile.id },
-          kind: 'regression_summary'
-        })
+      await createAnalysis(harness.baseUrl, {
+        source: { type: 'run', runId: latestRun.id, checkId: thresholdProfile.id },
+        kind: 'regression_summary'
       });
-      expect(analysisFromRunResponse.status).toBe(201);
+
+      const regressionAnalysisInput = {
+        source: {
+          type: 'comparison' as const,
+          comparisonId: regressionComparison.id
+        },
+        kind: 'regression_summary' as const
+      };
+      const regressionAnalyses = [
+        await createAnalysis(harness.baseUrl, regressionAnalysisInput),
+        await createAnalysis(harness.baseUrl, regressionAnalysisInput)
+      ];
+      const analysisProjection = (analysis: AnalysisResource) => ({
+        generator: analysis.generator,
+        kind: analysis.kind,
+        status: analysis.status,
+        findings: analysis.output.findings.map(
+          ({ kind, severity, summary, evidenceRefs }) => ({
+            kind,
+            severity,
+            summary,
+            evidenceRefs
+          })
+        ),
+        recommendations: analysis.output.recommendations.map(
+          ({ kind, summary }) => ({ kind, summary })
+        ),
+        narrative: analysis.output.narrative
+      });
+      expect(analysisProjection(regressionAnalyses[0]!))
+        .toEqual(analysisProjection(regressionAnalyses[1]!));
+      expect(analysisProjection(regressionAnalyses[0]!)).toMatchObject({
+        generator: {
+          type: 'rule_engine',
+          version: 'v1'
+        },
+        kind: 'regression_summary',
+        status: 'succeeded',
+        findings: [{
+          kind: 'latency_regression',
+          severity: expect.stringMatching(/^(low|medium|high)$/),
+          summary: expect.stringContaining('region checks regressed'),
+          evidenceRefs: [regressionComparison.id]
+        }],
+        recommendations: [{
+          kind: 'inspect_regressed_routes',
+          summary: expect.any(String)
+        }]
+      });
 
       const analysesPageResponse = await fetch(`${harness.baseUrl}/v1/analyses?pageSize=1`);
       const analysesPagePayload = await analysesPageResponse.json() as {
@@ -819,7 +916,7 @@ describe('api service monitoring expansion', () => {
         pageInfo: { totalCount: number; nextPageToken: string | null };
       };
       expect(analysesPageResponse.status).toBe(200);
-      expect(analysesPagePayload.pageInfo.totalCount).toBe(2);
+      expect(analysesPagePayload.pageInfo.totalCount).toBe(4);
       expect(analysesPagePayload.pageInfo.nextPageToken).not.toBeNull();
 
       const filteredAnalysesResponse = await fetch(`${harness.baseUrl}/v1/analyses?pageSize=5&filter=run`);
@@ -1511,6 +1608,66 @@ const waitForWebhookPayloads = async (payloads: unknown[], expectedLength: numbe
   throw new Error(`Timed out waiting for ${expectedLength} webhook payloads`);
 };
 
+const createComparison = async (
+  baseUrl: string,
+  input: CreateComparisonInput
+): Promise<ComparisonResource> => {
+  const response = await fetch(`${baseUrl}/v1/comparisons`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(input)
+  });
+  return readCreatedResource(
+    response,
+    '/v1/comparisons',
+    (payload) => comparisonResourceSchema.parse(payload)
+  );
+};
+
+const createAnalysis = async (
+  baseUrl: string,
+  input: CreateAnalysisInput
+): Promise<AnalysisResource> => {
+  const response = await fetch(`${baseUrl}/v1/analyses`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(input)
+  });
+  return readCreatedResource(
+    response,
+    '/v1/analyses',
+    (payload) => analysisResourceSchema.parse(payload)
+  );
+};
+
+const readCreatedResource = async <T>(
+  response: Response,
+  endpoint: string,
+  parse: (payload: unknown) => T
+): Promise<T> => {
+  const body = await response.text();
+
+  if (response.status !== 201) {
+    throw new Error(
+      `${endpoint} returned ${response.status}: ${body.slice(0, 1_000)}`
+    );
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(body) as unknown;
+  } catch {
+    throw new Error(`${endpoint} returned invalid JSON with status 201`);
+  }
+
+  return parse(payload);
+};
+
 const createProperty = async (baseUrl: string) => {
   const response = await fetch(`${baseUrl}/v1/properties`, {
     method: 'POST',
@@ -1641,7 +1798,13 @@ const waitForRuns = async (baseUrl: string, profileId: string, expectedLength: n
 
     if (response.ok) {
       const payload = await response.json() as {
-        runs: Array<{ id: string; profileId: string }>;
+        runs: Array<{
+          id: string;
+          profileId: string;
+          evaluation: {
+            worstLatencyMs: number | null;
+          } | null;
+        }>;
       };
 
       if (payload.runs.length >= expectedLength) {

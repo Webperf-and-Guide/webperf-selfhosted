@@ -62,8 +62,7 @@ export function validateReleaseVersion(version: string) {
   return version;
 }
 
-export function validateRepositoryReleaseVersion(version: string) {
-  validateReleaseVersion(version);
+function highestRepositoryReleaseVersion() {
   const packageManifests = readdirSync(join(repositoryRoot, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => join(repositoryRoot, 'packages', entry.name, 'package.json'))
@@ -82,10 +81,19 @@ export function validateRepositoryReleaseVersion(version: string) {
   if (packageVersions.length === 0) {
     throw new Error('No public @webperf package versions were found');
   }
-  const releaseVersion = parseReleaseVersion(version);
-  const highestVersion = packageVersions
+  return packageVersions
     .map(({ version: packageVersion, name }) => ({ name, version: parseReleaseVersion(packageVersion) }))
     .sort((left, right) => compareReleaseVersions(right.version, left.version))[0];
+}
+
+export function repositoryReleaseVersion() {
+  return highestRepositoryReleaseVersion().version.raw;
+}
+
+export function validateRepositoryReleaseVersion(version: string) {
+  validateReleaseVersion(version);
+  const releaseVersion = parseReleaseVersion(version);
+  const highestVersion = highestRepositoryReleaseVersion();
   if (compareReleaseVersions(releaseVersion, highestVersion.version) !== 0) {
     throw new Error(
       `Release ${version} must match the highest Sampo-managed public package version ${highestVersion.version.raw} (${highestVersion.name})`
@@ -462,9 +470,11 @@ if (import.meta.main) {
       console.log(
         JSON.stringify({ ok: true, version: validateRepositoryReleaseVersion(args[0]) })
       );
+    } else if (command === 'repository-version' && args.length === 0) {
+      console.log(JSON.stringify({ ok: true, version: repositoryReleaseVersion() }));
     } else {
       throw new Error(
-        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version>'
+        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version> | repository-version'
       );
     }
   } catch (error) {

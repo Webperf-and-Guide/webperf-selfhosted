@@ -12,12 +12,14 @@ self-hosted product:
 
 ## Formal releases
 
-A `v0.x.y` tag on a commit in `main` starts the
-[release workflow](../../.github/workflows/release.yml). The workflow first
-runs the same required CI used by pull requests and waits for the protected
-`release` GitHub Environment. Once approved, it publishes all six images with
-the version and source-SHA tags, generates SPDX SBOMs and provenance
-attestations, and creates a GitHub Release.
+Merging a Sampo-generated release PR dispatches the
+[release workflow](../../.github/workflows/release.yml) for the highest public
+package version. The workflow runs the same required CI used by pull requests
+and waits for the protected `release` GitHub Environment. Once approved, it
+creates or verifies the matching `v0.x.y` repository tag, publishes all six
+images with version and source-SHA tags, generates SPDX SBOMs and provenance
+attestations, and creates a GitHub Release. A manually pushed `v0.x.y` tag
+enters the same protected path.
 
 The downloadable release bundle contains a `compose.yml` in which every image
 is pinned by OCI digest. It also contains:
@@ -53,20 +55,26 @@ not publish a `:latest` channel.
 ## Creating a release
 
 Sampo changesets are the source for JS/TS package versions and release notes.
+Feature PRs add changesets but do not consume them. After those PRs merge,
+[`release-pr.yml`](../../.github/workflows/release-pr.yml) creates or refreshes
+`release/sampo` with the generated versions and changelogs.
 
 ```sh
-bun run sampo:release:dry-run
-bun run sampo:release
-git add CHANGELOG.md packages .sampo/changesets
-git commit -m "release: prepare 0.x.y"
-git tag v0.x.y
-git push origin main v0.x.y
+gh pr view --repo Webperf-and-Guide/webperf-selfhosted
+# Review and merge the generated release/sampo PR after Required CI.
+# Approve the waiting `release` Environment deployment.
 ```
 
-Use the highest Sampo-managed `@webperf/*` package version as the repository
-release version. The tag workflow refuses a tag with pending changesets, a tag
-outside `main` history, or a version that does not match that highest package
-version.
+The release PR merge automatically dispatches the formal workflow when the
+matching tag is absent. To retry safely:
+
+```sh
+gh workflow run release.yml --ref main -f version=0.x.y
+```
+
+The workflow refuses pending changesets, a source outside `main` history, a
+version that does not match the highest Sampo-managed package version, or an
+existing tag that points elsewhere.
 
 ## Local image builds
 

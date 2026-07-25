@@ -6,7 +6,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   releaseImages,
   renderReleaseBundle,
+  repositoryReleaseVersion,
   validateReleaseComposeImages,
+  validateRepositoryReleaseVersion,
   validateReleaseVersion,
   writeReleaseImageMetadata
 } from './release-bundle';
@@ -20,6 +22,11 @@ afterEach(() => {
 });
 
 describe('release bundle generation', () => {
+  test('reports a repository version accepted by the release validator', () => {
+    const version = repositoryReleaseVersion();
+    expect(validateRepositoryReleaseVersion(version)).toBe(version);
+  });
+
   test('renders a complete digest-pinned bundle from six image records', () => {
     const root = makeTemporaryDirectory();
     const output = join(root, 'webperf-selfhosted-v0.2.0');

@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Public beta version to release (for example, 0.2.0)'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +25,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,18 +35,34 @@ jobs:
       - name: Validate tag, ancestry, and Sampo state
         id: release
         shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_TYPE" = "tag"
-          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ]]; then
+            test "$GITHUB_REF" = 'refs/heads/main'
+            version="$REQUESTED_VERSION"
+            tag="v${version}"
+          else
+            test "$GITHUB_REF_TYPE" = 'tag'
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
+          fi
           bun tooling/scripts/release-bundle.ts validate-repository-version "$version"
           git fetch --no-tags origin main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          source_sha="$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main
           if find .sampo/changesets -maxdepth 1 -type f -name '*.md' -print -quit | grep -q .; then
             echo "Apply and commit every pending Sampo changeset before tagging a release." >&2
             exit 1
           fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
+            test "$(git rev-list -n 1 "$tag")" = "$source_sha"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
 
   ci:
     name: Required CI before release
@@ -56,11 +80,46 @@ jobs:
     permissions: {}
     steps:
       - name: Confirm protected environment approval
-        run: test "$GITHUB_REF_TYPE" = "tag"
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        shell: bash
+        run: test -n "$RELEASE_TAG" && test -n "$SOURCE_SHA"
+
+  tag:
+    name: Publish immutable release tag
+    needs: [prepare, ci, authorize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Create or verify release tag
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$SOURCE_SHA"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m "WebPerf ${VERSION}"
+          # A GITHUB_TOKEN-authored tag push does not recursively start this workflow.
+          git push origin "refs/tags/${RELEASE_TAG}"
 
   images:
     name: Publish release image ${{ matrix.name }}
-    needs: [prepare, ci, authorize]
+    needs: [prepare, ci, tag]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -99,6 +158,8 @@ jobs:
             file: apps/browser-audit-lighthouse/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
@@ -116,10 +177,10 @@ jobs:
           push: true
           tags: |
             ghcr.io/webperf-and-guide/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
-            ghcr.io/webperf-and-guide/${{ matrix.image }}:sha-${{ github.sha }}
+            ghcr.io/webperf-and-guide/${{ matrix.image }}:sha-${{ needs.prepare.outputs.source_sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.source_sha }}
             org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
           sbom: true
           provenance: mode=max
@@ -154,10 +215,11 @@ jobs:
           IMAGE_REPOSITORY: ghcr.io/webperf-and-guide/${{ matrix.image }}
           VERSION: ${{ needs.prepare.outputs.version }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
           bun tooling/scripts/release-bundle.ts metadata \
             "$IMAGE_NAME" "$IMAGE_REPOSITORY" "$VERSION" \
-            "$IMAGE_DIGEST" "$GITHUB_SHA" release-output
+            "$IMAGE_DIGEST" "$SOURCE_SHA" release-output
       - name: Upload image release inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -168,7 +230,7 @@ jobs:
 
   bundle:
     name: Publish release bundle
-    needs: [prepare, ci, images]
+    needs: [prepare, ci, tag, images]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -178,6 +240,8 @@ jobs:
       artifact-metadata: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Download image metadata and SBOMs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -220,6 +284,7 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
         shell: bash
         run: |
@@ -235,10 +300,10 @@ jobs:
             "dist/${bundle_name}/runtime-metadata.json"
             release-input/*.spdx.json
           )
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
               --verify-tag \
               --title "WebPerf ${VERSION}" \
               --generate-notes

@@ -2,7 +2,9 @@
 
 Tagged `v0.x.y` releases are created only by `.github/workflows/release.yml`
 after the reusable CI workflow succeeds and the protected `release` GitHub
-Environment authorizes publication.
+Environment authorizes publication. `.github/workflows/release-pr.yml`
+consumes pending Sampo changesets in a generated PR and dispatches that formal
+workflow after the release PR merges.
 
 Each release contains:
 
@@ -18,10 +20,12 @@ The managed cloud repository should consume `runtime-metadata.json` from a
 specific GitHub Release. It must not infer runtime identity from `main`,
 `latest`, or a mutable tag.
 
-Before creating a release tag, apply and commit all pending Sampo changesets.
-The workflow rejects tags outside `main` history and repositories with pending
-changeset Markdown files.
+Before creating a release tag, merge the generated Sampo release PR. The
+workflow rejects tags outside `main` history, repositories with pending
+changeset Markdown files, version mismatches, and existing tags that point to a
+different commit.
 
 Repository administrators must configure the `release` Environment with a
-required reviewer and tag-only deployment rules. The workflow places this
-single approval before any versioned image is pushed.
+required reviewer and deployment rules limited to the `main` branch plus
+`v*.*.*` tags. The workflow places this single approval before the immutable
+tag or any versioned image is pushed.

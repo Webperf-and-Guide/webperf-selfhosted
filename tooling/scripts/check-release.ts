@@ -52,6 +52,7 @@ function readWorkflow(file: string): string | undefined {
 }
 
 const releaseWorkflow = readWorkflow('release.yml');
+const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
 const releaseImageMatrix = parseImageMatrix(releaseWorkflow, 'release.yml', 'images');
 const developmentImageMatrix = parseImageMatrix(
@@ -104,6 +105,7 @@ for (const definition of releaseImages) {
 }
 
 for (const requiredFragment of [
+  'workflow_dispatch:',
   'uses: ./.github/workflows/ci.yml',
   'sbom: true',
   'provenance: mode=max',
@@ -120,6 +122,42 @@ for (const requiredFragment of [
   }
 }
 
+for (const requiredFragment of [
+  'workflow_dispatch:',
+  'actions: write',
+  'contents: write',
+  'pull-requests: write',
+  'SAMPO_RELEASE_BRANCH: main',
+  'bun run sampo:release',
+  'bun install --lockfile-only',
+  'peter-evans/create-pull-request@',
+  'branch: release/sampo',
+  'gh run list',
+  'gh workflow run ci.yml --ref',
+  'repository-version',
+  'gh workflow run release.yml --ref main -f'
+]) {
+  if (releasePrWorkflow !== undefined && !releasePrWorkflow.includes(requiredFragment)) {
+    violations.push(`release-pr.yml: missing release preparation invariant ${requiredFragment}`);
+  }
+}
+if (releasePrWorkflow !== undefined && releasePrWorkflow.includes('sampo:publish')) {
+  violations.push('release-pr.yml: container release preparation must not publish npm packages');
+}
+
+for (const requiredFragment of [
+  'Publish immutable release tag',
+  'git tag -a "$RELEASE_TAG"',
+  'git push origin "refs/tags/${RELEASE_TAG}"',
+  'source_sha',
+  'ref: ${{ needs.prepare.outputs.source_sha }}',
+  'RELEASE_TAG: ${{ needs.prepare.outputs.tag }}'
+]) {
+  if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
+    violations.push(`release.yml: missing dispatch release invariant ${requiredFragment}`);
+  }
+}
+
 if (releaseWorkflow !== undefined && containsMutableContainerTag(releaseWorkflow)) {
   violations.push('release.yml: formal releases must not use main or latest image tags');
 }
@@ -133,12 +171,28 @@ if (ciWorkflow !== undefined && ciWorkflow.includes(':latest')) {
   violations.push('ci.yml: the mutable latest tag is not part of the development channel');
 }
 for (const requiredFragment of [
+  'workflow_dispatch:',
   'runs-on: ${{ matrix.runner }}',
   'platforms: ${{ matrix.platform }}'
 ]) {
   if (ciWorkflow !== undefined && !ciWorkflow.includes(requiredFragment)) {
     violations.push(`ci.yml: missing arm64 build invariant ${requiredFragment}`);
   }
+}
+
+try {
+  const rootManifest = JSON.parse(
+    readFileSync(join(root, 'package.json'), 'utf8')
+  ) as { devDependencies?: Record<string, unknown> };
+  const sampoVersion = rootManifest.devDependencies?.sampo;
+  if (
+    typeof sampoVersion !== 'string'
+    || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(sampoVersion)
+  ) {
+    violations.push('package.json: Sampo must be an exact pinned development dependency');
+  }
+} catch {
+  violations.push('package.json: root manifest is missing, unreadable, or malformed');
 }
 
 try {

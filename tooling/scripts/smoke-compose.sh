@@ -90,6 +90,9 @@ values['SELFHOST_INTERNAL_SECRET'] = 'smoke-internal-secret-value'
 values['PROBE_SHARED_SECRET'] = 'smoke-probe-shared-secret'
 values['BROWSER_AUDIT_SHARED_SECRET_NEXT'] = ''
 values['BROWSER_AUDIT_SHARED_SECRET'] = 'smoke-browser-audit-shared-secret'
+values['CONSOLE_PUBLIC_PORT'] = '0'
+values['SELFHOST_API_DEBUG_PORT'] = '0'
+values['BROWSER_AUDIT_DEBUG_PORT'] = '0'
 
 if profile == 'browser-audit':
     values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'

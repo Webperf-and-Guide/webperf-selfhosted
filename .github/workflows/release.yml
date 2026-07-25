@@ -56,10 +56,7 @@ jobs:
             echo "Apply and commit every pending Sampo changeset before tagging a release." >&2
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
-            git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}"
-            test "$(git rev-list -n 1 "$tag")" = "$source_sha"
-          fi
+          bash tooling/scripts/release-tag.sh verify "$tag" "$source_sha" "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
@@ -98,6 +95,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Create or verify release tag
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -106,16 +104,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$SOURCE_SHA"
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m "WebPerf ${VERSION}"
-          # A GITHUB_TOKEN-authored tag push does not recursively start this workflow.
-          git push origin "refs/tags/${RELEASE_TAG}"
+          bash tooling/scripts/release-tag.sh \
+            publish "$RELEASE_TAG" "$SOURCE_SHA" "$VERSION"
 
   images:
     name: Publish release image ${{ matrix.name }}

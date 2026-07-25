@@ -54,6 +54,12 @@ function readWorkflow(file: string): string | undefined {
 const releaseWorkflow = readWorkflow('release.yml');
 const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
+let releaseTagScript: string | undefined;
+try {
+  releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
+} catch {
+  violations.push('tooling/scripts/release-tag.sh: script is missing or unreadable');
+}
 const releaseImageMatrix = parseImageMatrix(releaseWorkflow, 'release.yml', 'images');
 const developmentImageMatrix = parseImageMatrix(
   ciWorkflow,
@@ -147,14 +153,28 @@ if (releasePrWorkflow !== undefined && releasePrWorkflow.includes('sampo:publish
 
 for (const requiredFragment of [
   'Publish immutable release tag',
-  'git tag -a "$RELEASE_TAG"',
-  'git push origin "refs/tags/${RELEASE_TAG}"',
+  'release-tag.sh verify',
+  'publish "$RELEASE_TAG" "$SOURCE_SHA" "$VERSION"',
   'source_sha',
   'ref: ${{ needs.prepare.outputs.source_sha }}',
   'RELEASE_TAG: ${{ needs.prepare.outputs.tag }}'
 ]) {
   if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
     violations.push(`release.yml: missing dispatch release invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'bun "$validator" validate-version "$version"',
+  'verify_remote_tag',
+  'git ls-remote --exit-code --tags origin "$tag_ref" "${tag_ref}^{}"',
+  'Existing release tag must be annotated.',
+  'git tag -a -f "$tag" "$source_sha"',
+  'if git push origin "$tag_ref"; then',
+  'A concurrent release may have won the push race.'
+]) {
+  if (releaseTagScript !== undefined && !releaseTagScript.includes(requiredFragment)) {
+    violations.push(`release-tag.sh: missing immutable-tag invariant ${requiredFragment}`);
   }
 }
 

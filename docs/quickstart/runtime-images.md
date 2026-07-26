@@ -1,7 +1,8 @@
 # Runtime images and releases
 
-`webperf-selfhosted` builds the six Linux/amd64 image families used by the
-self-hosted product:
+`webperf-selfhosted` builds the six Linux image families used by the
+self-hosted product. Every published runtime reference is a multi-platform OCI
+index for `linux/amd64` and `linux/arm64`:
 
 - `ghcr.io/webperf-and-guide/webperf-console`
 - `ghcr.io/webperf-and-guide/webperf-api`
@@ -37,6 +38,7 @@ is pinned by OCI digest. It also contains:
 Official installation material never uses `:main` or `:latest`. A version tag
 is convenient for discovery, while the release Compose file and managed-cloud
 runtime handoff use the immutable digest recorded in the same release.
+Docker resolves that digest to the host's matching native platform manifest.
 
 The metadata schema and bundle contract live under
 [infra/release](../../infra/release/README.md). Managed consumers must fetch
@@ -98,14 +100,17 @@ git push origin "refs/tags/v${version}"
 ## Local image builds
 
 Use `compose.dev.yml` to build all services from the current checkout, or build
-an individual image directly. For example:
+an individual image directly. Choose one of the two supported target platforms
+for a local image load:
 
 ```sh
-docker buildx build --platform linux/amd64 \
+WEBPERF_PLATFORM=linux/arm64 # or linux/amd64
+
+docker buildx build --platform "$WEBPERF_PLATFORM" --load \
   -f apps/browser-audit-lighthouse/Dockerfile \
   -t webperf-browser-audit-lighthouse:dev .
 
-docker buildx build --platform linux/amd64 \
+docker buildx build --platform "$WEBPERF_PLATFORM" --load \
   -f apps/probe-rs/Dockerfile \
   -t webperf-probe:dev apps/probe-rs
 ```

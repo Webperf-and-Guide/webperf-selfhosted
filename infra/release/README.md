@@ -11,7 +11,8 @@ synchronizing the source Compose `WEBPERF_VERSION`.
 
 Each release contains:
 
-- six GHCR images tagged with the release version and source SHA;
+- six multi-platform (`linux/amd64` and `linux/arm64`) GHCR image indexes,
+  tagged with the release version and source SHA;
 - OCI-native SBOM and max-mode provenance attestations;
 - GitHub provenance and SPDX SBOM attestations bound to each image digest;
 - a tarball whose `compose.yml` pins all six image repositories by digest;

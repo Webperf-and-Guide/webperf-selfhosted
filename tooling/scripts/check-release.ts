@@ -30,6 +30,7 @@ type WorkflowImageEntry = {
 
 type WorkflowBuildEntry = {
   name: string;
+  context: string;
   file: string;
   platform: string;
   arch: string;
@@ -88,14 +89,22 @@ if (releaseCiPermissionsResult.parsed) {
   }
 }
 
-if (!ciImageBuildMatrix.some(
-  (entry) => entry.name === 'browser-audit-lighthouse'
-    && entry.file === 'apps/browser-audit-lighthouse/Dockerfile'
-    && entry.platform === 'linux/arm64'
-    && entry.arch === 'arm64'
-    && entry.runner === 'ubuntu-24.04-arm'
-)) {
-  violations.push('ci.yml: Browser Audit image matrix must build on the native arm64 runner');
+for (const definition of releaseImages) {
+  for (const { platform, arch, runner } of [
+    { platform: 'linux/amd64', arch: 'amd64', runner: 'ubuntu-latest' },
+    { platform: 'linux/arm64', arch: 'arm64', runner: 'ubuntu-24.04-arm' }
+  ]) {
+    if (!ciImageBuildMatrix.some(
+      (entry) => entry.name === definition.name
+        && entry.platform === platform
+        && entry.arch === arch
+        && entry.runner === runner
+    )) {
+      violations.push(
+        `ci.yml: ${definition.name} image matrix must build on the native ${arch} runner`
+      );
+    }
+  }
 }
 
 let workflowFiles: string[] = [];
@@ -130,6 +139,33 @@ for (const definition of releaseImages) {
   }
 }
 
+for (const [file, workflow] of [
+  ['ci.yml', ciWorkflow],
+  ['release.yml', releaseWorkflow]
+] as const) {
+  if (workflow === undefined) {
+    continue;
+  }
+  if (!workflow.includes('docker/setup-qemu-action@')) {
+    violations.push(`${file}: multi-platform publishing must set up arm64 emulation`);
+  }
+  if (!workflow.includes('platforms: linux/amd64,linux/arm64')) {
+    violations.push(`${file}: runtime publishing must target linux/amd64 and linux/arm64`);
+  }
+}
+
+assertCacheScopes('ci.yml', ciWorkflow, [
+  'scope=ci-${{ matrix.name }}-amd64',
+  'scope=ci-${{ matrix.name }}-arm64',
+  'scope=ci-${{ matrix.name }}-publish'
+]);
+
+assertCacheScopes('release.yml', releaseWorkflow, [
+  'scope=ci-${{ matrix.name }}-amd64',
+  'scope=ci-${{ matrix.name }}-arm64',
+  'scope=release-${{ matrix.name }}'
+]);
+
 for (const requiredFragment of [
   'workflow_dispatch:',
   'uses: ./.github/workflows/ci.yml',
@@ -143,6 +179,8 @@ for (const requiredFragment of [
   'provenance: mode=max',
   'actions/attest@',
   'environment: release',
+  'Verify published OCI platforms',
+  'docker buildx imagetools inspect --raw',
   'browser-audit.apparmor',
   'browser-audit-seccomp.json',
   'compose.apparmor.yml',
@@ -460,6 +498,21 @@ if (violations.length > 0) {
 
 console.log('Release policy check passed.');
 
+function assertCacheScopes(
+  file: string,
+  workflow: string | undefined,
+  fragments: readonly string[]
+) {
+  if (workflow === undefined) {
+    return;
+  }
+  for (const requiredFragment of fragments) {
+    if (!workflow.includes(requiredFragment)) {
+      violations.push(`${file}: multi-platform cache scope is missing ${requiredFragment}`);
+    }
+  }
+}
+
 function parseImageMatrix(
   content: string | undefined,
   file: string,
@@ -481,6 +534,7 @@ function parseBuildMatrix(
   return parseMatrixInclude(content, file, jobId).filter(
     (entry): entry is WorkflowBuildEntry => (
       typeof entry.name === 'string'
+      && typeof entry.context === 'string'
       && typeof entry.file === 'string'
       && typeof entry.platform === 'string'
       && typeof entry.arch === 'string'

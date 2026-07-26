@@ -8,7 +8,7 @@ license.
 ## Requirements
 
 - Docker Engine with the Compose v2 plugin;
-- a Linux/amd64 host, or a container runtime configured to emulate amd64;
+- a Linux/amd64 or Linux/arm64 host;
 - enough persistent disk for SQLite history and optional Browser Audit files;
 - loopback port `5173`, or another port set with `CONSOLE_PUBLIC_PORT`;
 - `openssl` or another cryptographically secure secret generator.
@@ -32,6 +32,9 @@ sha256sum --check SHA256SUMS
 On macOS, use `shasum -a 256 -c SHA256SUMS`. Do not reconstruct the official
 Compose file from mutable image tags: the release copy is already bound to the
 digests recorded in `runtime-metadata.json`.
+
+Each release digest is a multi-platform OCI index for `linux/amd64` and
+`linux/arm64`; Docker selects the matching native manifest automatically.
 
 ## 2. Create the environment file
 

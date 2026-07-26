@@ -160,12 +160,13 @@ npm/@webperf/contracts: patch
 
   test('renders a complete digest-pinned bundle from six image records', () => {
     const root = makeTemporaryDirectory();
-    const output = join(root, 'webperf-selfhosted-v0.2.0');
+    const version = repositoryReleaseVersion();
+    const output = join(root, `webperf-selfhosted-v${version}`);
     const sourceCommit = 'a'.repeat(40);
-    const input = writeValidReleaseInputs(root, '0.2.0', sourceCommit);
+    const input = writeValidReleaseInputs(root, version, sourceCommit);
 
     const result = renderReleaseBundle({
-      version: '0.2.0',
+      version,
       inputDirectory: input,
       outputDirectory: output
     });
@@ -177,13 +178,13 @@ npm/@webperf/contracts: patch
     expect(result.imageCount).toBe(6);
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
-    expect(compose).toContain('WEBPERF_RUNTIME_VERSION: "0.2.0"');
+    expect(compose).toContain(`WEBPERF_RUNTIME_VERSION: "${version}"`);
     expect(validateReleaseComposeImages(compose)).toHaveLength(8);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);
       for (const suffix of ['', '-linux-arm64']) {
         expect(readFileSync(
-          join(output, 'sbom', `${definition.name}-0.2.0${suffix}.spdx.json`),
+          join(output, 'sbom', `${definition.name}-${version}${suffix}.spdx.json`),
           'utf8'
         )).toContain('SPDXRef-DOCUMENT');
       }
@@ -193,12 +194,12 @@ npm/@webperf/contracts: patch
       {
         platform: 'linux/amd64',
         digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-        file: 'console-0.2.0.spdx.json'
+        file: `console-${version}.spdx.json`
       },
       {
         platform: 'linux/arm64',
         digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-        file: 'console-0.2.0-linux-arm64.spdx.json'
+        file: `console-${version}-linux-arm64.spdx.json`
       }
     ]);
     expect(readFileSync(join(output, '.env.example'), 'utf8')).not.toContain(
@@ -207,7 +208,7 @@ npm/@webperf/contracts: patch
     expect(readFileSync(join(output, 'SHA256SUMS'), 'utf8')).toContain(
       'runtime-metadata.json'
     );
-    expect(readFileSync(join(output, 'VERSION'), 'utf8')).toBe('0.2.0\n');
+    expect(readFileSync(join(output, 'VERSION'), 'utf8')).toBe(`${version}\n`);
     expect(JSON.parse(
       readFileSync(join(output, 'browser-audit-seccomp.json'), 'utf8')
     ).defaultAction).toBe('SCMP_ACT_ERRNO');

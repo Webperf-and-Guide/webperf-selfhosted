@@ -211,6 +211,7 @@ Current repo state as of 2026-07-26:
 - protected release runs `30161891204` and `30191805871` successfully published annotated tags `v0.2.0` and `v0.2.1`; the current `v0.2.1` release includes six immutable multi-architecture GHCR images, a digest-pinned Compose bundle, per-platform SPDX SBOMs, provenance attestations, checksums, and release-scoped runtime metadata
 - PRs #4 through #9 closed the local Compose port-isolation, canonical baseline/deterministic analysis, multi-architecture release, and release-bundle-version evidence gaps; the public-beta hardening plan records the verified gates and the remaining runtime gate
 - all six GHCR packages are public, and anonymous registry checks verify `0.2.1` manifests for both `linux/amd64` and `linux/arm64`; the archive checksum and digest-pinned Compose rendering are verified, while a full empty-host runtime start still needs a Docker host with enough free image storage
+- formal releases now finish with a required fresh GitHub-hosted published-bundle smoke for both default and Browser Audit profiles; its current bundle-aware harness is kept separate from a source-pinned checkout that must match the bundle runtime metadata, while the historical `v0.2.1` clean-host drill remains outstanding until that published bundle is run through the harness
 
 Current local dev entrypoints:
 - `bun run dev`

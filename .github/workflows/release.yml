@@ -412,3 +412,13 @@ jobs:
               --title "WebPerf ${VERSION}" \
               --generate-notes
           fi
+
+  smoke-published-bundle:
+    name: Smoke published release bundle
+    needs: [prepare, bundle]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-bundle-smoke.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}

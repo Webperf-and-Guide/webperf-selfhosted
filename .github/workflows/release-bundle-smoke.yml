@@ -1,0 +1,139 @@
+name: release-bundle-smoke
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Published WebPerf version to install from the public GitHub Release'
+        required: true
+        type: string
+      source_sha:
+        description: 'Exact prepared source commit that produced the release bundle'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published WebPerf version to install from the public GitHub Release'
+        required: true
+        type: string
+      source_sha:
+        description: 'Optional source commit; defaults to the immutable v<version> tag'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-bundle-smoke-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Published release bundle (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: default
+            compose_profile: ''
+          - profile: browser-audit
+            compose_profile: browser-audit
+    steps:
+      - name: Check out smoke harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Check out release source for metadata verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha || format('v{0}', inputs.version) }}
+          path: release-source
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Cache Bun packages
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Download and verify public release bundle
+        id: bundle
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_SOURCE_DIRECTORY: ${{ github.workspace }}/release-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun tooling/scripts/release-bundle.ts validate-version "$VERSION" >/dev/null
+          source_sha="$(git -C "$RELEASE_SOURCE_DIRECTORY" rev-parse HEAD)"
+          test "$(tr -d '\r\n' < "$RELEASE_SOURCE_DIRECTORY/VERSION")" = "$VERSION"
+          release_root="$(mktemp -d "${RUNNER_TEMP}/webperf-release-bundle.XXXXXX")"
+          bundle_name="webperf-selfhosted-v${VERSION}"
+          release_base="https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/download/v${VERSION}"
+          download_public_asset() {
+            local destination="$1"
+            local url="$2"
+            if ! curl -q --fail --silent --show-error --location \
+              --retry 15 \
+              --retry-all-errors \
+              --retry-max-time 45 \
+              --connect-timeout 10 \
+              --max-time 20 \
+              -o "$destination" "$url"; then
+              echo "Could not download public release asset: $url" >&2
+              return 1
+            fi
+          }
+          download_public_asset "${release_root}/SHA256SUMS" "${release_base}/SHA256SUMS"
+          download_public_asset \
+            "${release_root}/${bundle_name}.tar.gz" "${release_base}/${bundle_name}.tar.gz"
+          (
+            cd "$release_root"
+            sha256sum --check SHA256SUMS
+            tar -xzf "${bundle_name}.tar.gz"
+          )
+          bundle_dir="${release_root}/${bundle_name}"
+          test -f "${bundle_dir}/compose.yml"
+          test -f "${bundle_dir}/.env.example"
+          test -f "${bundle_dir}/runtime-metadata.json"
+          (cd "$bundle_dir" && sha256sum --check SHA256SUMS)
+          jq -e --arg version "$VERSION" --arg source_sha "$source_sha" '
+            .version == $version
+            and .tag == ("v" + $version)
+            and .sourceCommit == $source_sha
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf-[a-z-]+@sha256:[0-9a-f]{64}$")] | all)
+          ' "${bundle_dir}/runtime-metadata.json" >/dev/null
+          echo "directory=${bundle_dir}" >> "$GITHUB_OUTPUT"
+      - name: Load Browser Audit AppArmor profile
+        if: ${{ matrix.profile == 'browser-audit' }}
+        env:
+          BUNDLE_DIR: ${{ steps.bundle.outputs.directory }}
+        run: sudo apparmor_parser -r -W "${BUNDLE_DIR}/browser-audit.apparmor"
+      - name: Start the published bundle without registry credentials
+        env:
+          COMPOSE_PROFILE: ${{ matrix.compose_profile }}
+          WEBPERF_SMOKE_COMPOSE_FILE: ${{ steps.bundle.outputs.directory }}/compose.yml
+          WEBPERF_SMOKE_ENV_TEMPLATE: ${{ steps.bundle.outputs.directory }}/.env.example
+          WEBPERF_SMOKE_APPARMOR_COMPOSE_FILE: ${{ steps.bundle.outputs.directory }}/compose.apparmor.yml
+          WEBPERF_SMOKE_USE_DEV_OVERRIDE: 'false'
+          WEBPERF_SMOKE_DOCKER_CONFIG: ${{ runner.temp }}/webperf-release-docker-config-${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WEBPERF_SMOKE_DOCKER_CONFIG"
+          test ! -e "$WEBPERF_SMOKE_DOCKER_CONFIG/config.json"
+          bash tooling/scripts/smoke-compose.sh
+      - name: Report Browser Audit sandbox denials
+        if: ${{ failure() && matrix.profile == 'browser-audit' }}
+        run: |
+          set -o pipefail
+          {
+            sudo journalctl --dmesg --no-pager --since '-20 minutes' 2>/dev/null || true
+            sudo dmesg 2>/dev/null || true
+            sudo tail -n 2000 /var/log/kern.log /var/log/syslog 2>/dev/null || true
+          } | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 200 || true

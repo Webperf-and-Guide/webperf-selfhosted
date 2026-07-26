@@ -2,21 +2,56 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-compose_file="$root_dir/infra/docker-compose/compose.yml"
-dev_compose_file="$root_dir/infra/docker-compose/compose.dev.yml"
-apparmor_compose_file="$root_dir/infra/docker-compose/compose.apparmor.yml"
+compose_file="${WEBPERF_SMOKE_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.yml}"
+dev_compose_file="${WEBPERF_SMOKE_DEV_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.dev.yml}"
+apparmor_compose_file="${WEBPERF_SMOKE_APPARMOR_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.apparmor.yml}"
+env_template="${WEBPERF_SMOKE_ENV_TEMPLATE:-$root_dir/infra/docker-compose/.env.example}"
+use_dev_override="${WEBPERF_SMOKE_USE_DEV_OVERRIDE:-true}"
+docker_config="${WEBPERF_SMOKE_DOCKER_CONFIG:-}"
 compose_project="webperf-smoke-$$"
 profile="${COMPOSE_PROFILE:-default}"
 temp_env="$(mktemp)"
 temp_artifact="$(mktemp)"
-compose_files=(-f "$compose_file" -f "$dev_compose_file")
+
+if [[ "$use_dev_override" != 'true' && "$use_dev_override" != 'false' ]]; then
+  printf 'WEBPERF_SMOKE_USE_DEV_OVERRIDE must be true or false, got %q\n' "$use_dev_override" >&2
+  exit 1
+fi
+
+for required_file in "$compose_file" "$env_template"; do
+  if [[ ! -f "$required_file" ]]; then
+    echo "Required Compose smoke file is missing: $required_file" >&2
+    exit 1
+  fi
+done
+
+compose_files=(-f "$compose_file")
+if [[ "$use_dev_override" == 'true' ]]; then
+  if [[ ! -f "$dev_compose_file" ]]; then
+    echo "Required development Compose override is missing: $dev_compose_file" >&2
+    exit 1
+  fi
+  compose_files+=(-f "$dev_compose_file")
+fi
 
 if [[ "$profile" == "browser-audit" ]] && docker info --format '{{range .SecurityOptions}}{{println .}}{{end}}' | grep -qx 'name=apparmor'; then
+  if [[ ! -f "$apparmor_compose_file" ]]; then
+    echo "Required Browser Audit AppArmor Compose overlay is missing: $apparmor_compose_file" >&2
+    exit 1
+  fi
   compose_files+=(-f "$apparmor_compose_file")
 fi
 
+if [[ -n "$docker_config" ]]; then
+  mkdir -p "$docker_config"
+fi
+
 compose() {
-  docker compose \
+  local -a compose_env=()
+  if [[ -n "$docker_config" ]]; then
+    compose_env+=("DOCKER_CONFIG=$docker_config")
+  fi
+  env "${compose_env[@]+${compose_env[@]}}" docker compose \
     --project-name "$compose_project" \
     --env-file "$temp_env" \
     "${compose_files[@]}" \
@@ -69,7 +104,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-cp "$root_dir/infra/docker-compose/.env.example" "$temp_env"
+cp "$env_template" "$temp_env"
 
 python3 - "$temp_env" "$profile" <<'PY'
 from pathlib import Path

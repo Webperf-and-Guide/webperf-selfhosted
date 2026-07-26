@@ -57,6 +57,7 @@ function readWorkflow(file: string): string | undefined {
 const releaseWorkflow = readWorkflow('release.yml');
 const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
+const releaseBundleSmokeWorkflow = readWorkflow('release-bundle-smoke.yml');
 let releaseTagScript: string | undefined;
 try {
   releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
@@ -200,10 +201,45 @@ for (const requiredFragment of [
   'browser-audit-seccomp.json',
   'compose.apparmor.yml',
   'runtime-metadata.json',
-  'SHA256SUMS'
+  'SHA256SUMS',
+  'uses: ./.github/workflows/release-bundle-smoke.yml',
+  'needs: [prepare, bundle]'
 ]) {
   if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
     violations.push(`release.yml: missing release invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'workflow_call:',
+  'workflow_dispatch:',
+  'version:',
+  'source_sha:',
+  'Check out smoke harness',
+  'ref: ${{ github.sha }}',
+  'Check out release source for metadata verification',
+  "ref: ${{ inputs.source_sha || format('v{0}', inputs.version) }}",
+  'path: release-source',
+  'RELEASE_SOURCE_DIRECTORY: ${{ github.workspace }}/release-source',
+  'git -C "$RELEASE_SOURCE_DIRECTORY" rev-parse HEAD',
+  '.sourceCommit == $source_sha',
+  'validate-version "$VERSION"',
+  'curl -q --fail --silent --show-error --location',
+  '--retry 15',
+  '--retry-all-errors',
+  '--retry-max-time 45',
+  '--connect-timeout 10',
+  '--max-time 20',
+  'sha256sum --check SHA256SUMS',
+  'WEBPERF_SMOKE_USE_DEV_OVERRIDE: \'false\'',
+  'WEBPERF_SMOKE_DOCKER_CONFIG:',
+  'test ! -e "$WEBPERF_SMOKE_DOCKER_CONFIG/config.json"',
+  'browser-audit.apparmor',
+  'BUNDLE_DIR: ${{ steps.bundle.outputs.directory }}',
+  'COMPOSE_PROFILE: ${{ matrix.compose_profile }}'
+]) {
+  if (releaseBundleSmokeWorkflow !== undefined && !releaseBundleSmokeWorkflow.includes(requiredFragment)) {
+    violations.push(`release-bundle-smoke.yml: missing published-bundle smoke invariant ${requiredFragment}`);
   }
 }
 
@@ -335,6 +371,12 @@ for (const requiredFragment of [
 
 if (releaseWorkflow !== undefined && containsMutableContainerTag(releaseWorkflow)) {
   violations.push('release.yml: formal releases must not use main or latest image tags');
+}
+if (
+  releaseBundleSmokeWorkflow !== undefined
+  && containsMutableContainerTag(releaseBundleSmokeWorkflow)
+) {
+  violations.push('release-bundle-smoke.yml: published bundle smoke must not use main or latest image tags');
 }
 if (
   ciWorkflow !== undefined

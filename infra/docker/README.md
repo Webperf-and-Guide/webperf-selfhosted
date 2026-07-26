@@ -9,9 +9,10 @@ The Dockerfiles in this repository build the six self-host runtime images:
 - Rust probe
 - optional Lighthouse reference runner
 
-All release images target `linux/amd64`. The production Compose source uses a
-single version placeholder, while each downloadable release bundle rewrites
-all image references to the OCI digests produced for that tagged commit.
+Every release image is a multi-platform OCI index for `linux/amd64` and
+`linux/arm64`. The production Compose source uses a single version placeholder,
+while each downloadable release bundle rewrites all image references to the OCI
+digests produced for that tagged commit.
 
 The [CI workflow](../../.github/workflows/ci.yml) publishes the `main` and
 source-SHA development channels only after required checks pass. The

@@ -17,8 +17,10 @@ cargo clippy --workspace --all-targets --manifest-path apps/probe-rs/Cargo.toml 
 
 ## Docker build
 
-Build the reusable `linux/amd64` image:
+Build a reusable image for either supported Linux architecture:
 
 ```sh
-docker buildx build --platform linux/amd64 -t webperf-probe:dev ./apps/probe-rs
+WEBPERF_PLATFORM=linux/arm64 # or linux/amd64
+docker buildx build --platform "$WEBPERF_PLATFORM" --load \
+  -t webperf-probe:dev ./apps/probe-rs
 ```

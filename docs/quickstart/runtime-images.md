@@ -1,7 +1,8 @@
 # Runtime images and releases
 
-`webperf-selfhosted` builds the six Linux/amd64 image families used by the
-self-hosted product:
+`webperf-selfhosted` builds the six Linux image families used by the
+self-hosted product. Every published runtime reference is a multi-platform OCI
+index for `linux/amd64` and `linux/arm64`:
 
 - `ghcr.io/webperf-and-guide/webperf-console`
 - `ghcr.io/webperf-and-guide/webperf-api`
@@ -18,9 +19,10 @@ Merging a Sampo-generated release PR dispatches the
 CI used by pull requests against that pinned source and waits for the protected
 `release` GitHub Environment. Once approved, it creates or verifies the matching
 `v0.x.y` repository tag, publishes all six images with version and source-SHA
-tags, generates SPDX SBOMs and provenance attestations, and creates a GitHub
-Release. A manually pushed annotated `v0.x.y` tag enters the same protected
-path.
+tags, generates a distinct SPDX SBOM for each published amd64 and arm64
+manifest, attests those SBOMs to their matching child digests, and creates a
+GitHub Release. A manually pushed annotated `v0.x.y` tag enters the same
+protected path.
 
 The downloadable release bundle contains a `compose.yml` in which every image
 is pinned by OCI digest. It also contains:
@@ -28,7 +30,7 @@ is pinned by OCI digest. It also contains:
 - `runtime-metadata.json`, with the version, source commit, image tags, and
   digests;
 - root `VERSION`;
-- one SPDX JSON SBOM per image;
+- two SPDX JSON SBOMs per image, one for each Linux platform;
 - `browser-audit-seccomp.json`, kept beside `compose.yml` for the optional
   Chromium runtime;
 - `SHA256SUMS`, `CHANGELOG.md`, `SECURITY.md`, and the license;
@@ -37,6 +39,10 @@ is pinned by OCI digest. It also contains:
 Official installation material never uses `:main` or `:latest`. A version tag
 is convenient for discovery, while the release Compose file and managed-cloud
 runtime handoff use the immutable digest recorded in the same release.
+Docker resolves that digest to the host's matching native platform manifest.
+For compatibility, `images[].sbom` names the amd64 SBOM; releases that include
+both platforms also expose `images[].sboms`, which maps each platform manifest
+digest to its SBOM file.
 
 The metadata schema and bundle contract live under
 [infra/release](../../infra/release/README.md). Managed consumers must fetch
@@ -98,14 +104,17 @@ git push origin "refs/tags/v${version}"
 ## Local image builds
 
 Use `compose.dev.yml` to build all services from the current checkout, or build
-an individual image directly. For example:
+an individual image directly. Choose one of the two supported target platforms
+for a local image load:
 
 ```sh
-docker buildx build --platform linux/amd64 \
+WEBPERF_PLATFORM=linux/arm64 # or linux/amd64
+
+docker buildx build --platform "$WEBPERF_PLATFORM" --load \
   -f apps/browser-audit-lighthouse/Dockerfile \
   -t webperf-browser-audit-lighthouse:dev .
 
-docker buildx build --platform linux/amd64 \
+docker buildx build --platform "$WEBPERF_PLATFORM" --load \
   -f apps/probe-rs/Dockerfile \
   -t webperf-probe:dev apps/probe-rs
 ```

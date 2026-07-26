@@ -421,3 +421,4 @@ jobs:
     uses: ./.github/workflows/release-bundle-smoke.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}

@@ -1,7 +1,7 @@
 # Public beta hardening plan
 
-Status: in progress  
-Owner: self-hosted maintainers  
+Status: awaiting public package install validation<br>
+Owner: self-hosted maintainers<br>
 Started: 2026-07-22
 
 ## Goal
@@ -216,7 +216,7 @@ The exact diff will stay small within each phase, but the expected surface is:
   filesystems where possible, tmpfs, log rotation, and resource examples.
 - [x] Keep Lighthouse optional, sandboxed, single-concurrency, and host-port
   free without default `SYS_ADMIN`.
-- [ ] Validate default and browser-audit Compose smoke paths.
+- [x] Validate default and browser-audit Compose smoke paths.
 - [x] Add a Sampo changeset for install/runtime behavior.
 
 ### 7. CI and release
@@ -247,19 +247,56 @@ The exact diff will stay small within each phase, but the expected surface is:
 ## Completion gates
 
 - [ ] A clean host can install a tagged, digest-pinned Compose bundle.
-- [ ] Default host exposure is console-only on loopback.
-- [ ] Required production secrets have no fallback.
+- [x] Default host exposure is console-only on loopback.
+- [x] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.
 - [x] Leased work recovers after API/executor restart.
-- [ ] Baseline/latest comparisons and deterministic analyses work.
+- [x] Baseline/latest comparisons and deterministic analyses work.
 - [x] Browser Audit creation and execution are asynchronous.
 - [x] Browser Audit stores downloadable local artifacts.
-- [ ] Secrets are absent from database API views, logs, exports, and errors.
-- [ ] Network and browser SSRF fixtures pass.
-- [ ] Canonical REST/OpenAPI surfaces agree and compatibility tests pass.
-- [ ] JS, Rust, docs, image, and integration CI all pass.
-- [ ] Release automation emits tagged artifacts, SBOM, provenance, and digests.
-- [ ] No cloud-only or provider-specific orchestration is imported.
+- [x] Secrets are absent from database API views, logs, exports, and errors.
+- [x] Network and browser SSRF fixtures pass.
+- [x] Canonical REST/OpenAPI surfaces agree and compatibility tests pass.
+- [x] JS, Rust, docs, image, and integration CI all pass.
+- [x] Release automation emits tagged artifacts, SBOM, provenance, and digests.
+- [x] No cloud-only or provider-specific orchestration is imported.
+
+## Verification evidence (2026-07-26)
+
+- PR [#4](https://github.com/Webperf-and-Guide/webperf-selfhosted/pull/4)
+  made the Compose smoke helper allocate loopback host ports dynamically. Both
+  `bun run smoke:compose` and `bun run smoke:compose:browser-audit` passed
+  locally and in CI.
+- PR [#5](https://github.com/Webperf-and-Guide/webperf-selfhosted/pull/5)
+  proves canonical baseline pin/read and baseline comparison HTTP flows, and
+  repeats the same rule-engine Analysis for a deterministic semantic result.
+  The regression fixture explicitly compares successful 800 ms and 650 ms
+  measurements, so it does not depend on run-list ordering.
+- CI run
+  [30165010711](https://github.com/Webperf-and-Guide/webperf-selfhosted/actions/runs/30165010711)
+  passed the JS/contracts/integration, documentation, Rust, six-image, default
+  Compose smoke, optional Browser Audit Compose smoke, and aggregate gates.
+- Release run
+  [30161891204](https://github.com/Webperf-and-Guide/webperf-selfhosted/actions/runs/30161891204)
+  successfully created annotated tag `v0.2.0`, the digest-pinned Compose
+  bundle, six immutable images, SBOMs, provenance attestations, checksums, and
+  release-scoped runtime metadata.
+- `bun run check`, `bun test`, `bun run check:docs`, and
+  `bun run compose:config` are the local regression commands for the
+  boundary/OpenAPI/release-policy, redaction, SSRF, contract, and Compose
+  checks listed above.
+
+### Remaining external gate
+
+As of this audit, all six release packages (`webperf-console`, `webperf-api`,
+`webperf-scheduler`, `webperf-executor`, `webperf-probe`, and
+`webperf-browser-audit-lighthouse`) are still private in GHCR. Their visibility
+must all be made public before attempting a credential-free clean-host
+installation. Only after all six [irreversible package-visibility changes](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
+are complete, download the `v0.2.0` release bundle into a fresh directory,
+verify its checksum, run the digest-pinned Compose stack with freshly generated
+secrets, and confirm both the default and optional Browser Audit profiles
+without registry credentials.
 
 Each implementation commit is reviewed with `ocr review --commit <sha>`.
 Review findings are fixed before the phase is considered complete. After the

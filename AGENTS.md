@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-07-24
+Last updated: 2026-07-26
 
 ## Mission
 
@@ -65,7 +65,7 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-07-24:
+Current repo state as of 2026-07-26:
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
@@ -208,6 +208,9 @@ Current repo state as of 2026-07-24:
 - defensive migration checks now resolve storage crypto only when locked pending work actually runs, self-host init narrows template keys through an explicit allowlist guard, and maintenance reports committed database work separately from retryable artifact reconciliation failures
 - the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
 - Browser Audit Compose CI reports bounded host-kernel AppArmor and namespace denial records when sandboxed Chromium health checks fail, so runtime-policy regressions can be diagnosed without weakening the sandbox
+- protected release run `30161891204` successfully published annotated tag `v0.2.0`, six immutable GHCR images, a digest-pinned Compose bundle, SPDX SBOMs, provenance attestations, checksums, and release-scoped runtime metadata
+- PRs #4 and #5 closed the remaining local Compose port-isolation and canonical baseline/deterministic analysis evidence gaps; the public-beta hardening plan now records the verified gates and their evidence
+- all six v0.2.0 GHCR packages remain private, so the only release-completion gate is an explicitly approved, credential-free clean-host installation after every required package is public
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -248,9 +251,9 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. finish the public-beta hardening PR CI/review loop and merge it to `main`
-2. perform the first protected v0 beta release and verify its images, attestations, checksums, metadata, and digest-pinned Compose bundle
-3. run a documented operator backup/restore drill against a release bundle
+1. obtain explicit maintainer confirmation, then make all six v0.2.0 GHCR packages public; GitHub does not allow a public package to return to private visibility
+2. only after all six packages are public, prove anonymous pulls and run the tagged digest-pinned Compose bundle from a fresh directory with newly generated secrets for both default and Browser Audit profiles
+3. run a documented operator backup/restore drill against the released bundle
 4. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
 5. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
 

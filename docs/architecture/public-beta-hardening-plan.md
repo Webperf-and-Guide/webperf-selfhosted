@@ -1,6 +1,6 @@
 # Public beta hardening plan
 
-Status: awaiting public package install validation<br>
+Status: awaiting clean-host runtime validation<br>
 Owner: self-hosted maintainers<br>
 Started: 2026-07-22
 
@@ -281,6 +281,21 @@ The exact diff will stay small within each phase, but the expected surface is:
   successfully created annotated tag `v0.2.0`, the digest-pinned Compose
   bundle, six immutable images, SBOMs, provenance attestations, checksums, and
   release-scoped runtime metadata.
+- Release run
+  [30191805871](https://github.com/Webperf-and-Guide/webperf-selfhosted/actions/runs/30191805871)
+  successfully created the current annotated `v0.2.1` release with six
+  multi-architecture images, per-platform SPDX SBOMs, provenance attestations,
+  checksums, and digest-pinned runtime metadata.
+- All six GHCR runtime packages are public. Anonymous registry checks confirm
+  that every `0.2.1` image tag has both `linux/amd64` and `linux/arm64`
+  manifests, without registry credentials.
+- A credential-free download of the `v0.2.1` archive passed its published
+  checksum. Its `runtime-metadata.json` source commit and all six image
+  references match the tag and Compose file, and both default and Browser Audit
+  Compose configurations render successfully without mutable image tags.
+- Current `main` revalidation passed `bun run check`, `bun test` (242 tests),
+  `bun run check:docs`, `bun run compose:config`, and Rust fmt, clippy, and
+  workspace tests.
 - `bun run check`, `bun test`, `bun run check:docs`, and
   `bun run compose:config` are the local regression commands for the
   boundary/OpenAPI/release-policy, redaction, SSRF, contract, and Compose
@@ -288,15 +303,16 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### Remaining external gate
 
-As of this audit, all six release packages (`webperf-console`, `webperf-api`,
+All six release packages (`webperf-console`, `webperf-api`,
 `webperf-scheduler`, `webperf-executor`, `webperf-probe`, and
-`webperf-browser-audit-lighthouse`) are still private in GHCR. Their visibility
-must all be made public before attempting a credential-free clean-host
-installation. Only after all six [irreversible package-visibility changes](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
-are complete, download the `v0.2.0` release bundle into a fresh directory,
-verify its checksum, run the digest-pinned Compose stack with freshly generated
-secrets, and confirm both the default and optional Browser Audit profiles
-without registry credentials.
+`webperf-browser-audit-lighthouse`) are now public. The next validation must
+run the `v0.2.1` digest-pinned bundle from a fresh directory with freshly
+generated secrets and no registry credentials, then confirm both the default
+and optional Browser Audit profiles. A local attempt reached the anonymous
+image pull but stopped because the local OrbStack image store had no free
+space; this is a host-capacity blocker, not a registry, archive, or Compose
+configuration failure. Keep the clean-host gate unchecked until that runtime
+start succeeds on a host with sufficient Docker storage.
 
 Each implementation commit is reviewed with `ocr review --commit <sha>`.
 Review findings are fixed before the phase is considered complete. After the

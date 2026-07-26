@@ -197,7 +197,7 @@ Current repo state as of 2026-07-26:
 - production Compose now consumes one versioned GHCR tag for console, API, scheduler, executor, probe, and the optional Lighthouse runner, while `compose.dev.yml` restores source builds for contributor smoke tests
 - default Compose publishes only the console on `127.0.0.1`; loopback API/runner access is opt-in through the `debug` profile, and all runtime services now have non-root/read-only policies, health checks, bounded resources, log rotation, and explicit stop behavior
 - the optional Lighthouse container now uses Chrome's user-namespace sandbox with no-new-privileges, non-setuid helpers, non-executable temp mounts, no host port, 1 GiB shared memory, one in-flight audit, and no default `SYS_ADMIN`; a semantic Compose check prevents those production invariants from regressing, rejects root UID/GID values, and requires exact development/production service parity
-- one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, all 100 Bun tests, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, an additional Lighthouse build on GitHub's native arm64 runner, and both default and Browser Audit Compose smokes
+- one required `ci` workflow now gates PRs and `main` on frozen Bun installation, boundary/OpenAPI/TypeScript/Svelte checks, the full Bun test suite, Rust fmt/clippy/tests, public-safe Markdown links, every linux/amd64 runtime image, an additional Lighthouse build on GitHub's native arm64 runner, and both default and Browser Audit Compose smokes
 - Compose smoke port-isolation assertions now inspect actual container port bindings instead of relying on version-dependent `docker compose port` output for exposed-but-unpublished ports
 - the Lighthouse runner toolchain now reports the Compose-selected WebPerf runtime version instead of reading a missing version from its private package manifest, and release bundles resolve that runtime version alongside image digests
 - the Lighthouse image keeps packaged sandbox helpers root-owned but non-setuid, explicitly selects the user-namespace sandbox, and relies on its product-specific Chrome path plus checked-in seccomp and AppArmor policies instead of a privileged helper
@@ -208,9 +208,9 @@ Current repo state as of 2026-07-26:
 - defensive migration checks now resolve storage crypto only when locked pending work actually runs, self-host init narrows template keys through an explicit allowlist guard, and maintenance reports committed database work separately from retryable artifact reconciliation failures
 - the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
 - Browser Audit Compose CI reports bounded host-kernel AppArmor and namespace denial records when sandboxed Chromium health checks fail, so runtime-policy regressions can be diagnosed without weakening the sandbox
-- protected release run `30161891204` successfully published annotated tag `v0.2.0`, six immutable GHCR images, a digest-pinned Compose bundle, SPDX SBOMs, provenance attestations, checksums, and release-scoped runtime metadata
-- PRs #4 and #5 closed the remaining local Compose port-isolation and canonical baseline/deterministic analysis evidence gaps; the public-beta hardening plan now records the verified gates and their evidence
-- all six v0.2.0 GHCR packages remain private, so the only release-completion gate is an explicitly approved, credential-free clean-host installation after every required package is public
+- protected release runs `30161891204` and `30191805871` successfully published annotated tags `v0.2.0` and `v0.2.1`; the current `v0.2.1` release includes six immutable multi-architecture GHCR images, a digest-pinned Compose bundle, per-platform SPDX SBOMs, provenance attestations, checksums, and release-scoped runtime metadata
+- PRs #4 through #9 closed the local Compose port-isolation, canonical baseline/deterministic analysis, multi-architecture release, and release-bundle-version evidence gaps; the public-beta hardening plan records the verified gates and the remaining runtime gate
+- all six GHCR packages are public, and anonymous registry checks verify `0.2.1` manifests for both `linux/amd64` and `linux/arm64`; the archive checksum and digest-pinned Compose rendering are verified, while a full empty-host runtime start still needs a Docker host with enough free image storage
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -251,11 +251,10 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. obtain explicit maintainer confirmation, then make all six v0.2.0 GHCR packages public; GitHub does not allow a public package to return to private visibility
-2. only after all six packages are public, prove anonymous pulls and run the tagged digest-pinned Compose bundle from a fresh directory with newly generated secrets for both default and Browser Audit profiles
-3. run a documented operator backup/restore drill against the released bundle
-4. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
-5. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+1. on a Docker host with sufficient free image storage, start the `v0.2.1` tagged digest-pinned bundle from a fresh directory with newly generated secrets and no registry credentials for both default and Browser Audit profiles
+2. run a documented operator backup/restore drill against the released bundle
+3. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+4. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
 
 ## Update Protocol
 

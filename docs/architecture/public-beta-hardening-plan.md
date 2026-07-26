@@ -1,6 +1,6 @@
 # Public beta hardening plan
 
-Status: awaiting generated-secret clean-host runtime validation<br>
+Status: complete — public-beta release bundle verified<br>
 Owner: self-hosted maintainers<br>
 Started: 2026-07-22
 
@@ -246,7 +246,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ## Completion gates
 
-- [ ] A clean host can install a tagged, digest-pinned Compose bundle.
+- [x] A clean host can install a tagged, digest-pinned Compose bundle.
 - [x] Default host exposure is console-only on loopback.
 - [x] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.
@@ -300,6 +300,14 @@ The exact diff will stay small within each phase, but the expected surface is:
   used an empty Docker credential directory, and successfully started the
   default and Browser Audit profiles; it used deterministic CI-only secret
   values, so it does not close the generated-secret clean-host gate.
+- Final published-bundle smoke run
+  [30197793088](https://github.com/Webperf-and-Guide/webperf-selfhosted/actions/runs/30197793088)
+  ran the merged `main` harness at `e4e987be98421a2e2464d4286c5adf8c3d9f005b`
+  against the public `v0.2.1` source commit
+  `5b974e3cadfd8ed68c3550f400637516ff165d52`. It generated four independent
+  secrets for the temporary Compose environment, used an empty Docker
+  credential directory, and passed the checksum/source-metadata validation plus
+  default and Browser Audit published-bundle smokes.
 - Current `main` revalidation passed `bun run check`, `bun test` (242 tests),
   `bun run check:docs`, `bun run compose:config`, and Rust fmt, clippy, and
   workspace tests.
@@ -308,14 +316,14 @@ The exact diff will stay small within each phase, but the expected surface is:
   boundary/OpenAPI/release-policy, redaction, SSRF, contract, and Compose
   checks listed above.
 
-### Remaining external gate
+### Completion evidence
 
 All six release packages (`webperf-console`, `webperf-api`,
 `webperf-scheduler`, `webperf-executor`, `webperf-probe`, and
-`webperf-browser-audit-lighthouse`) are public. Rerun the `v0.2.1`
-published-bundle smoke with independently generated secrets before closing the
-clean-host gate; it must still verify the empty Docker credential directory and
-both default and Browser Audit profiles.
+`webperf-browser-audit-lighthouse`) are public. The final `v0.2.1`
+published-bundle smoke used independently generated secrets, an empty Docker
+credential directory, and both default and Browser Audit profiles; no
+public-beta external gate remains.
 
 Each implementation commit is reviewed with `ocr review --commit <sha>`.
 Review findings are fixed before the phase is considered complete. After the

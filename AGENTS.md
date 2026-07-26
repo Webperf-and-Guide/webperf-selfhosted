@@ -209,9 +209,9 @@ Current repo state as of 2026-07-26:
 - the README now starts with operator outcomes, current console screenshots, and a digest-pinned Docker release install; `docs/users` covers the complete install/configure/regions/checks/scheduling/browser-audit/artifact/backup/upgrade/security/troubleshooting/reverse-proxy/cloud decision path, while source setup and release mechanics live under `docs/contributors`
 - Browser Audit Compose CI reports bounded host-kernel AppArmor and namespace denial records when sandboxed Chromium health checks fail, so runtime-policy regressions can be diagnosed without weakening the sandbox
 - protected release runs `30161891204` and `30191805871` successfully published annotated tags `v0.2.0` and `v0.2.1`; the current `v0.2.1` release includes six immutable multi-architecture GHCR images, a digest-pinned Compose bundle, per-platform SPDX SBOMs, provenance attestations, checksums, and release-scoped runtime metadata
-- PRs #4 through #11 closed the local Compose port-isolation, canonical baseline/deterministic analysis, multi-architecture release, and release-bundle-version evidence gaps; the public-beta hardening plan records the remaining generated-secret runtime gate
-- all six GHCR packages are public, and anonymous registry checks verify `0.2.1` manifests for both `linux/amd64` and `linux/arm64`; GitHub-hosted published-bundle smoke run `30196392990` verified the archive checksums, source metadata, empty Docker credential directory, and both runtime profiles with deterministic CI-only secret values
-- formal releases now finish with a required fresh GitHub-hosted published-bundle smoke for both default and Browser Audit profiles; its current bundle-aware harness is kept separate from a source-pinned checkout that must match the bundle runtime metadata, and its next `v0.2.1` drill must use independently generated secrets
+- PRs #4 through #12 closed the local Compose port-isolation, canonical baseline/deterministic analysis, multi-architecture release, release-bundle-version, and generated-secret clean-host evidence gaps; the public-beta hardening plan is complete
+- all six GHCR packages are public, and anonymous registry checks verify `0.2.1` manifests for both `linux/amd64` and `linux/arm64`; GitHub-hosted published-bundle smoke run `30197793088` verified the public archive checksums and source metadata with an empty Docker credential directory, four independently generated temporary secrets, and both runtime profiles
+- formal releases now finish with a required fresh GitHub-hosted published-bundle smoke for both default and Browser Audit profiles; its bundle-aware harness is separate from a source-pinned checkout that must match the bundle runtime metadata, and the current `v0.2.1` drill passed with independently generated secrets
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -252,10 +252,9 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. rerun the `v0.2.1` tagged digest-pinned bundle from a fresh directory with independently generated secrets and no registry credentials for both default and Browser Audit profiles
-2. run a documented operator backup/restore drill against the released bundle
-3. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
-4. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+1. run a documented operator backup/restore drill against the released bundle
+2. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+3. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
 
 ## Update Protocol
 

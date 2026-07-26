@@ -291,12 +291,12 @@ The exact diff will stay small within each phase, but the expected surface is:
 As of this audit, all six release packages (`webperf-console`, `webperf-api`,
 `webperf-scheduler`, `webperf-executor`, `webperf-probe`, and
 `webperf-browser-audit-lighthouse`) are still private in GHCR. Their visibility
-must be made public before a credential-free clean-host installation can be
-tested. After each [irreversible package-visibility change](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility),
-download the `v0.2.0` release bundle into a fresh directory, verify its
-checksum, run the digest-pinned Compose stack with freshly generated secrets,
-and confirm both the default and optional Browser Audit profiles without
-registry credentials.
+must all be made public before attempting a credential-free clean-host
+installation. Only after all six [irreversible package-visibility changes](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)
+are complete, download the `v0.2.0` release bundle into a fresh directory,
+verify its checksum, run the digest-pinned Compose stack with freshly generated
+secrets, and confirm both the default and optional Browser Audit profiles
+without registry credentials.
 
 Each implementation commit is reviewed with `ocr review --commit <sha>`.
 Review findings are fixed before the phase is considered complete. After the

@@ -1,6 +1,6 @@
 # Public beta hardening plan
 
-Status: awaiting clean-host runtime validation<br>
+Status: complete — public-beta release bundle verified<br>
 Owner: self-hosted maintainers<br>
 Started: 2026-07-22
 
@@ -246,7 +246,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ## Completion gates
 
-- [ ] A clean host can install a tagged, digest-pinned Compose bundle.
+- [x] A clean host can install a tagged, digest-pinned Compose bundle.
 - [x] Default host exposure is console-only on loopback.
 - [x] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.
@@ -293,6 +293,12 @@ The exact diff will stay small within each phase, but the expected surface is:
   checksum. Its `runtime-metadata.json` source commit and all six image
   references match the tag and Compose file, and both default and Browser Audit
   Compose configurations render successfully without mutable image tags.
+- Published-bundle smoke run
+  [30196392990](https://github.com/Webperf-and-Guide/webperf-selfhosted/actions/runs/30196392990)
+  downloaded the public `v0.2.1` archive into fresh GitHub-hosted runners,
+  verified both checksum layers and source commit `5b974e3cadfd8ed68c3550f400637516ff165d52`,
+  used an empty Docker credential directory, and successfully started the
+  default and Browser Audit profiles.
 - Current `main` revalidation passed `bun run check`, `bun test` (242 tests),
   `bun run check:docs`, `bun run compose:config`, and Rust fmt, clippy, and
   workspace tests.
@@ -301,18 +307,13 @@ The exact diff will stay small within each phase, but the expected surface is:
   boundary/OpenAPI/release-policy, redaction, SSRF, contract, and Compose
   checks listed above.
 
-### Remaining external gate
+### Completion evidence
 
 All six release packages (`webperf-console`, `webperf-api`,
 `webperf-scheduler`, `webperf-executor`, `webperf-probe`, and
-`webperf-browser-audit-lighthouse`) are now public. The next validation must
-run the `v0.2.1` digest-pinned bundle from a fresh directory with freshly
-generated secrets and no registry credentials, then confirm both the default
-and optional Browser Audit profiles. A local attempt reached the anonymous
-image pull but stopped because the local OrbStack image store had no free
-space; this is a host-capacity blocker, not a registry, archive, or Compose
-configuration failure. Keep the clean-host gate unchecked until that runtime
-start succeeds on a host with sufficient Docker storage.
+`webperf-browser-audit-lighthouse`) are public. The published-bundle smoke
+above closes the clean-host gate without depending on the local OrbStack image
+store that previously lacked free space.
 
 Each implementation commit is reviewed with `ocr review --commit <sha>`.
 Review findings are fixed before the phase is considered complete. After the

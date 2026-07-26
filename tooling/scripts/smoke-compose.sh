@@ -104,9 +104,29 @@ cleanup() {
 
 trap cleanup EXIT
 
+generate_smoke_secret() {
+  local value
+  value="$(openssl rand -base64 32 | tr -d '\r\n')"
+  if [[ ${#value} -lt 32 ]]; then
+    echo 'Failed to generate a sufficiently long smoke secret' >&2
+    exit 1
+  fi
+  printf '%s' "$value"
+}
+
+smoke_admin_token="$(generate_smoke_secret)" || exit 1
+smoke_internal_secret="$(generate_smoke_secret)" || exit 1
+smoke_probe_secret="$(generate_smoke_secret)" || exit 1
+smoke_browser_audit_secret="$(generate_smoke_secret)" || exit 1
+
 cp "$env_template" "$temp_env"
 
+SMOKE_ADMIN_TOKEN="$smoke_admin_token" \
+SMOKE_INTERNAL_SECRET="$smoke_internal_secret" \
+SMOKE_PROBE_SECRET="$smoke_probe_secret" \
+SMOKE_BROWSER_AUDIT_SECRET="$smoke_browser_audit_secret" \
 python3 - "$temp_env" "$profile" <<'PY'
+import os
 from pathlib import Path
 import sys
 
@@ -120,11 +140,11 @@ for raw in env_path.read_text().splitlines():
     key, value = raw.split('=', 1)
     values[key] = value
 
-values['SELFHOST_ADMIN_TOKEN'] = 'smoke-admin-token-value'
-values['SELFHOST_INTERNAL_SECRET'] = 'smoke-internal-secret-value'
-values['PROBE_SHARED_SECRET'] = 'smoke-probe-shared-secret'
+values['SELFHOST_ADMIN_TOKEN'] = os.environ['SMOKE_ADMIN_TOKEN']
+values['SELFHOST_INTERNAL_SECRET'] = os.environ['SMOKE_INTERNAL_SECRET']
+values['PROBE_SHARED_SECRET'] = os.environ['SMOKE_PROBE_SECRET']
 values['BROWSER_AUDIT_SHARED_SECRET_NEXT'] = ''
-values['BROWSER_AUDIT_SHARED_SECRET'] = 'smoke-browser-audit-shared-secret'
+values['BROWSER_AUDIT_SHARED_SECRET'] = os.environ['SMOKE_BROWSER_AUDIT_SECRET']
 values['CONSOLE_PUBLIC_PORT'] = '0'
 values['SELFHOST_API_DEBUG_PORT'] = '0'
 values['BROWSER_AUDIT_DEBUG_PORT'] = '0'
@@ -216,7 +236,7 @@ fi
 if [[ "$profile" == "browser-audit" ]]; then
   audit_response="$(
     curl -fsS -X POST "${api_debug_url}/v1/browser-audits" \
-      -H 'authorization: Bearer smoke-admin-token-value' \
+      -H "authorization: Bearer ${smoke_admin_token}" \
       -H 'content-type: application/json' \
       -d '{
         "targetUrl": "https://example.com",
@@ -242,7 +262,7 @@ if [[ "$profile" == "browser-audit" ]]; then
   for _ in {1..60}; do
     audit_detail="$(
       curl -fsS "${api_debug_url}/v1/browser-audits/${audit_id}" \
-        -H 'authorization: Bearer smoke-admin-token-value'
+        -H "authorization: Bearer ${smoke_admin_token}"
     )"
     audit_status="$(bun -e 'console.log(JSON.parse(process.argv[1]).status)' "$audit_detail")"
     if [[ "$audit_status" == "succeeded" || "$audit_status" == "failed" ]]; then
@@ -295,7 +315,7 @@ if [[ "$profile" == "browser-audit" ]]; then
     exit 1
   fi
   curl -fsS "${api_debug_url}${artifact_url}" \
-    -H 'authorization: Bearer smoke-admin-token-value' \
+    -H "authorization: Bearer ${smoke_admin_token}" \
     -o "$temp_artifact"
   if [[ ! -s "$temp_artifact" ]]; then
     echo "Expected a non-empty Browser Audit artifact download" >&2

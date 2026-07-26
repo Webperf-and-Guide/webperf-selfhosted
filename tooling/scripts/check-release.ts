@@ -58,6 +58,12 @@ const releaseWorkflow = readWorkflow('release.yml');
 const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
 const releaseBundleSmokeWorkflow = readWorkflow('release-bundle-smoke.yml');
+let composeSmokeScript: string | undefined;
+try {
+  composeSmokeScript = readFileSync(join(root, 'tooling/scripts/smoke-compose.sh'), 'utf8');
+} catch {
+  violations.push('tooling/scripts/smoke-compose.sh: script is missing or unreadable');
+}
 let releaseTagScript: string | undefined;
 try {
   releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
@@ -207,6 +213,33 @@ for (const requiredFragment of [
 ]) {
   if (releaseWorkflow !== undefined && !releaseWorkflow.includes(requiredFragment)) {
     violations.push(`release.yml: missing release invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'openssl rand -base64 32',
+  'SMOKE_ADMIN_TOKEN="$smoke_admin_token"',
+  'SMOKE_INTERNAL_SECRET="$smoke_internal_secret"',
+  'SMOKE_PROBE_SECRET="$smoke_probe_secret"',
+  'SMOKE_BROWSER_AUDIT_SECRET="$smoke_browser_audit_secret"',
+  'smoke_admin_token="$(generate_smoke_secret)" || exit 1',
+  'smoke_internal_secret="$(generate_smoke_secret)" || exit 1',
+  'smoke_probe_secret="$(generate_smoke_secret)" || exit 1',
+  'smoke_browser_audit_secret="$(generate_smoke_secret)" || exit 1',
+  '-H "authorization: Bearer ${smoke_admin_token}"'
+]) {
+  if (composeSmokeScript !== undefined && !composeSmokeScript.includes(requiredFragment)) {
+    violations.push(`smoke-compose.sh: missing generated-secret invariant ${requiredFragment}`);
+  }
+}
+for (const fixedCredential of [
+  'smoke-admin-token-value',
+  'smoke-internal-secret-value',
+  'smoke-probe-shared-secret',
+  'smoke-browser-audit-shared-secret'
+]) {
+  if (composeSmokeScript?.includes(fixedCredential)) {
+    violations.push(`smoke-compose.sh: fixed smoke credential must not remain (${fixedCredential})`);
   }
 }
 

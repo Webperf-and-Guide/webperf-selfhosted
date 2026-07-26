@@ -1,5 +1,12 @@
 # @webperf/config
 
+## 0.2.1 — 2026-07-26
+
+### Patch changes
+
+- [f8672b5](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/f8672b51d4f6fc71b07152e1f682686c8b87a8fe) Publish every self-host runtime image for Linux amd64 and arm64, and verify the
+  published OCI index before releasing its digest-pinned Compose bundle. — Thanks @imjlk!
+
 ## 0.2.0 — 2026-07-25
 
 ### Minor changes

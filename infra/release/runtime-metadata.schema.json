@@ -43,7 +43,30 @@
             "const": "linux/amd64",
             "description": "The v1 amd64 compatibility baseline. The immutable digest can name a multi-platform OCI index; resolve supported platforms from that registry manifest."
           },
-          "sbom": { "type": "string", "pattern": "^[a-z-]+-[0-9].+\\.spdx\\.json$" }
+          "sbom": {
+            "type": "string",
+            "pattern": "^[a-z-]+-[0-9].+\\.spdx\\.json$",
+            "description": "The linux/amd64 compatibility SBOM. New multi-platform releases also publish sboms with a matching per-platform digest and file."
+          },
+          "sboms": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              { "contains": { "properties": { "platform": { "const": "linux/amd64" } }, "required": ["platform"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "platform": { "const": "linux/arm64" } }, "required": ["platform"] }, "minContains": 1, "maxContains": 1 }
+            ],
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["platform", "digest", "file"],
+              "properties": {
+                "platform": { "enum": ["linux/amd64", "linux/arm64"] },
+                "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+                "file": { "type": "string", "pattern": "^[a-z-]+-[0-9].+\\.spdx\\.json$" }
+              }
+            }
+          }
         }
       }
     }

@@ -181,8 +181,26 @@ npm/@webperf/contracts: patch
     expect(validateReleaseComposeImages(compose)).toHaveLength(8);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);
+      for (const suffix of ['', '-linux-arm64']) {
+        expect(readFileSync(
+          join(output, 'sbom', `${definition.name}-0.2.0${suffix}.spdx.json`),
+          'utf8'
+        )).toContain('SPDXRef-DOCUMENT');
+      }
     }
     expect(runtimeMetadata.images).toHaveLength(6);
+    expect(runtimeMetadata.images[0].sboms).toEqual([
+      {
+        platform: 'linux/amd64',
+        digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        file: 'console-0.2.0.spdx.json'
+      },
+      {
+        platform: 'linux/arm64',
+        digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        file: 'console-0.2.0-linux-arm64.spdx.json'
+      }
+    ]);
     expect(readFileSync(join(output, '.env.example'), 'utf8')).not.toContain(
       'WEBPERF_VERSION='
     );
@@ -241,6 +259,8 @@ npm/@webperf/contracts: patch
         image: 'ghcr.io/example/not-probe',
         version: '0.2.0',
         digest: `sha256:${'a'.repeat(64)}`,
+        amd64Digest: `sha256:${'b'.repeat(64)}`,
+        arm64Digest: `sha256:${'c'.repeat(64)}`,
         sourceCommit: 'b'.repeat(40),
         outputDirectory: makeTemporaryDirectory()
       })
@@ -274,24 +294,34 @@ function makeTemporaryDirectory() {
 function writeValidReleaseInputs(root: string, version: string, sourceCommit: string) {
   const input = join(root, 'input');
   for (const definition of releaseImages) {
-    const digest = `sha256:${createHash('sha256').update(definition.name).digest('hex')}`;
+    const digest = createFixtureDigest(`index:${definition.name}`);
+    const amd64Digest = createFixtureDigest(`linux/amd64:${definition.name}`);
+    const arm64Digest = createFixtureDigest(`linux/arm64:${definition.name}`);
     writeReleaseImageMetadata({
       ...definition,
       version,
       digest,
+      amd64Digest,
+      arm64Digest,
       sourceCommit,
       outputDirectory: input
     });
-    writeFileSync(
-      join(input, `${definition.name}-${version}.spdx.json`),
-      JSON.stringify({
-        spdxVersion: 'SPDX-2.3',
-        SPDXID: 'SPDXRef-DOCUMENT',
-        name: definition.name
-      })
-    );
+    for (const suffix of ['', '-linux-arm64']) {
+      writeFileSync(
+        join(input, `${definition.name}-${version}${suffix}.spdx.json`),
+        JSON.stringify({
+          spdxVersion: 'SPDX-2.3',
+          SPDXID: 'SPDXRef-DOCUMENT',
+          name: `${definition.name}${suffix}`
+        })
+      );
+    }
   }
   return input;
+}
+
+function createFixtureDigest(value: string) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
 function writeRepositoryReleaseFixture({

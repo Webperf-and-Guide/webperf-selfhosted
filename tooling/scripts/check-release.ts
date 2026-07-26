@@ -26,6 +26,8 @@ const workflowDocumentCache = new Map<string, WorkflowPolicyDocument | undefined
 type WorkflowImageEntry = {
   name: string;
   image: string;
+  context: string;
+  file: string;
 };
 
 type WorkflowBuildEntry = {
@@ -99,9 +101,11 @@ for (const definition of releaseImages) {
         && entry.platform === platform
         && entry.arch === arch
         && entry.runner === runner
+        && entry.context === definition.context
+        && entry.file === definition.file
     )) {
       violations.push(
-        `ci.yml: ${definition.name} image matrix must build on the native ${arch} runner`
+        `ci.yml: ${definition.name} image matrix must build ${definition.file} from ${definition.context} on the native ${arch} runner`
       );
     }
   }
@@ -129,7 +133,10 @@ for (const file of workflowFiles) {
 for (const definition of releaseImages) {
   const image = definition.image.split('/').at(-1) ?? '';
   const hasMapping = (entries: WorkflowImageEntry[]) => entries.some(
-    (entry) => entry.name === definition.name && entry.image === image
+    (entry) => entry.name === definition.name
+      && entry.image === image
+      && entry.context === definition.context
+      && entry.file === definition.file
   );
   if (releaseWorkflow !== undefined && !hasMapping(releaseImageMatrix)) {
     violations.push(`release.yml: missing or incorrect image matrix mapping for ${definition.name}`);
@@ -148,6 +155,9 @@ for (const [file, workflow] of [
   }
   if (!workflow.includes('docker/setup-qemu-action@')) {
     violations.push(`${file}: multi-platform publishing must set up arm64 emulation`);
+  }
+  if (!/image:\s+(?:docker\.io\/)?tonistiigi\/binfmt@sha256:[a-f0-9]{64}/.test(workflow)) {
+    violations.push(`${file}: QEMU binfmt image must be pinned by digest`);
   }
   if (!workflow.includes('platforms: linux/amd64,linux/arm64')) {
     violations.push(`${file}: runtime publishing must target linux/amd64 and linux/arm64`);
@@ -179,8 +189,13 @@ for (const requiredFragment of [
   'provenance: mode=max',
   'actions/attest@',
   'environment: release',
-  'Verify published OCI platforms',
+  'Resolve published OCI platform manifests',
+  'id: platform-digests',
   'docker buildx imagetools inspect --raw',
+  'steps.platform-digests.outputs.linux_amd64_digest',
+  'steps.platform-digests.outputs.linux_arm64_digest',
+  'output-file: release-output/${{ matrix.name }}-${{ needs.prepare.outputs.version }}.spdx.json',
+  '-linux-arm64.spdx.json',
   'browser-audit.apparmor',
   'browser-audit-seccomp.json',
   'compose.apparmor.yml',
@@ -522,6 +537,8 @@ function parseImageMatrix(
     (entry): entry is WorkflowImageEntry => (
       typeof entry.name === 'string'
       && typeof entry.image === 'string'
+      && typeof entry.context === 'string'
+      && typeof entry.file === 'string'
     )
   );
 }

@@ -14,12 +14,13 @@ Each release contains:
 - six multi-platform (`linux/amd64` and `linux/arm64`) GHCR image indexes,
   tagged with the release version and source SHA;
 - OCI-native SBOM and max-mode provenance attestations;
-- GitHub provenance and SPDX SBOM attestations bound to each image digest;
+- GitHub provenance bound to each image index plus SPDX SBOM attestations bound
+  to each amd64 and arm64 platform manifest;
 - a tarball whose `compose.yml` pins all six image repositories by digest;
 - the root `VERSION` released by the tag;
 - the `browser-audit-seccomp.json` referenced by that Compose file;
 - `runtime-metadata.json` following `runtime-metadata.schema.json`;
-- one SPDX JSON SBOM per image and SHA-256 checksums.
+- two SPDX JSON SBOMs per image (one per Linux platform) and SHA-256 checksums.
 
 The managed cloud repository should consume `runtime-metadata.json` from a
 specific GitHub Release. It must not infer runtime identity from `main`,

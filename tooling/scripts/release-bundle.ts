@@ -16,18 +16,52 @@ import {
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
 export const releaseImages = [
-  { name: 'console', image: 'ghcr.io/webperf-and-guide/webperf-console' },
-  { name: 'api', image: 'ghcr.io/webperf-and-guide/webperf-api' },
-  { name: 'scheduler', image: 'ghcr.io/webperf-and-guide/webperf-scheduler' },
-  { name: 'executor', image: 'ghcr.io/webperf-and-guide/webperf-executor' },
-  { name: 'probe', image: 'ghcr.io/webperf-and-guide/webperf-probe' },
+  {
+    name: 'console',
+    image: 'ghcr.io/webperf-and-guide/webperf-console',
+    context: '.',
+    file: 'apps/console/Dockerfile'
+  },
+  {
+    name: 'api',
+    image: 'ghcr.io/webperf-and-guide/webperf-api',
+    context: '.',
+    file: 'apps/api/Dockerfile'
+  },
+  {
+    name: 'scheduler',
+    image: 'ghcr.io/webperf-and-guide/webperf-scheduler',
+    context: '.',
+    file: 'apps/scheduler/Dockerfile'
+  },
+  {
+    name: 'executor',
+    image: 'ghcr.io/webperf-and-guide/webperf-executor',
+    context: '.',
+    file: 'apps/executor/Dockerfile'
+  },
+  {
+    name: 'probe',
+    image: 'ghcr.io/webperf-and-guide/webperf-probe',
+    context: './apps/probe-rs',
+    file: 'apps/probe-rs/Dockerfile'
+  },
   {
     name: 'browser-audit-lighthouse',
-    image: 'ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse'
+    image: 'ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse',
+    context: '.',
+    file: 'apps/browser-audit-lighthouse/Dockerfile'
   }
 ] as const;
 
 type ReleaseImageName = (typeof releaseImages)[number]['name'];
+type ReleasePlatform = 'linux/amd64' | 'linux/arm64';
+
+type ReleaseImageSbom = {
+  platform: ReleasePlatform;
+  digest: string;
+  file: string;
+};
 
 export type ReleaseImageMetadata = {
   schemaVersion: 1;
@@ -39,6 +73,7 @@ export type ReleaseImageMetadata = {
   platform: 'linux/amd64';
   sourceCommit: string;
   sbom: string;
+  sboms?: ReleaseImageSbom[];
 };
 
 const repositoryRoot = resolve(import.meta.dir, '../..');
@@ -56,10 +91,14 @@ const metadataKeys = [
   'platform',
   'reference',
   'sbom',
+  'sboms',
   'schemaVersion',
   'sourceCommit',
   'tag'
 ];
+const legacyMetadataKeys = metadataKeys.filter((key) => key !== 'sboms');
+const releaseImageSbomKeys = ['digest', 'file', 'platform'];
+const releasePlatforms: readonly ReleasePlatform[] = ['linux/amd64', 'linux/arm64'];
 
 export function validateReleaseVersion(version: string) {
   if (!versionPattern.test(version)) {
@@ -253,6 +292,8 @@ export function writeReleaseImageMetadata({
   image,
   version,
   digest,
+  amd64Digest,
+  arm64Digest,
   sourceCommit,
   outputDirectory
 }: {
@@ -260,6 +301,8 @@ export function writeReleaseImageMetadata({
   image: string;
   version: string;
   digest: string;
+  amd64Digest: string;
+  arm64Digest: string;
   sourceCommit: string;
   outputDirectory: string;
 }) {
@@ -271,9 +314,24 @@ export function writeReleaseImageMetadata({
   if (!digestPattern.test(digest)) {
     throw new Error(`Invalid OCI digest for ${name}`);
   }
+  if (!digestPattern.test(amd64Digest) || !digestPattern.test(arm64Digest)) {
+    throw new Error(`Invalid platform OCI digest for ${name}`);
+  }
   if (!commitPattern.test(sourceCommit)) {
     throw new Error(`Invalid source commit for ${name}`);
   }
+
+  const amd64Sbom: ReleaseImageSbom = {
+    platform: 'linux/amd64',
+    digest: amd64Digest,
+    file: releaseSbomFilename(definition.name, version, 'linux/amd64')
+  };
+  const arm64Sbom: ReleaseImageSbom = {
+    platform: 'linux/arm64',
+    digest: arm64Digest,
+    file: releaseSbomFilename(definition.name, version, 'linux/arm64')
+  };
+  const sboms: ReleaseImageSbom[] = [amd64Sbom, arm64Sbom];
 
   const metadata: ReleaseImageMetadata = {
     schemaVersion: 1,
@@ -284,7 +342,8 @@ export function writeReleaseImageMetadata({
     reference: `${definition.image}@${digest}`,
     platform: 'linux/amd64',
     sourceCommit,
-    sbom: `${definition.name}-${version}.spdx.json`
+    sbom: amd64Sbom.file,
+    sboms
   };
 
   mkdirSync(outputDirectory, { recursive: true });
@@ -359,9 +418,15 @@ export function renderReleaseBundle({
   const sbomDirectory = join(outputDirectory, 'sbom');
   mkdirSync(sbomDirectory);
   for (const entry of metadata) {
-    const source = join(inputDirectory, entry.sbom);
-    validateSpdxDocument(source, entry.name);
-    copyFileSync(source, join(sbomDirectory, entry.sbom));
+    const platformSboms = entry.sboms?.map(({ platform, file }) => ({ platform, file })) ?? [{
+      platform: 'linux/amd64' as const,
+      file: entry.sbom
+    }];
+    for (const sbom of platformSboms) {
+      const source = join(inputDirectory, sbom.file);
+      validateSpdxDocument(source, `${entry.name} (${sbom.platform})`);
+      copyFileSync(source, join(sbomDirectory, sbom.file));
+    }
   }
 
   const runtimeMetadata = {
@@ -410,9 +475,14 @@ function readReleaseImageMetadata(
     throw new Error(`Release metadata is not an object: ${basename(path)}`);
   }
   const metadata = parsed as Partial<ReleaseImageMetadata>;
+  const hasPlatformSboms = metadata.sboms !== undefined;
+  const expectedSbomFile = hasPlatformSboms
+    ? releaseSbomFilename(definition.name, version, 'linux/amd64')
+    : legacySbomFilename(definition.name, version);
   const checks: Array<[valid: boolean, failure: string]> = [
     [
-      Object.keys(metadata).sort().join('\n') === metadataKeys.join('\n'),
+      Object.keys(metadata).sort().join('\n')
+        === (hasPlatformSboms ? metadataKeys : legacyMetadataKeys).join('\n'),
       'metadata keys do not match the release schema'
     ],
     [metadata.schemaVersion === 1, 'schemaVersion must be 1'],
@@ -433,10 +503,16 @@ function readReleaseImageMetadata(
       'sourceCommit must be a full SHA-1 or SHA-256 commit ID'
     ],
     [
-      metadata.sbom === `${definition.name}-${version}.spdx.json`,
-      `sbom must be ${definition.name}-${version}.spdx.json`
+      metadata.sbom === expectedSbomFile,
+      `sbom must be ${expectedSbomFile}`
     ]
   ];
+  if (hasPlatformSboms) {
+    checks.push([
+      hasExpectedPlatformSboms(metadata.sboms, definition.name, version),
+      `sboms must cover linux/amd64 and linux/arm64 for ${definition.name}`
+    ]);
+  }
   const failures = checks.filter(([valid]) => !valid).map(([, failure]) => failure);
   if (failures.length > 0) {
     throw new Error(
@@ -444,6 +520,46 @@ function readReleaseImageMetadata(
     );
   }
   return metadata as ReleaseImageMetadata;
+}
+
+function hasExpectedPlatformSboms(
+  value: unknown,
+  name: string,
+  version: string
+): value is ReleaseImageSbom[] {
+  if (!Array.isArray(value) || value.length !== releasePlatforms.length) {
+    return false;
+  }
+  const candidates = value.filter((entry): entry is Partial<ReleaseImageSbom> => (
+    entry !== null
+    && typeof entry === 'object'
+    && !Array.isArray(entry)
+  ));
+  return releasePlatforms.every((platform) => {
+    const matching = candidates.filter((entry) => (
+      Object.keys(entry).sort().join('\n') === releaseImageSbomKeys.join('\n')
+      && entry.platform === platform
+      && typeof entry.digest === 'string'
+      && digestPattern.test(entry.digest)
+      && entry.file === releaseSbomFilename(name, version, platform)
+    ));
+    return matching.length === 1;
+  });
+}
+
+function releaseSbomFilename(
+  name: string,
+  version: string,
+  platform: ReleasePlatform
+): string {
+  if (platform === 'linux/amd64') {
+    return legacySbomFilename(name, version);
+  }
+  return `${name}-${version}-linux-arm64.spdx.json`;
+}
+
+function legacySbomFilename(name: string, version: string) {
+  return `${name}-${version}.spdx.json`;
 }
 
 function validateSpdxDocument(path: string, imageName: string) {
@@ -697,8 +813,17 @@ function escapeRegExp(value: string) {
 if (import.meta.main) {
   const [command, ...args] = Bun.argv.slice(2);
   try {
-    if (command === 'metadata' && args.length === 6) {
-      const [name, image, version, digest, sourceCommit, outputDirectory] = args;
+    if (command === 'metadata' && args.length === 8) {
+      const [
+        name,
+        image,
+        version,
+        digest,
+        amd64Digest,
+        arm64Digest,
+        sourceCommit,
+        outputDirectory
+      ] = args;
       console.log(
         JSON.stringify({
           ok: true,
@@ -707,6 +832,8 @@ if (import.meta.main) {
             image,
             version,
             digest,
+            amd64Digest,
+            arm64Digest,
             sourceCommit,
             outputDirectory
           })
@@ -732,7 +859,7 @@ if (import.meta.main) {
       console.log(JSON.stringify({ ok: true, ...prepareRepositoryRelease() }));
     } else {
       throw new Error(
-        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version> | repository-version | prepare-repository-release'
+        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <amd64-digest> <arm64-digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version> | repository-version | prepare-repository-release'
       );
     }
   } catch (error) {

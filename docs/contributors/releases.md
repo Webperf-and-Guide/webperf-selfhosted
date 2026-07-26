@@ -108,7 +108,11 @@ environment approval. After approval it:
 5. rewrites every release Compose image to an approved `@sha256:` reference;
 6. creates a deterministic archive and SHA-256 checksum;
 7. uploads the bundle, Compose file, runtime metadata, and SBOMs to the GitHub
-   Release.
+   Release; and
+8. downloads that public archive into fresh GitHub-hosted runners, verifies its
+   checksum, and starts both the default and Browser Audit profiles with an
+   empty Docker credential directory so the release is proven installable by an
+   anonymous consumer.
 
 Formal install material never uses `main` or `latest`. The `main` and
 `sha-<commit>` image tags are development channels published only after main

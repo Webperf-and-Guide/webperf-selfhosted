@@ -178,16 +178,21 @@ for _ in {1..90}; do
   sleep 2
 done
 
+# Final check — if console still unreachable, dump diagnostics before failing.
 if ! curl -fsS "${console_url}/" >/dev/null 2>&1; then
-  echo "=== Console container logs ==="
-  compose "${profile_args[@]}" logs --tail 30 console 2>&1 || true
-  echo "=== API container logs ==="
-  compose "${profile_args[@]}" logs --tail 15 api 2>&1 || true
-  echo "=== compose port output ==="
+  echo "=== CONSOLE UNREACHABLE — diagnostics ==="
+  echo "--- compose port console 3000 ---"
   compose "${profile_args[@]}" port console 3000 2>&1 || true
+  echo "--- console container logs ---"
+  compose "${profile_args[@]}" logs --no-log-prefix --tail 30 console 2>&1 || true
+  echo "--- api container logs ---"
+  compose "${profile_args[@]}" logs --no-log-prefix --tail 15 api 2>&1 || true
+  echo "--- docker ps ---"
+  docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' 2>&1 || true
+  echo "=== END diagnostics ==="
+  echo "Console failed to respond at ${console_url}" >&2
+  exit 1
 fi
-
-curl -fsS "${console_url}/" >/dev/null
 
 if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:* ]]; then
   echo "Expected console to bind on loopback, got ${console_mapping:-no mapping}" >&2

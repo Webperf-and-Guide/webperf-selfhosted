@@ -44,8 +44,15 @@ const resolveRole = (): string => {
 const role = resolveRole();
 const entrypoint = ROLE_ENTRYPOINTS[role];
 
-// Build the final argv: entrypoint base + extra args (for db subcommands).
+// Only the db role accepts extra arguments (migrate, backup, etc.). Other
+// roles reject stray argv so a typo in a Compose command array fails fast
+// instead of silently propagating to the entrypoint.
 const extraArgs = process.argv.slice(3);
+if (extraArgs.length > 0 && role !== 'db') {
+  throw new Error(
+    `Role '${role}' does not accept extra arguments, but received: ${extraArgs.join(' ')}`
+  );
+}
 const finalArgv = [...entrypoint, ...extraArgs];
 
 console.log(JSON.stringify({
@@ -69,5 +76,10 @@ const forwardSignal = (signal: NodeJS.Signals) => {
 process.once('SIGINT', forwardSignal);
 process.once('SIGTERM', forwardSignal);
 
-const exitCode = await child.exited;
+// Bun's child.exited returns the exit code for normal termination, or a
+// negative value (the negated signal number) if the child was killed by a
+// signal. Convert to the POSIX 128+signal convention so orchestrators
+// (Docker, Kubernetes) classify the exit correctly.
+const rawExitCode = await child.exited;
+const exitCode = rawExitCode < 0 ? 128 + Math.abs(rawExitCode) : rawExitCode;
 process.exit(exitCode);

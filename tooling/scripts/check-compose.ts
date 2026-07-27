@@ -44,11 +44,11 @@ const composeRenderTimeoutMs = 30_000;
 const maximumTmpfsBytes = 2 * 1024 ** 3;
 const defaultServiceNames = ['api', 'console', 'executor', 'probe', 'scheduler'];
 const expectedImages: Record<string, string> = {
-  api: 'webperf-api',
-  console: 'webperf-console',
-  executor: 'webperf-executor',
+  api: 'webperf',
+  console: 'webperf',
+  executor: 'webperf',
   probe: 'webperf-probe',
-  scheduler: 'webperf-scheduler',
+  scheduler: 'webperf',
   'browser-audit-lighthouse': 'webperf-browser-audit-lighthouse'
 };
 const browserCapabilityAdditions = ['SYS_CHROOT'];

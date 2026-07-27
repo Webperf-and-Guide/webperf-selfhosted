@@ -1,27 +1,27 @@
 services:
   console:
-    image: webperf-console:dev
+    image: webperf:dev
     build:
       context: ../..
-      dockerfile: apps/console/Dockerfile
+      dockerfile: infra/docker/Dockerfile.webperf
 
   api:
-    image: webperf-api:dev
+    image: webperf:dev
     build:
       context: ../..
-      dockerfile: apps/api/Dockerfile
+      dockerfile: infra/docker/Dockerfile.webperf
 
   scheduler:
-    image: webperf-scheduler:dev
+    image: webperf:dev
     build:
       context: ../..
-      dockerfile: apps/scheduler/Dockerfile
+      dockerfile: infra/docker/Dockerfile.webperf
 
   executor:
-    image: webperf-executor:dev
+    image: webperf:dev
     build:
       context: ../..
-      dockerfile: apps/executor/Dockerfile
+      dockerfile: infra/docker/Dockerfile.webperf
 
   probe:
     image: webperf-probe:dev
@@ -36,13 +36,13 @@ services:
       dockerfile: apps/browser-audit-lighthouse/Dockerfile
 
   api-debug:
-    image: webperf-api:dev
+    image: webperf:dev
     build:
       context: ../..
-      dockerfile: apps/api/Dockerfile
+      dockerfile: infra/docker/Dockerfile.webperf
 
   browser-audit-debug:
-    image: webperf-api:dev
+    image: webperf:dev
     build:
       context: ../..
-      dockerfile: apps/api/Dockerfile
+      dockerfile: infra/docker/Dockerfile.webperf

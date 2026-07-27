@@ -178,6 +178,15 @@ for _ in {1..90}; do
   sleep 2
 done
 
+if ! curl -fsS "${console_url}/" >/dev/null 2>&1; then
+  echo "=== Console container logs ==="
+  compose "${profile_args[@]}" logs --tail 30 console 2>&1 || true
+  echo "=== API container logs ==="
+  compose "${profile_args[@]}" logs --tail 15 api 2>&1 || true
+  echo "=== compose port output ==="
+  compose "${profile_args[@]}" port console 3000 2>&1 || true
+fi
+
 curl -fsS "${console_url}/" >/dev/null
 
 if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:* ]]; then

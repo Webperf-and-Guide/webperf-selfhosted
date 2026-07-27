@@ -55,7 +55,7 @@ describe('durable execution restart recovery', () => {
         authorization: `Bearer ${testAdminToken}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ url: 'https://example.com/', regions: ['tokyo'] })
+      body: JSON.stringify({ url: 'https://example.com/' })
     });
     expect(createJobResponse.status).toBe(201);
     const createdJob = await createJobResponse.json() as { job: { id: string } };
@@ -105,7 +105,7 @@ describe('durable execution restart recovery', () => {
       client: secondExecutor,
       leaseOwner: secondLease.leaseOwner,
       probeSharedSecret: testProbeSecret,
-      probeBaseUrls: { tokyo: `http://127.0.0.1:${probe.port}` }
+      probeBaseUrl: `http://127.0.0.1:${probe.port}`
     });
     await processExecutionJob({
       client: secondExecutor,

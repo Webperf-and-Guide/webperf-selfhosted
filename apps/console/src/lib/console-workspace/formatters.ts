@@ -3,7 +3,6 @@ import type {
   CheckProfileComparisonResponse,
   CheckProfileLatestComparisonResponse,
   LatencyJobDetail,
-  RegionAvailability,
   RequestHeader
 } from '@webperf/contracts';
 import type { ComparisonSection } from '$lib/console-view';
@@ -11,16 +10,6 @@ import type { ComparisonSection } from '$lib/console-view';
 export const CONSOLE_COLLECTION_PAGE_SIZE = 100;
 export const CONSOLE_RUN_PAGE_SIZE = 10;
 export const CONSOLE_RECENT_RUN_COUNT = 3;
-export const MAX_SELECTABLE_REGIONS = 4;
-
-export const groupRegions = (regions: RegionAvailability[]) => {
-  const continents = Array.from(new Set(regions.map((region) => region.continent)));
-
-  return continents.map((continent) => ({
-    continent,
-    regions: regions.filter((region) => region.continent === continent)
-  }));
-};
 
 export const formatTiming = (value: number | null | undefined) =>
   value == null ? 'n/a' : `${value} ms`;

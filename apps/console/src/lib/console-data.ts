@@ -6,16 +6,14 @@ import type {
   CheckProfileRunDetailResponse,
   CheckProfileRunListResponse,
   PropertyListResponse,
-  RegionAvailability,
-  RegionPackListResponse,
   RouteSetListResponse,
-  CheckProfileListResponse
+  CheckProfileListResponse,
+  RuntimeLocationReport
 } from '@webperf/contracts';
 
 export type SavedChecksData = {
   properties: PropertyListResponse['properties'];
   routeSets: RouteSetListResponse['routeSets'];
-  regionPacks: RegionPackListResponse['regionPacks'];
   checkProfiles: CheckProfileListResponse['checkProfiles'];
   profileMeta: Array<{
     profileId: string;
@@ -28,7 +26,9 @@ export type SavedChecksData = {
 };
 
 export type ConsolePageData = {
-  regions: RegionAvailability[];
+  // Phase 1 of issue #14: the 41-city availability catalog became a single
+  // runtime location for one standalone deployment.
+  runtimeLocation: RuntimeLocationReport;
   capabilities: {
     browserAuditDirectRun: boolean;
   };

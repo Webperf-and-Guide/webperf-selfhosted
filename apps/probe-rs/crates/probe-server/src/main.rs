@@ -26,7 +26,7 @@ async fn run_server() -> Result<()> {
     info!(
         probe_impl = "rust",
         listen_addr = %config.listen_addr,
-        region = %config.region_code,
+        region = %config.region_id,
         "probe starting"
     );
 

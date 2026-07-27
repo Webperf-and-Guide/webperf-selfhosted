@@ -62,10 +62,10 @@ const createLatencyJob = (id: string): LatencyJobDetail => ({
   startedAt: null,
   completedAt: null,
   requesterIp: null,
-  selectedRegions: ['tokyo'],
+  region: 'local',
   targets: [{
     jobId: id,
-    region: 'tokyo',
+    region: 'local',
     status: 'queued',
     attemptNo: 0,
     maxAttempts: 3,

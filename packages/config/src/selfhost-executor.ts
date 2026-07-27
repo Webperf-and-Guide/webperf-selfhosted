@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isIP } from 'node:net';
-import { defaultSelfhostProbeBaseUrl, defaultSelfhostProbeBaseUrlsJson, emptyStringToUndefined } from './shared';
+import { defaultSelfhostProbeBaseUrl, emptyStringToUndefined } from './shared';
 
 export const isLoopbackHostname = (hostname: string) => {
   const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
@@ -28,10 +28,6 @@ export const selfhostExecutorEnvSchema = z
     SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
     PROBE_SHARED_SECRET: z.string().trim().min(16),
     BROWSER_AUDIT_SHARED_SECRET: z.string().trim().min(16),
-    SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
-    // Issue #14 Phase 1 single-region probe origin. Added in parallel with
-    // the legacy SELFHOST_PROBE_BASE_URLS_JSON map; PR2 of Phase 1 removes
-    // the legacy map and makes this the only configuration path.
     SELFHOST_PROBE_BASE_URL: z.string().url().default(defaultSelfhostProbeBaseUrl),
     SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
     SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: z.preprocess(

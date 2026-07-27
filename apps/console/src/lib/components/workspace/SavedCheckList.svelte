@@ -29,7 +29,6 @@
     getComparisonSections,
     getPropertyName,
     getRecentRunDetails,
-    getRegionPackName,
     getReport,
     getRouteSetName,
     isBaselineRun,
@@ -54,7 +53,6 @@
     getComparisonSections: (profile: CheckProfile) => ComparisonSection[];
     getPropertyName: (profile: CheckProfile) => string;
     getRecentRunDetails: (profileId: string) => CheckProfileRunDetailResponse[];
-    getRegionPackName: (profile: CheckProfile) => string;
     getReport: (profileId: string) => CheckProfileReportResponse | null;
     getRouteSetName: (profile: CheckProfile) => string;
     isBaselineRun: (profile: CheckProfile, runId: string) => boolean;
@@ -91,7 +89,6 @@
       {profile}
       propertyName={getPropertyName(profile)}
       recentRunDetails={getRecentRunDetails(profile.id)}
-      regionPackName={getRegionPackName(profile)}
       report={getReport(profile.id)}
       routeSetName={getRouteSetName(profile)}
       running={runningProfileId === profile.id}

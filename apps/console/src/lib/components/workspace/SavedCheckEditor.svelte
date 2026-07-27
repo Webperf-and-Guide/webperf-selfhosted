@@ -12,13 +12,12 @@
   import { Select } from '@webperf/ui/components/ui/select';
   import { Switch } from '@webperf/ui/components/ui/switch';
   import { Textarea } from '@webperf/ui/components/ui/textarea';
-  import type { CheckProfile, Property, RegionPack, RouteSet } from '@webperf/contracts';
+  import type { CheckProfile, Property, RouteSet } from '@webperf/contracts';
 
   type ChecksState = {
     editingProfileId: string;
     profilePropertyId: string;
     profileRouteSetId: string;
-    profileRegionPackId: string;
     profileName: string;
     profileNote: string;
     profileScheduleMinutes: string;
@@ -39,7 +38,6 @@
     checkProfiles,
     properties,
     routeSets,
-    regionPacks,
     state,
     busy,
     onLoadProfileEditor,
@@ -50,7 +48,6 @@
     checkProfiles: CheckProfile[];
     properties: Property[];
     routeSets: RouteSet[];
-    regionPacks: RegionPack[];
     state: ChecksState;
     busy: boolean;
     onLoadProfileEditor: (profileId: string) => void;
@@ -96,15 +93,6 @@
               <option value="">Select route group</option>
               {#each routeSets as routeSet (routeSet.id)}
                 <option value={routeSet.id}>{routeSet.name}</option>
-              {/each}
-            </Select>
-          </label>
-          <label class="field">
-            <span>Region set</span>
-            <Select bind:value={state.profileRegionPackId}>
-              <option value="">Select region set</option>
-              {#each regionPacks as regionPack (regionPack.id)}
-                <option value={regionPack.id}>{regionPack.name}</option>
               {/each}
             </Select>
           </label>

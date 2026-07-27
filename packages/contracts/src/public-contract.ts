@@ -19,7 +19,6 @@ import {
   createCheckProfileSchema,
   createExportInputSchema,
   createPropertySchema,
-  createRegionPackSchema,
   createRouteSetSchema,
   exportListResponseSchema,
   exportResourceSchema,
@@ -27,15 +26,12 @@ import {
   pageInfoSchema,
   propertySchema,
   propertyListResponseSchema,
-  regionPackSchema,
   regionsResponseSchema,
-  regionPackListResponseSchema,
   routeSetListResponseSchema,
   routeSetSchema,
   setCheckProfileBaselineSchema,
   updateCheckProfileSchema,
   updatePropertySchema,
-  updateRegionPackSchema,
   updateRouteSetSchema
 } from './public-api';
 
@@ -45,10 +41,6 @@ const siteIdSchema = z.object({
 
 const routeGroupIdSchema = z.object({
   routeGroupId: z.string().min(1)
-});
-
-const regionSetIdSchema = z.object({
-  regionSetId: z.string().min(1)
 });
 
 const checkIdSchema = z.object({
@@ -108,15 +100,6 @@ const routeGroupMutationResponseSchema = z.object({
   routeGroup: routeSetSchema
 });
 
-const regionSetsResponseSchema = z.object({
-  regionSets: z.array(regionPackSchema),
-  pageInfo: pageInfoSchema
-});
-
-const regionSetMutationResponseSchema = z.object({
-  regionSet: regionPackSchema
-});
-
 const checksResponseSchema = z.object({
   checks: z.array(checkProfileSchema),
   pageInfo: pageInfoSchema
@@ -138,10 +121,9 @@ const checkRunCreateResponseSchema = z.object({
 
 export const PUBLIC_OPENAPI_TAG_DEFINITIONS = [
   { name: 'capabilities', description: 'Feature and deployment capability discovery.' },
-  { name: 'catalog', description: 'Region catalog and availability.' },
+  { name: 'catalog', description: 'Runtime location and availability.' },
   { name: 'sites', description: 'Site configuration resources.' },
   { name: 'routeGroups', description: 'Representative route group resources.' },
-  { name: 'regionSets', description: 'Named region set resources.' },
   { name: 'checks', description: 'Checks, baselines, and check-triggered runs.' },
   { name: 'runs', description: 'Resolved run details.' },
   { name: 'comparisons', description: 'Derived comparison resources.' },
@@ -284,62 +266,6 @@ export const publicContract = populateContractRouterPaths(
           inputStructure: 'detailed',
           summary: 'Delete route group',
           tags: ['routeGroups']
-        })
-    },
-    regionSets: {
-      list: oc
-        .input(listInputSchema)
-        .output(regionSetsResponseSchema)
-        .route({
-          method: 'GET',
-          path: '/v1/region-sets',
-          inputStructure: 'detailed',
-          summary: 'List region sets',
-          tags: ['regionSets']
-        }),
-      create: oc
-        .input(createRegionPackSchema)
-        .output(regionSetMutationResponseSchema)
-        .route({
-          method: 'POST',
-          path: '/v1/region-sets',
-          summary: 'Create region set',
-          tags: ['regionSets']
-        }),
-      get: oc
-        .input(z.object({ params: regionSetIdSchema }))
-        .output(regionPackSchema)
-        .route({
-          method: 'GET',
-          path: '/v1/region-sets/{regionSetId}',
-          inputStructure: 'detailed',
-          summary: 'Get region set',
-          tags: ['regionSets']
-        }),
-      update: oc
-        .input(
-          z.object({
-            params: regionSetIdSchema,
-            body: updateRegionPackSchema
-          })
-        )
-        .output(regionSetMutationResponseSchema)
-        .route({
-          method: 'PATCH',
-          path: '/v1/region-sets/{regionSetId}',
-          inputStructure: 'detailed',
-          summary: 'Update region set',
-          tags: ['regionSets']
-        }),
-      remove: oc
-        .input(z.object({ params: regionSetIdSchema }))
-        .output(z.object({ ok: z.boolean() }))
-        .route({
-          method: 'DELETE',
-          path: '/v1/region-sets/{regionSetId}',
-          inputStructure: 'detailed',
-          summary: 'Delete region set',
-          tags: ['regionSets']
         })
     },
     checks: {

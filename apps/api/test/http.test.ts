@@ -173,7 +173,7 @@ describe('api service monitoring expansion', () => {
       expect(health.service).toBe('webperf-api');
       expect(health.ok).toBe(true);
       expect((await opsClient.system.health()).service).toBe('webperf-api');
-      expect((await appClient.system.regions()).regions.length).toBeGreaterThan(0);
+      expect((await appClient.system.regions()).runtimeLocation.regionId.length).toBeGreaterThan(0);
       expect((await publicClient.capabilities.get()).deploymentModel).toBe('selfhost');
       expect((await publicClient.capabilities.get()).features.browserAuditDirectRun).toBe(true);
       expect((await publicClient.capabilities.get()).metrics.networkProbe).toEqual({
@@ -347,8 +347,7 @@ describe('api service monitoring expansion', () => {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            url: 'https://example.com/',
-            regions: ['tokyo']
+            url: 'https://example.com/'
           })
         });
       } finally {
@@ -378,11 +377,9 @@ describe('api service monitoring expansion', () => {
 
       const property = await createProperty(harness.baseUrl);
       const routeSet = await createRouteSet(harness.baseUrl, property.id);
-      const regionPack = await createRegionPack(harness.baseUrl);
       const maskedWebhookSecretResponse = await postCheckProfile(harness.baseUrl, {
         propertyId: property.id,
         routeSetId: routeSet.id,
-        regionPackId: regionPack.id,
         monitorType: 'latency',
         latencyThresholdMs: 600,
         webhookUrl: webhook.url,
@@ -397,7 +394,6 @@ describe('api service monitoring expansion', () => {
       const thresholdProfile = await createCheckProfile(harness.baseUrl, {
         propertyId: property.id,
         routeSetId: routeSet.id,
-        regionPackId: regionPack.id,
         monitorType: 'latency',
         latencyThresholdMs: 600,
         webhookUrl: webhook.url,
@@ -453,7 +449,6 @@ describe('api service monitoring expansion', () => {
       const uptimeProfile = await createCheckProfile(harness.baseUrl, {
         propertyId: property.id,
         routeSetId: routeSet.id,
-        regionPackId: regionPack.id,
         monitorType: 'uptime',
         latencyThresholdMs: null,
         webhookUrl: webhook.url
@@ -491,7 +486,6 @@ describe('api service monitoring expansion', () => {
         },
         body: JSON.stringify({
           targetUrl: 'https://example.com',
-          region: 'tokyo',
           policy: {
             preset: 'mobile',
             flow: {
@@ -936,7 +930,6 @@ describe('api service monitoring expansion', () => {
         },
         body: JSON.stringify({
           targetUrl: 'https://example.com/alpha',
-          region: 'tokyo',
           policy: {
             preset: 'mobile',
             flow: {
@@ -954,7 +947,6 @@ describe('api service monitoring expansion', () => {
         },
         body: JSON.stringify({
           targetUrl: 'https://example.com/beta',
-          region: 'tokyo',
           policy: {
             preset: 'desktop',
             flow: {
@@ -1012,18 +1004,6 @@ describe('api service monitoring expansion', () => {
       });
       expect(secondaryRouteSetResponse.status).toBe(201);
 
-      const secondaryRegionPackResponse = await fetch(`${harness.baseUrl}/v1/region-packs`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: 'Backup APAC',
-          regions: ['tokyo']
-        })
-      });
-      expect(secondaryRegionPackResponse.status).toBe(201);
-
       const propertiesPageResponse = await fetch(`${harness.baseUrl}/v1/properties?pageSize=1`);
       const propertiesPagePayload = await propertiesPageResponse.json() as {
         properties: Array<{ id: string; name: string }>;
@@ -1064,26 +1044,6 @@ describe('api service monitoring expansion', () => {
       expect(filteredRouteSetsPayload.pageInfo.filter).toBe('secondary');
       expect(filteredRouteSetsPayload.routeSets[0]?.name).toBe('Secondary checkout');
 
-      const regionPacksPageResponse = await fetch(`${harness.baseUrl}/v1/region-packs?pageSize=1`);
-      const regionPacksPagePayload = await regionPacksPageResponse.json() as {
-        regionPacks: Array<{ id: string; name: string }>;
-        pageInfo: { totalCount: number; pageSize: number; nextPageToken: string | null };
-      };
-      expect(regionPacksPageResponse.status).toBe(200);
-      expect(regionPacksPagePayload.pageInfo.totalCount).toBe(2);
-      expect(regionPacksPagePayload.pageInfo.pageSize).toBe(1);
-      expect(regionPacksPagePayload.pageInfo.nextPageToken).not.toBeNull();
-
-      const filteredRegionPacksResponse = await fetch(`${harness.baseUrl}/v1/region-packs?pageSize=5&filter=backup`);
-      const filteredRegionPacksPayload = await filteredRegionPacksResponse.json() as {
-        regionPacks: Array<{ name: string }>;
-        pageInfo: { totalCount: number; filter: string | null };
-      };
-      expect(filteredRegionPacksResponse.status).toBe(200);
-      expect(filteredRegionPacksPayload.pageInfo.totalCount).toBe(1);
-      expect(filteredRegionPacksPayload.pageInfo.filter).toBe('backup');
-      expect(filteredRegionPacksPayload.regionPacks[0]?.name).toBe('Backup APAC');
-
       const compatibilityChecksResponse = await fetch(`${harness.baseUrl}/v1/check-profiles?pageSize=5&filter=uptime`);
       const compatibilityChecksPayload = await compatibilityChecksResponse.json() as {
         checkProfiles: Array<{ name: string }>;
@@ -1097,7 +1057,6 @@ describe('api service monitoring expansion', () => {
       for (const [legacyPath, canonicalPath] of [
         ['/v1/properties', '/v1/sites'],
         ['/v1/route-sets', '/v1/route-groups'],
-        ['/v1/region-packs', '/v1/region-sets'],
         ['/v1/check-profiles', '/v1/checks']
       ] as const) {
         const compatibilityResponse = await fetch(`${harness.baseUrl}${legacyPath}`);
@@ -1105,6 +1064,13 @@ describe('api service monitoring expansion', () => {
         expect(compatibilityResponse.headers.get('deprecation')).toBe('true');
         expect(compatibilityResponse.headers.get('link')).toContain(canonicalPath);
         expect(compatibilityResponse.headers.get('warning')).toContain('Deprecated API path');
+      }
+
+      // Phase 1 of issue #14: Region Pack / Region Set routes were removed and
+      // now return 410 Gone instead of a deprecation header.
+      for (const removedPath of ['/v1/region-packs', '/v1/region-sets'] as const) {
+        const removedResponse = await fetch(`${harness.baseUrl}${removedPath}`);
+        expect(removedResponse.status).toBe(410);
       }
 
       const canonicalSitesResponse = await fetch(`${harness.baseUrl}/v1/sites`);
@@ -1511,7 +1477,7 @@ const drainExecutions = async (
     client,
     leaseOwner,
     probeSharedSecret: testProbeSecret,
-    probeBaseUrls: { tokyo: `http://127.0.0.1:${probePort}` }
+    probeBaseUrl: `http://127.0.0.1:${probePort}`
   });
   const webhookHandler = createWebhookExecutionHandler({
     client,
@@ -1701,26 +1667,9 @@ const createRouteSet = async (baseUrl: string, propertyId: string) => {
   return payload.routeSet as { id: string };
 };
 
-const createRegionPack = async (baseUrl: string) => {
-  const response = await fetch(`${baseUrl}/v1/region-packs`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      name: 'Core 1',
-      regions: ['tokyo']
-    })
-  });
-  const payload = await response.json();
-  expect(response.ok).toBe(true);
-  return payload.regionPack as { id: string };
-};
-
 type CheckProfileTestInput = {
   propertyId: string;
   routeSetId: string;
-  regionPackId: string;
   monitorType: 'latency' | 'uptime';
   latencyThresholdMs: number | null;
   webhookUrl: string;
@@ -1739,7 +1688,6 @@ const postCheckProfile = async (baseUrl: string, input: CheckProfileTestInput) =
     body: JSON.stringify({
       propertyId: input.propertyId,
       routeSetId: input.routeSetId,
-      regionPackId: input.regionPackId,
       name: input.name ?? `Profile ${input.monitorType}`,
       note: input.note ?? 'http integration test',
       request: {

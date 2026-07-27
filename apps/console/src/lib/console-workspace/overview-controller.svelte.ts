@@ -1,15 +1,14 @@
-import type { LatencyJobDetail, RegionAvailability } from '@webperf/contracts';
-import type { MetricGridItem, RegionQuickPickItem } from '@webperf/ui/components/operator/types';
+import type { LatencyJobDetail, RuntimeLocationReport } from '@webperf/contracts';
+import type { MetricGridItem } from '@webperf/ui/components/operator/types';
 import {
   buildRequestConfig,
   formatRequestConfig,
   formatText,
-  formatTiming,
-  MAX_SELECTABLE_REGIONS
+  formatTiming
 } from './formatters';
 
 type OverviewAccessors = {
-  getRegions: () => RegionAvailability[];
+  getRuntimeLocation: () => RuntimeLocationReport;
   getSavedChecksEnabled: () => boolean;
   getCheckProfileCount: () => number;
 };
@@ -20,8 +19,6 @@ type CreateJobPayload = {
 };
 
 export class OverviewController {
-  readonly maxSelectableRegions = MAX_SELECTABLE_REGIONS;
-
   state = $state({
     targetUrl: '',
     note: '',
@@ -31,7 +28,6 @@ export class OverviewController {
     requestContentType: '',
     jobMonitorType: 'latency' as 'latency' | 'uptime',
     jobLatencyThresholdMs: '',
-    userSelectedRegions: null as string[] | null,
     isSubmitting: false,
     submitError: null as string | null,
     helperMessage: null as string | null,
@@ -43,31 +39,16 @@ export class OverviewController {
 
   constructor(private readonly accessors: OverviewAccessors) {}
 
-  get regions() {
-    return this.accessors.getRegions();
+  // Phase 1 of issue #14: one standalone deployment measures from one fixed
+  // runtime location. The previous multi-region selector, quick picks, and
+  // active-region preview were removed; the hero metric now reports the
+  // deployment's single runtime location.
+  get runtimeLocation() {
+    return this.accessors.getRuntimeLocation();
   }
 
-  get selectableCount() {
-    return this.regions.filter((region) => region.selectable).length;
-  }
-
-  get defaultSelectedRegions() {
-    return this.regions
-      .filter((region) => region.defaultSelected)
-      .map((region) => region.code);
-  }
-
-  get selectedRegions() {
-    return this.state.userSelectedRegions ?? this.defaultSelectedRegions;
-  }
-
-  get activeRegionOptions() {
-    return this.regions.filter((region) => region.selectable);
-  }
-
-  get activeRegionPreview() {
-    const labels = this.activeRegionOptions.slice(0, 4).map((region) => region.label);
-    return labels.length > 0 ? labels.join(' · ') : 'No active regions';
+  get runtimeLocationLabel() {
+    return this.runtimeLocation.label ?? this.runtimeLocation.regionId;
   }
 
   get controlModeLabel() {
@@ -80,16 +61,6 @@ export class OverviewController {
       : 'Manual checks are available while saved resources stay offline.';
   }
 
-  get quickRegionItems(): RegionQuickPickItem[] {
-    return this.activeRegionOptions.map((region) => ({
-      id: region.code,
-      label: region.label,
-      selected: this.selectedRegions.includes(region.code),
-      disabled: !region.selectable,
-      onclick: () => this.toggleRegion(region)
-    }));
-  }
-
   get heroMetrics(): MetricGridItem[] {
     return [
       {
@@ -99,10 +70,10 @@ export class OverviewController {
         detail: this.controlModeDetail
       },
       {
-        id: 'active-regions',
-        label: 'Active regions',
-        value: `${this.selectableCount} active / ${this.regions.length} modeled`,
-        detail: this.activeRegionPreview
+        id: 'runtime-location',
+        label: 'Runtime location',
+        value: this.runtimeLocationLabel,
+        detail: `Measures from this deployment's configured region (${this.runtimeLocation.regionId}).`
       },
       {
         id: 'saved-checks',
@@ -144,27 +115,6 @@ export class OverviewController {
     this.closeStream();
   };
 
-  toggleRegion = (region: RegionAvailability) => {
-    if (!region.selectable) {
-      this.state.helperMessage = `${region.label} is cataloged, but not activated yet.`;
-      return;
-    }
-
-    this.state.helperMessage = null;
-
-    if (this.selectedRegions.includes(region.code)) {
-      this.state.userSelectedRegions = this.selectedRegions.filter((code) => code !== region.code);
-      return;
-    }
-
-    if (this.selectedRegions.length >= this.maxSelectableRegions) {
-      this.state.helperMessage = `You can measure up to ${this.maxSelectableRegions} regions per run.`;
-      return;
-    }
-
-    this.state.userSelectedRegions = [...this.selectedRegions, region.code];
-  };
-
   submitJob = async (event: SubmitEvent) => {
     event.preventDefault();
     this.state.submitError = null;
@@ -172,11 +122,6 @@ export class OverviewController {
 
     if (!this.state.targetUrl) {
       this.state.submitError = 'Enter a URL to measure.';
-      return;
-    }
-
-    if (this.selectedRegions.length === 0) {
-      this.state.submitError = 'Choose at least one active region.';
       return;
     }
 
@@ -190,7 +135,6 @@ export class OverviewController {
         },
         body: JSON.stringify({
           url: this.state.targetUrl,
-          regions: this.selectedRegions,
           note: this.state.note || undefined,
           request: buildRequestConfig(
             this.state.requestMethod,

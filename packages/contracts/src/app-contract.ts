@@ -20,20 +20,16 @@ import {
   exportResourceSchema,
   createCheckProfileSchema,
   createPropertySchema,
-  createRegionPackSchema,
   createRouteSetSchema,
   listQuerySchema,
   propertyListResponseSchema,
   propertySchema,
-  regionPackListResponseSchema,
-  regionPackSchema,
   regionsResponseSchema,
   routeSetListResponseSchema,
   routeSetSchema,
   setCheckProfileBaselineSchema,
   updateCheckProfileSchema,
   updatePropertySchema,
-  updateRegionPackSchema,
   updateRouteSetSchema
 } from './public-api';
 import { controlHealthSchema } from './control-contract';
@@ -89,13 +85,6 @@ export const appContract = populateContractRouterPaths(
       get: oc.input(z.object({ params: idSchema })).output(routeSetSchema).route({ method: 'GET', path: '/v1/route-sets/{id}', inputStructure: 'detailed' }),
       update: oc.input(z.object({ params: idSchema, body: updateRouteSetSchema })).output(z.object({ routeSet: routeSetSchema })).route({ method: 'PUT', path: '/v1/route-sets/{id}', inputStructure: 'detailed' }),
       delete: oc.input(z.object({ params: idSchema })).output(z.object({ ok: z.boolean() })).route({ method: 'DELETE', path: '/v1/route-sets/{id}', inputStructure: 'detailed' })
-    },
-    regionPacks: {
-      list: oc.input(listInputSchema).output(regionPackListResponseSchema).route({ method: 'GET', path: '/v1/region-packs', inputStructure: 'detailed' }),
-      create: oc.input(createRegionPackSchema).output(z.object({ regionPack: regionPackSchema })).route({ method: 'POST', path: '/v1/region-packs' }),
-      get: oc.input(z.object({ params: idSchema })).output(regionPackSchema).route({ method: 'GET', path: '/v1/region-packs/{id}', inputStructure: 'detailed' }),
-      update: oc.input(z.object({ params: idSchema, body: updateRegionPackSchema })).output(z.object({ regionPack: regionPackSchema })).route({ method: 'PUT', path: '/v1/region-packs/{id}', inputStructure: 'detailed' }),
-      delete: oc.input(z.object({ params: idSchema })).output(z.object({ ok: z.boolean() })).route({ method: 'DELETE', path: '/v1/region-packs/{id}', inputStructure: 'detailed' })
     },
     checkProfiles: {
       list: oc.input(listInputSchema).output(checkProfileListResponseSchema).route({ method: 'GET', path: '/v1/check-profiles', inputStructure: 'detailed' }),

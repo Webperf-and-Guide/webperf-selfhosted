@@ -1385,16 +1385,18 @@ console.log(
 // dispatch endpoint as the standalone scheduler, using loopback origin and
 // the internal secret already present in the API process.
 if (runtime.schedulerMode === 'embedded') {
+  const schedulerBaseLogFields = {
+    service: 'webperf-api',
+    component: 'embedded-scheduler'
+  };
   const schedulerLogger: SchedulerLogger = {
     info: (event) => console.log(JSON.stringify({
-      service: 'webperf-api',
-      component: 'embedded-scheduler',
+      ...schedulerBaseLogFields,
       level: 'info',
       ...event
     })),
     error: (event) => console.error(JSON.stringify({
-      service: 'webperf-api',
-      component: 'embedded-scheduler',
+      ...schedulerBaseLogFields,
       level: 'error',
       ...event
     }))

@@ -60,19 +60,25 @@ queries, or fragments.
 SQLite and artifacts share the default named volume but have different backup
 semantics. Read [Backup and restore](./backup-restore.md).
 
-## Regions and execution
+## Runtime location and execution
 
-The three region settings must agree and use valid single-line JSON:
+One standalone deployment measures from one fixed runtime location:
 
 ```dotenv
-SELFHOST_ACTIVE_REGION_CODES_JSON=["tokyo"]
-SELFHOST_REGION_IDS_JSON={"tokyo":"JP"}
-SELFHOST_PROBE_BASE_URLS_JSON={"tokyo":"http://probe:8080"}
+SELFHOST_REGION_ID=local
+SELFHOST_REGION_LABEL=
+SELFHOST_PROBE_BASE_URL=http://probe:8080
 ```
 
-`SELFHOST_MAX_TARGET_ATTEMPTS` is capped at 20. Insecure HTTP probe and browser
-origins are allowed only for the private default Compose networks; remote
-runtimes should use HTTPS and disable the corresponding
+`SELFHOST_REGION_ID` is the stable serialized identifier (1–64 lowercase
+ASCII letters, digits, or hyphens). `SELFHOST_REGION_LABEL` is the optional
+display name. `SELFHOST_PROBE_BASE_URL` is the credential-free HTTP(S)
+origin of the Rust probe. Read [Configure the runtime location](./regions.md)
+for the full remote-probe walkthrough.
+
+`SELFHOST_MAX_TARGET_ATTEMPTS` is capped at 20. Insecure HTTP probe and
+browser origins are allowed only for the private default Compose networks;
+remote runtimes should use HTTPS and disable the corresponding
 `SELFHOST_EXECUTOR_ALLOW_INSECURE_*` override.
 
 ## Resource and log limits

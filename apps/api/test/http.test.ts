@@ -486,7 +486,6 @@ describe('api service monitoring expansion', () => {
         },
         body: JSON.stringify({
           targetUrl: 'https://example.com',
-          region: 'tokyo',
           policy: {
             preset: 'mobile',
             flow: {
@@ -931,7 +930,6 @@ describe('api service monitoring expansion', () => {
         },
         body: JSON.stringify({
           targetUrl: 'https://example.com/alpha',
-          region: 'tokyo',
           policy: {
             preset: 'mobile',
             flow: {
@@ -949,7 +947,6 @@ describe('api service monitoring expansion', () => {
         },
         body: JSON.stringify({
           targetUrl: 'https://example.com/beta',
-          region: 'tokyo',
           policy: {
             preset: 'desktop',
             flow: {

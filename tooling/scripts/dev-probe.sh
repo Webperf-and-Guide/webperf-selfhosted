@@ -15,4 +15,10 @@ if [[ -z "${PROBE_LISTEN_ADDR:-}" ]]; then
   export PROBE_LISTEN_ADDR="0.0.0.0:${probe_port}"
 fi
 
+# Phase 1 of issue #14: propagate the configured runtime region identity so
+# the Rust probe reports the same region as the API/executor.
+if [[ -z "${REGION_ID:-}" && -n "${SELFHOST_REGION_ID:-}" ]]; then
+  export REGION_ID="$SELFHOST_REGION_ID"
+fi
+
 cargo run -p probe-server --manifest-path apps/probe-rs/Cargo.toml

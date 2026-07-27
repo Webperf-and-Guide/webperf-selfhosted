@@ -343,7 +343,7 @@ export const checkProfileSchema = z.object({
 });
 export type CheckProfile = z.infer<typeof checkProfileSchema>;
 
-export const createCheckProfileSchema = z.object({
+export const createCheckProfileSchema = z.strictObject({
   propertyId: z.string().min(1),
   routeSetId: z.string().min(1),
   name: z.string().min(1).max(120),
@@ -401,11 +401,11 @@ export const checkProfileRunSchema = z.object({
 });
 export type CheckProfileRun = z.infer<typeof checkProfileRunSchema>;
 
-export const createBrowserAuditInputSchema = z.object({
+export const createBrowserAuditInputSchema = z.strictObject({
   targetUrl: z.string().url(),
   // Region input was removed in Phase 1 of issue #14: Browser Audits run from
   // the deployment's single configured runtime location and record it as
-  // provenance automatically.
+  // provenance automatically. strictObject rejects legacy `region` payloads.
   policy: browserAuditPolicySchema,
   customHeaders: z.array(browserAuditHeaderSchema).max(20).default([]),
   cookies: z.array(browserAuditCookieSchema).max(20).default([])

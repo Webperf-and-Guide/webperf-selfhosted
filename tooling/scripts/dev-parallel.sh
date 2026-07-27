@@ -19,11 +19,10 @@ bash "$root_dir/tooling/scripts/ensure-port-free.sh" \
   "selfhost parallel probe" \
   "Stop the existing process or set SELFHOST_PARALLEL_PROBE_PORT to another port."
 
-if [[ -n "${SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON:-}" ]]; then
-  export SELFHOST_PROBE_BASE_URLS_JSON="$SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON"
+if [[ -n "${SELFHOST_PARALLEL_PROBE_BASE_URL:-}" ]]; then
+  export SELFHOST_PROBE_BASE_URL="$SELFHOST_PARALLEL_PROBE_BASE_URL"
 else
-  printf -v SELFHOST_PROBE_BASE_URLS_JSON '{"tokyo":"%s"}' "$probe_base_url"
-  export SELFHOST_PROBE_BASE_URLS_JSON
+  export SELFHOST_PROBE_BASE_URL="$probe_base_url"
 fi
 export SELFHOST_CONTROL_BASE_URL="$api_base_url"
 export SELFHOST_EXECUTOR_API_BASE_URL="$api_base_url"

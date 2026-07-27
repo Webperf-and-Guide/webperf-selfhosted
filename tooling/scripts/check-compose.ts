@@ -227,18 +227,11 @@ assertLoopbackPort(
 assertAllPublishedPortsLoopback(productionWithProfiles, 'production Compose');
 assertAllPublishedPortsLoopback(developmentWithProfiles, 'development Compose');
 
-// Phase 2 of issue #14: Bun services share one webperf image. Only services
-// with distinct Dockerfiles (webperf via api, probe, browser-audit-lighthouse)
-// need a build override; the others reference the same webperf:dev tag.
-const buildRequiredServices = ['api', 'probe', 'browser-audit-lighthouse'];
-
 for (const name of Object.keys(expectedImages)) {
-  if (buildRequiredServices.includes(name)) {
-    assert(
-      Boolean(developmentWithProfiles.services[name]?.build),
-      `${name} must have a source-build development override`
-    );
-  }
+  assert(
+    Boolean(developmentWithProfiles.services[name]?.build),
+    `${name} must have a source-build development override`
+  );
   assert(
     developmentWithProfiles.services[name]?.image?.endsWith(':dev') === true,
     `${name} development image must use a local :dev tag`

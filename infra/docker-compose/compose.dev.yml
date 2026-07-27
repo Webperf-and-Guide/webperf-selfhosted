@@ -1,21 +1,27 @@
 # Phase 2 of issue #14: all Bun services share one webperf image build.
-# Only the api service defines a build; the other Bun services reference
-# the same image: tag so Compose does not rebuild the same Dockerfile.
-services:
-  api:
-    image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+# Every Bun service defines the same build so compose up --build builds it
+# once (BuildKit cache) and reuses the result. Without build: on each
+# service, compose tries to pull the local-only :dev tag from a registry.
+x-webperf-build: &webperf-build
+  context: ../..
+  dockerfile: infra/docker/Dockerfile.webperf
 
+services:
   console:
     image: webperf:dev
+    build: *webperf-build
+
+  api:
+    image: webperf:dev
+    build: *webperf-build
 
   scheduler:
     image: webperf:dev
+    build: *webperf-build
 
   executor:
     image: webperf:dev
+    build: *webperf-build
 
   probe:
     image: webperf-probe:dev
@@ -31,6 +37,8 @@ services:
 
   api-debug:
     image: webperf:dev
+    build: *webperf-build
 
   browser-audit-debug:
     image: webperf:dev
+    build: *webperf-build

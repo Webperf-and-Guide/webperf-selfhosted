@@ -116,7 +116,6 @@ describe('Reports Browser Audit response handling', () => {
       getSavedChecksEnabled: () => true,
       getBrowserAudits: () => [],
       getBrowserAuditDirectRunEnabled: () => true,
-      getRegions: () => [],
       refreshControlData: async () => {
         throw new Error('refresh unavailable');
       }

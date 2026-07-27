@@ -1,34 +1,23 @@
-import type { RegionAvailability } from '@webperf/contracts';
-import { groupRegions } from './formatters';
+import type { RuntimeLocationReport } from '@webperf/contracts';
 
 type RegionsAccessors = {
-  getRegions: () => RegionAvailability[];
-  getSelectedRegions: () => string[];
-  toggleRegion: (region: RegionAvailability) => void;
+  getRuntimeLocation: () => RuntimeLocationReport;
 };
 
 export class RegionsController {
   constructor(private readonly accessors: RegionsAccessors) {}
 
-  get regions() {
-    return this.accessors.getRegions();
+  get runtimeLocation() {
+    return this.accessors.getRuntimeLocation();
   }
 
-  get selectedRegions() {
-    return this.accessors.getSelectedRegions();
+  get regionId() {
+    return this.runtimeLocation.regionId;
   }
 
-  get groupedRegions() {
-    return groupRegions(this.regions);
+  get regionLabel() {
+    return this.runtimeLocation.label ?? this.runtimeLocation.regionId;
   }
-
-  get selectableCount() {
-    return this.regions.filter((region) => region.selectable).length;
-  }
-
-  toggleRegion = (region: RegionAvailability) => {
-    this.accessors.toggleRegion(region);
-  };
 }
 
 export const createRegionsController = (accessors: RegionsAccessors) =>

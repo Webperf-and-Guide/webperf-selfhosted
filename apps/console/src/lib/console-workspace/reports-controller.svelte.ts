@@ -2,8 +2,7 @@ import {
   browserAuditResourceSchema,
   isBrowserAuditTerminalExecutionStatus,
   type BrowserAuditExecutionStatus,
-  type BrowserAuditResource,
-  type RegionAvailability
+  type BrowserAuditResource
 } from '@webperf/contracts';
 import type { MetricGridItem } from '@webperf/ui/components/operator/types';
 
@@ -182,7 +181,6 @@ type ReportsAccessors = {
   getSavedChecksEnabled: () => boolean;
   getBrowserAudits: () => BrowserAuditResource[];
   getBrowserAuditDirectRunEnabled: () => boolean;
-  getRegions: () => RegionAvailability[];
   refreshControlData: () => Promise<void>;
 };
 
@@ -193,7 +191,9 @@ export class ReportsController {
   state = $state({
     workspaceTab: 'browser' as 'browser' | 'browserAudits' | 'endpoints',
     browserAuditTargetUrl: '',
-    browserAuditRegion: '',
+    // Phase 1 of issue #14: Browser Audit region selection was removed.
+    // Audits run from the deployment's single runtime location, so the
+    // server stamps the region id automatically.
     browserAuditPreset: 'mobile' as 'mobile' | 'desktop',
     browserAuditSubmitting: false,
     browserAuditSubmitError: null as string | null,
@@ -215,14 +215,10 @@ export class ReportsController {
     return this.accessors.getBrowserAuditDirectRunEnabled();
   }
 
+  // Region selection was removed; the option list stays empty so existing
+  // markup that binds to it continues to render without offering a choice.
   get browserAuditRegionOptions() {
-    return this.accessors
-      .getRegions()
-      .filter((region) => region.selectable)
-      .map((region) => ({
-        value: region.code,
-        label: region.label
-      }));
+    return [] as Array<{ value: string; label: string }>;
   }
 
   get selectedBrowserAudit() {
@@ -302,7 +298,6 @@ export class ReportsController {
         },
         body: JSON.stringify({
           targetUrl: this.state.browserAuditTargetUrl,
-          region: this.state.browserAuditRegion || null,
           policy: {
             preset: this.state.browserAuditPreset,
             flow: {

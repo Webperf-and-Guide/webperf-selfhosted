@@ -1,17 +1,12 @@
-import type { UpdateRegionPackInput } from '@webperf/contracts';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getControlPlaneClient, proxyControlResponse } from '$lib/server/control-plane';
 
-export const GET: RequestHandler = async ({ params, platform }) =>
-  proxyControlResponse(getControlPlaneClient(platform).app.regionPacks.get({ params: { id: params.id } }));
+// Phase 1 of issue #14: Region Packs were removed. The console proxy returns
+// 410 Gone for every method on the per-id route.
+const GONE_BODY = {
+  error: 'Region packs were removed in Phase 1 of issue #14.'
+} as const;
 
-export const PUT: RequestHandler = async ({ request, params, platform }) =>
-  proxyControlResponse(
-    getControlPlaneClient(platform).app.regionPacks.update({
-      params: { id: params.id },
-      body: await request.json() as UpdateRegionPackInput
-    })
-  );
-
-export const DELETE: RequestHandler = async ({ params, platform }) =>
-  proxyControlResponse(getControlPlaneClient(platform).app.regionPacks.delete({ params: { id: params.id } }));
+export const GET: RequestHandler = async () => json(GONE_BODY, { status: 410 });
+export const PUT: RequestHandler = async () => json(GONE_BODY, { status: 410 });
+export const DELETE: RequestHandler = async () => json(GONE_BODY, { status: 410 });

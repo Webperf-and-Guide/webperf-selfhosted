@@ -17,7 +17,6 @@
     profile,
     propertyName,
     routeSetName,
-    regionPackName,
     configBusy,
     running,
     baselineBusy,
@@ -42,7 +41,6 @@
     profile: CheckProfile;
     propertyName: string;
     routeSetName: string;
-    regionPackName: string;
     configBusy: boolean;
     running: boolean;
     baselineBusy: boolean;
@@ -325,7 +323,7 @@
   comparisonEmptyMessage="Run this profile at least twice to unlock latest-vs-previous comparison."
   comparisonPanels={comparisonPanels}
   primaryActions={primaryActions}
-  meta={`${propertyName} · ${routeSetName} · ${regionPackName}`}
+  meta={`${propertyName} · ${routeSetName}`}
   note={profile.note ?? undefined}
   reportPanel={reportPanel}
   runHistory={runHistory}

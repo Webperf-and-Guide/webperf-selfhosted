@@ -3,21 +3,21 @@
   import { OperatorSectionHeader } from '@webperf/ui/components/operator/operator-section-header';
 
   let {
-    selectableCount,
-    regionCount,
+    regionId,
+    regionLabel,
     children
   } = $props<{
-    selectableCount: number;
-    regionCount: number;
+    regionId: string;
+    regionLabel: string;
     children?: Snippet;
   }>();
 </script>
 
 <section class="regions-section" id="regions">
   <OperatorSectionHeader
-    eyebrow="Region catalog"
-    title="Keep the rollout corridor visible without making it the center of the page."
-    description={`${selectableCount} of ${regionCount} modeled regions are currently activated for measurement.`}
+    eyebrow="Runtime location"
+    title="One deployment measures from one fixed runtime location."
+    description={`This standalone deployment reports ${regionLabel} (${regionId}). Configure a different identity with SELFHOST_REGION_ID and SELFHOST_REGION_LABEL.`}
   />
 
   {@render children?.()}

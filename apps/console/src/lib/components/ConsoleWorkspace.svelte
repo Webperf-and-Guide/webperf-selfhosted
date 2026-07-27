@@ -22,11 +22,8 @@
   import { createResourcesController } from '$lib/console-workspace/resources-controller.svelte';
   import { LiveRunTargetCard } from '@webperf/ui/components/operator/live-run-target-card';
   import { MetricGrid } from '@webperf/ui/components/operator/metric-grid';
-  import { RegionContinentCard } from '@webperf/ui/components/operator/region-continent-card';
-  import { RegionQuickPick } from '@webperf/ui/components/operator/region-quick-pick';
   import { ResourceEditorPanel } from '@webperf/ui/components/operator/resource-editor-panel';
   import Button from '@webperf/ui/components/ui/button';
-  import { Checkbox } from '@webperf/ui/components/ui/checkbox';
   import {
     Root as FieldSet,
     Content as FieldSetContent,
@@ -36,11 +33,9 @@
   import { Input } from '@webperf/ui/components/ui/input';
   import { ScrollArea } from '@webperf/ui/components/ui/scroll-area';
   import { Select } from '@webperf/ui/components/ui/select';
-  import { Switch } from '@webperf/ui/components/ui/switch';
-  import { TagsInput } from '@webperf/ui/components/ui/tags-input';
   import { Tabs, TabsContent, TabsList, TabsTrigger } from '@webperf/ui/components/ui/tabs';
   import { Textarea } from '@webperf/ui/components/ui/textarea';
-  import type { CheckProfile, RegionAvailability } from '@webperf/contracts';
+  import type { CheckProfile } from '@webperf/contracts';
   import { onDestroy } from 'svelte';
   import type { ConsolePageData, ConsoleWorkspaceMode } from '$lib/console-data';
   import {
@@ -56,12 +51,13 @@
   }>();
   const queryClient = useQueryClient();
 
-  const regions = $derived.by(() => data.regions ?? []);
+  // Phase 1 of issue #14: the 41-city availability catalog became a single
+  // runtime location. Region Pack / region selection helpers were removed.
+  const runtimeLocation = $derived.by(() => data.runtimeLocation);
   const browserAudits = $derived.by(() => data.browserAudits ?? []);
   const savedChecks = $derived.by(() => data.savedChecks ?? null);
   const properties = $derived.by(() => savedChecks?.properties ?? []);
   const routeSets = $derived.by(() => savedChecks?.routeSets ?? []);
-  const regionPacks = $derived.by(() => savedChecks?.regionPacks ?? []);
   const checkProfiles = $derived.by(() => savedChecks?.checkProfiles ?? []);
   const profileMetaEntries = $derived.by(() => savedChecks?.profileMeta ?? []);
   const showOverview = $derived(mode === 'overview');
@@ -75,7 +71,7 @@
     await queryClient.invalidateQueries({ queryKey: ['control'] });
   };
   const overview = createOverviewController({
-    getRegions: () => regions,
+    getRuntimeLocation: () => runtimeLocation,
     getSavedChecksEnabled: () => Boolean(savedChecks),
     getCheckProfileCount: () => checkProfiles.length
   });
@@ -83,8 +79,6 @@
   const resources = createResourcesController({
     getProperties: () => properties,
     getRouteSets: () => routeSets,
-    getRegionPacks: () => regionPacks,
-    getActiveRegionOptions: () => overview.activeRegionOptions,
     refreshControlData
   });
   const resourcesState = resources.state;
@@ -92,7 +86,6 @@
     getSavedChecksEnabled: () => Boolean(savedChecks),
     getProperties: () => properties,
     getRouteSets: () => routeSets,
-    getRegionPacks: () => regionPacks,
     getCheckProfiles: () => checkProfiles,
     getProfileMetaEntries: () => profileMetaEntries,
     refreshControlData
@@ -102,30 +95,17 @@
     getSavedChecksEnabled: () => Boolean(savedChecks),
     getBrowserAudits: () => browserAudits,
     getBrowserAuditDirectRunEnabled: () => data.capabilities.browserAuditDirectRun,
-    getRegions: () => regions,
     refreshControlData
   });
   const reportsState = reports.state;
   const regionCatalog = createRegionsController({
-    getRegions: () => regions,
-    getSelectedRegions: () => overview.selectedRegions,
-    toggleRegion: overview.toggleRegion
+    getRuntimeLocation: () => runtimeLocation
   });
 
-  const maxSelectableRegions = overview.maxSelectableRegions;
-  const selectableCount = $derived.by(() => overview.selectableCount);
-  const selectedRegions = $derived.by(() => overview.selectedRegions);
-  const activeRegionPreview = $derived.by(() => overview.activeRegionPreview);
-  const controlModeLabel = $derived.by(() => overview.controlModeLabel);
-  const controlModeDetail = $derived.by(() => overview.controlModeDetail);
-  const quickRegionItems = $derived.by(() => overview.quickRegionItems);
   const jobSummaryItems = $derived.by(() => overview.jobSummaryItems);
-  const activeRegionOptions = $derived.by(() => resources.activeRegionOptions);
-  const activeRegionCodeSuggestions = $derived.by(() => resources.activeRegionCodeSuggestions);
   const propertyById = $derived.by(() => resources.propertyById);
   const visibleCheckProfiles = $derived.by(() => checks.visibleCheckProfiles);
   const checkProfilePageInfo = $derived.by(() => checks.checkProfilePageInfo);
-  const groupedRegions = $derived.by(() => regionCatalog.groupedRegions);
 
   onDestroy(() => {
     overview.destroy();
@@ -179,15 +159,9 @@
           </label>
 
           <div class="field">
-            <span>Selected regions</span>
-            <strong>{selectedRegions.length} / {maxSelectableRegions}</strong>
+            <span>Runtime location</span>
+            <strong>{overview.runtimeLocationLabel}</strong>
           </div>
-
-          <RegionQuickPick
-            items={quickRegionItems}
-            label="Quick region picks"
-            summary={`${selectedRegions.length} / ${maxSelectableRegions}`}
-          />
         </FieldSetContent>
       </FieldSet>
 
@@ -397,64 +371,6 @@
             {/snippet}
           </ResourceEditorPanel>
         </form>
-
-        <form onsubmit={resources.submitRegionPack}>
-          <ResourceEditorPanel
-            description="Pin the active corridor that each saved check should cover."
-            title={resourcesState.editingRegionPackId ? 'Edit region set' : 'Create region set'}
-          >
-            <label class="field">
-              <span>Existing region set</span>
-              <Select
-                bind:value={resourcesState.editingRegionPackId}
-                onchange={(event: Event) =>
-                  resources.loadRegionPackEditor((event.currentTarget as HTMLSelectElement).value)}
-              >
-                <option value="">Create new region set</option>
-                {#each regionPacks as regionPack (regionPack.id)}
-                  <option value={regionPack.id}>{regionPack.name}</option>
-                {/each}
-              </Select>
-            </label>
-            <label class="field">
-              <span>Name</span>
-              <Input bind:value={resourcesState.regionPackName} placeholder="APAC core" />
-            </label>
-            <label class="field">
-              <span>Selected region codes</span>
-              <TagsInput
-                bind:value={resourcesState.regionPackCodes}
-                placeholder="Add active region codes"
-                restrictToSuggestions
-                suggestions={activeRegionCodeSuggestions}
-              />
-            </label>
-            <div class="field">
-              <span>Regions</span>
-              <div class="pill-grid">
-                {#each activeRegionOptions as region (region.code)}
-                  <Button
-                    class={`pill-button ${resourcesState.regionPackCodes.includes(region.code) ? 'selected' : ''}`}
-                    variant="ghost"
-                    type="button"
-                    onclick={() => resources.toggleRegionPackCode(region.code)}
-                  >
-                    {region.label}
-                  </Button>
-                {/each}
-              </div>
-            </div>
-            {#snippet footer()}
-              <Button type="submit" variant="secondary" disabled={resources.isConfigBusy('region-pack')}>
-                {#if resources.isConfigBusy('region-pack')}{resourcesState.editingRegionPackId ? 'Updating...' : 'Saving...'}{:else}{resourcesState.editingRegionPackId ? 'Update region set' : 'Save region set'}{/if}
-              </Button>
-              {#if resourcesState.editingRegionPackId}
-                <Button variant="ghost" type="button" onclick={resources.resetRegionPackForm} disabled={resources.isConfigBusy('region-pack')}>Cancel</Button>
-                <Button variant="destructive" type="button" onclick={() => resources.deleteRegionPack(resourcesState.editingRegionPackId)} disabled={resources.isConfigBusy('region-pack')}>Delete</Button>
-              {/if}
-            {/snippet}
-          </ResourceEditorPanel>
-        </form>
       </div>
     {/if}
   </ResourceEditors>
@@ -472,7 +388,6 @@
         busy={checks.isConfigBusy('check-profile')}
         {checkProfiles}
         {properties}
-        {regionPacks}
         {routeSets}
         onDelete={checks.deleteCheckProfile}
         onLoadProfileEditor={checks.loadProfileEditor}
@@ -511,7 +426,6 @@
           getComparisonSections={checks.comparisonSections}
           getPropertyName={checks.getPropertyName}
           getRecentRunDetails={checks.getRecentRunDetails}
-          getRegionPackName={checks.getRegionPackName}
           getReport={checks.getReport}
           getRouteSetName={checks.getRouteSetName}
           isBaselineRun={checks.isBaselineRun}
@@ -578,15 +492,11 @@
                     </Select>
                   </label>
 
-                  <label class="field">
-                    <span>Region</span>
-                    <Select bind:value={reportsState.browserAuditRegion}>
-                      <option value="">auto-select</option>
-                      {#each reports.browserAuditRegionOptions as option (option.value)}
-                        <option value={option.value}>{option.label}</option>
-                      {/each}
-                    </Select>
-                  </label>
+                  <div class="field">
+                    <span>Runtime location</span>
+                    <strong>{regionCatalog.regionLabel}</strong>
+                    <small>Browser audits run from this deployment's single runtime location.</small>
+                  </div>
                 </FieldSetContent>
                 <FieldSetFooter class="builder-actions">
                   <Button
@@ -648,24 +558,14 @@
 {/if}
 
 {#if showRegions}
-  <RegionCatalog regionCount={regions.length} selectableCount={selectableCount}>
-    <ScrollArea class="max-h-[72vh] rounded-[var(--wp-radius-lg)] border border-line/55 bg-white/[0.02] p-1">
-      <div class="continents pr-3">
-        {#each groupedRegions as group (group.continent)}
-          <RegionContinentCard
-            continent={group.continent}
-            itemCount={group.regions.length}
-            items={group.regions.map((region) => ({
-              id: region.code,
-              label: region.label,
-              detail: region.launchStage === 'core' ? 'launch active' : 'catalog only',
-              selected: selectedRegions.includes(region.code),
-              disabled: !region.selectable,
-              onSelect: () => regionCatalog.toggleRegion(region)
-            }))}
-          />
-        {/each}
-      </div>
-    </ScrollArea>
+  <RegionCatalog regionId={regionCatalog.regionId} regionLabel={regionCatalog.regionLabel}>
+    <div class="runtime-location-card">
+      <p class="card-copy">
+        This standalone deployment is one regional runtime. New checks, manual jobs,
+        and browser audits all measure from <strong>{regionCatalog.regionLabel}</strong>
+        (<code>{regionCatalog.regionId}</code>). The managed Cloud product coordinates
+        several regional runtimes; that orchestration lives outside this repository.
+      </p>
+    </div>
   </RegionCatalog>
 {/if}

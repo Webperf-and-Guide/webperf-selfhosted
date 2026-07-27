@@ -1,13 +1,14 @@
-import type { CreateRegionPackInput } from '@webperf/contracts';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getControlPlaneClient, proxyControlResponse, toListInput } from '$lib/server/control-plane';
-import { readListQuery } from '$lib/server/list-query';
 
-export const GET: RequestHandler = async ({ platform, url }) =>
-  proxyControlResponse(getControlPlaneClient(platform).app.regionPacks.list(toListInput(readListQuery(url))));
+// Phase 1 of issue #14: Region Packs were removed. The console proxy returns
+// 410 Gone so stale UI/clients fail fast. The managed Cloud product may keep
+// its own managed-region catalog outside this repository.
+const GONE_BODY = {
+  error:
+    'Region packs were removed in Phase 1 of issue #14. One standalone deployment measures from one runtime location.'
+} as const;
 
-export const POST: RequestHandler = async ({ request, platform }) =>
-  proxyControlResponse(
-    getControlPlaneClient(platform).app.regionPacks.create(await request.json() as CreateRegionPackInput),
-    201
-  );
+export const GET: RequestHandler = async () => json(GONE_BODY, { status: 410 });
+
+export const POST: RequestHandler = async () => json(GONE_BODY, { status: 410 });

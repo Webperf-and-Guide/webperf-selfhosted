@@ -12,7 +12,6 @@ import type {
   CheckProfileRunListResponse,
   LatencyJobDetail,
   Property,
-  RegionPack,
   RouteSet
 } from '@webperf/contracts';
 import type { MetricGridItem } from '@webperf/ui/components/operator/types';
@@ -39,7 +38,6 @@ type ChecksAccessors = {
   getSavedChecksEnabled: () => boolean;
   getProperties: () => Property[];
   getRouteSets: () => RouteSet[];
-  getRegionPacks: () => RegionPack[];
   getCheckProfiles: () => CheckProfile[];
   getProfileMetaEntries: () => SavedProfileMeta[];
   refreshControlData: () => Promise<void>;
@@ -49,7 +47,6 @@ export class ChecksController {
   state = $state({
     profilePropertyId: '',
     profileRouteSetId: '',
-    profileRegionPackId: '',
     profileName: '',
     profileNote: '',
     profileScheduleMinutes: '',
@@ -112,10 +109,6 @@ export class ChecksController {
     return this.accessors.getRouteSets();
   }
 
-  get regionPacks() {
-    return this.accessors.getRegionPacks();
-  }
-
   get checkProfiles() {
     return this.accessors.getCheckProfiles();
   }
@@ -130,10 +123,6 @@ export class ChecksController {
 
   get routeSetById() {
     return new Map<string, RouteSet>(this.routeSets.map((routeSet) => [routeSet.id, routeSet] as const));
-  }
-
-  get regionPackById() {
-    return new Map<string, RegionPack>(this.regionPacks.map((regionPack) => [regionPack.id, regionPack] as const));
   }
 
   get checkProfileById() {
@@ -280,7 +269,6 @@ export class ChecksController {
     this.state.editingProfileId = '';
     this.state.profilePropertyId = '';
     this.state.profileRouteSetId = '';
-    this.state.profileRegionPackId = '';
     this.state.profileName = '';
     this.state.profileNote = '';
     this.state.profileScheduleMinutes = '';
@@ -312,7 +300,6 @@ export class ChecksController {
     this.state.editingProfileId = profile.id;
     this.state.profilePropertyId = profile.propertyId;
     this.state.profileRouteSetId = profile.routeSetId;
-    this.state.profileRegionPackId = profile.regionPackId;
     this.state.profileName = profile.name;
     this.state.profileNote = profile.note ?? '';
     this.state.profileScheduleMinutes = profile.schedule?.intervalMinutes?.toString() ?? '';
@@ -347,7 +334,6 @@ export class ChecksController {
             body: JSON.stringify({
               propertyId: this.state.profilePropertyId,
               routeSetId: this.state.profileRouteSetId,
-              regionPackId: this.state.profileRegionPackId,
               name: this.state.profileName,
               note: this.state.profileNote || undefined,
               request: buildRequestConfig(
@@ -540,9 +526,6 @@ export class ChecksController {
 
   getRouteSetName = (profile: CheckProfile) =>
     this.routeSetById.get(profile.routeSetId)?.name ?? 'Unknown route group';
-
-  getRegionPackName = (profile: CheckProfile) =>
-    this.regionPackById.get(profile.regionPackId)?.name ?? 'Unknown region set';
 
   getProfileMeta = (profileId: string) => this.profileMetaById.get(profileId) ?? null;
 

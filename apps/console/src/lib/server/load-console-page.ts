@@ -7,7 +7,6 @@ import type {
   CheckProfileRunDetailResponse,
   CheckProfileRunListResponse,
   PropertyListResponse,
-  RegionPackListResponse,
   RegionsResponse,
   RouteSetListResponse
 } from '@webperf/contracts';
@@ -29,7 +28,7 @@ export const loadConsolePage = async ({ fetch }: { fetch: LoaderFetch }): Promis
   const savedChecks = await loadSavedChecks(fetch);
 
   return {
-    regions: regionsPayload?.regions ?? [],
+    runtimeLocation: regionsPayload?.runtimeLocation ?? { regionId: 'local' },
     capabilities: {
       browserAuditDirectRun: Boolean(capabilitiesPayload?.features?.browserAuditDirectRun)
     },
@@ -48,10 +47,9 @@ const loadSavedChecks = async (fetchFn: LoaderFetch) => {
     return null satisfies SavedChecksData | null;
   }
 
-  const [propertiesPayload, routeSetsPayload, regionPacksPayload, profileMeta] = await Promise.all([
+  const [propertiesPayload, routeSetsPayload, profileMeta] = await Promise.all([
     fetchOptionalJson<PropertyListResponse>(fetchFn, `/api/control/properties?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`),
     fetchOptionalJson<RouteSetListResponse>(fetchFn, `/api/control/route-sets?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`),
-    fetchOptionalJson<RegionPackListResponse>(fetchFn, `/api/control/region-packs?pageSize=${CONSOLE_COLLECTION_PAGE_SIZE}`),
     Promise.all(
       checkProfilesPayload.checkProfiles.map(async (profile) => {
         const [runsPayload, latestComparison, baselineComparison, report] = await Promise.all([
@@ -97,7 +95,6 @@ const loadSavedChecks = async (fetchFn: LoaderFetch) => {
   return {
     properties: propertiesPayload?.properties ?? [],
     routeSets: routeSetsPayload?.routeSets ?? [],
-    regionPacks: regionPacksPayload?.regionPacks ?? [],
     checkProfiles: checkProfilesPayload.checkProfiles,
     profileMeta
   } satisfies SavedChecksData;

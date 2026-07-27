@@ -41,6 +41,63 @@ describe('strict self-host configuration', () => {
     })).toThrow();
   });
 
+  test('Issue #14 Phase 1: parses single-region runtime identity and probe origin', () => {
+    // Defaults: id `local`, label resolves to id at consumption time, probe origin loopback.
+    const defaults = parseSelfhostApiVars(requiredApiSecrets);
+    expect(defaults.SELFHOST_REGION_ID).toBe('local');
+    expect(defaults.SELFHOST_REGION_LABEL).toBeUndefined();
+    expect(defaults.SELFHOST_PROBE_BASE_URL).toBe('http://127.0.0.1:8080');
+
+    // Operator-chosen generic region ids stay accepted.
+    const configured = parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_REGION_ID: 'kr-seoul-office',
+      SELFHOST_REGION_LABEL: 'Seoul office runtime',
+      SELFHOST_PROBE_BASE_URL: 'http://probe:8080'
+    });
+    expect(configured.SELFHOST_REGION_ID).toBe('kr-seoul-office');
+    expect(configured.SELFHOST_REGION_LABEL).toBe('Seoul office runtime');
+    expect(configured.SELFHOST_PROBE_BASE_URL).toBe('http://probe:8080');
+  });
+
+  test('Issue #14 Phase 1: rejects invalid region ids and probe origins', () => {
+    // region id must be lowercase ascii letters/digits/hyphens, anchored.
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_REGION_ID: 'Tokyo'
+    })).toThrow();
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_REGION_ID: 'has space'
+    })).toThrow();
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_REGION_ID: '-leading-hyphen'
+    })).toThrow();
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_REGION_ID: 'trailing-hyphen-'
+    })).toThrow();
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_REGION_ID: 'a'.repeat(65)
+    })).toThrow();
+
+    // probe origin must be a credential-free HTTP(S) origin.
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_PROBE_BASE_URL: 'https://operator:secret@probe.internal/'
+    })).toThrow('credential-free');
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_PROBE_BASE_URL: 'http://probe.internal/measure'
+    })).toThrow();
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_PROBE_BASE_URL: 'ftp://probe.internal/'
+    })).toThrow();
+  });
+
   test('requires server-side console, scheduler, and executor credentials', () => {
     expect(() => parseSelfhostConsoleVars({})).toThrow();
     expect(() => parseSelfhostSchedulerVars({})).toThrow();
@@ -127,5 +184,26 @@ describe('strict self-host configuration', () => {
         SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP: 'true'
       }).SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP
     ).toBe(true);
+  });
+
+  test('Issue #14 Phase 1: executor accepts the single-region probe origin', () => {
+    const base = {
+      SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+      ...executionSecrets
+    };
+    expect(parseSelfhostExecutorVars(base).SELFHOST_PROBE_BASE_URL).toBe('http://127.0.0.1:8080');
+    expect(parseSelfhostExecutorVars({
+      ...base,
+      SELFHOST_PROBE_BASE_URL: 'http://probe:8080'
+    }).SELFHOST_PROBE_BASE_URL).toBe('http://probe:8080');
+    // Same credential-free origin discipline as the API parser.
+    expect(() => parseSelfhostExecutorVars({
+      ...base,
+      SELFHOST_PROBE_BASE_URL: 'https://operator:secret@probe.internal/'
+    })).toThrow('credential-free');
+    expect(() => parseSelfhostExecutorVars({
+      ...base,
+      SELFHOST_PROBE_BASE_URL: 'http://probe.internal/measure'
+    })).toThrow();
   });
 });

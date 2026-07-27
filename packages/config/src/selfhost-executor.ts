@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isIP } from 'node:net';
-import { defaultSelfhostProbeBaseUrlsJson, emptyStringToUndefined } from './shared';
+import { defaultSelfhostProbeBaseUrl, defaultSelfhostProbeBaseUrlsJson, emptyStringToUndefined } from './shared';
 
 export const isLoopbackHostname = (hostname: string) => {
   const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
@@ -29,6 +29,10 @@ export const selfhostExecutorEnvSchema = z
     PROBE_SHARED_SECRET: z.string().trim().min(16),
     BROWSER_AUDIT_SHARED_SECRET: z.string().trim().min(16),
     SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
+    // Issue #14 Phase 1 single-region probe origin. Added in parallel with
+    // the legacy SELFHOST_PROBE_BASE_URLS_JSON map; PR2 of Phase 1 removes
+    // the legacy map and makes this the only configuration path.
+    SELFHOST_PROBE_BASE_URL: z.string().url().default(defaultSelfhostProbeBaseUrl),
     SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
     SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: z.preprocess(
       (value) => value ?? 'false',
@@ -146,6 +150,40 @@ export const selfhostExecutorEnvSchema = z
           });
         }
       }
+    }
+
+    // SELFHOST_PROBE_BASE_URL must be a credential-free HTTP(S) origin. The
+    // executor appends the signed /measure path itself, matching the existing
+    // contract for the legacy SELFHOST_PROBE_BASE_URLS_JSON entries. Loopback
+    // and insecure-HTTP policy is enforced by the network handler at runtime
+    // using SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP, so this check only
+    // bounds the URL shape.
+    let probeBaseUrl: URL | null = null;
+    try {
+      probeBaseUrl = new URL(config.SELFHOST_PROBE_BASE_URL);
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        message: 'Probe base URL is invalid',
+        path: ['SELFHOST_PROBE_BASE_URL']
+      });
+    }
+    if (
+      probeBaseUrl
+      && (
+        !['http:', 'https:'].includes(probeBaseUrl.protocol)
+        || probeBaseUrl.username
+        || probeBaseUrl.password
+        || probeBaseUrl.pathname !== '/'
+        || probeBaseUrl.search
+        || probeBaseUrl.hash
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Probe base URL must be a credential-free HTTP(S) origin without path, query, or fragment',
+        path: ['SELFHOST_PROBE_BASE_URL']
+      });
     }
 
     if (config.SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS * 3 > config.SELFHOST_EXECUTOR_LEASE_DURATION_MS) {

@@ -43,6 +43,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@webperf/contracts": "workspace:*",
     "zod": "^4.1.12"
   }
 }

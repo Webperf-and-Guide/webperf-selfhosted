@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## Mission
 
@@ -212,6 +212,7 @@ Current repo state as of 2026-07-26:
 - PRs #4 through #12 closed the local Compose port-isolation, canonical baseline/deterministic analysis, multi-architecture release, release-bundle-version, and generated-secret clean-host evidence gaps; the public-beta hardening plan is complete
 - all six GHCR packages are public, and anonymous registry checks verify `0.2.1` manifests for both `linux/amd64` and `linux/arm64`; GitHub-hosted published-bundle smoke run `30197793088` verified the public archive checksums and source metadata with an empty Docker credential directory, four independently generated temporary secrets, and both runtime profiles
 - formal releases now finish with a required fresh GitHub-hosted published-bundle smoke for both default and Browser Audit profiles; its bundle-aware harness is separate from a source-pinned checkout that must match the bundle runtime metadata, and the current `v0.2.1` drill passed with independently generated secrets
+- issue #14 Phase 1 has started: PR #15 lands the foundation slice by adding the generic runtime region identity (`runtimeRegionIdSchema`, `runtimeRegionLabelSchema`, `runtimeLocationSchema`) to `@webperf/contracts` and the single-region `SELFHOST_REGION_ID`, `SELFHOST_REGION_LABEL`, and `SELFHOST_PROBE_BASE_URL` variables to `@webperf/config`, in parallel with the legacy 41-city enum and `SELFHOST_*_JSON` maps. The default region id is `local` and the default probe origin is loopback, so the bundle no longer makes an unverified Tokyo claim for new single-region installs. PR2 of Phase 1 will remove the legacy enum/JSON variables and move API/executor consumption to this model; PR3 will rework the Console `/regions` workspace into a Runtime Location view, update user/architecture docs, and add the Phase 1 changeset. Per the operator decision, the legacy 3-variable compatibility parser and stored multi-region Check migration are intentionally omitted because there is no production data to preserve.
 
 Current local dev entrypoints:
 - `bun run dev`

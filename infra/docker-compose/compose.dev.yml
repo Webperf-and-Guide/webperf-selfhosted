@@ -1,27 +1,25 @@
+# Phase 2 of issue #14: all Bun services share one webperf image build.
+# The x-webperf-build anchor avoids building the same Dockerfile four times.
+x-webperf-build: &webperf-build
+  context: ../..
+  dockerfile: infra/docker/Dockerfile.webperf
+
 services:
   console:
     image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+    build: *webperf-build
 
   api:
     image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+    build: *webperf-build
 
   scheduler:
     image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+    build: *webperf-build
 
   executor:
     image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+    build: *webperf-build
 
   probe:
     image: webperf-probe:dev
@@ -37,12 +35,8 @@ services:
 
   api-debug:
     image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+    build: *webperf-build
 
   browser-audit-debug:
     image: webperf:dev
-    build:
-      context: ../..
-      dockerfile: infra/docker/Dockerfile.webperf
+    build: *webperf-build

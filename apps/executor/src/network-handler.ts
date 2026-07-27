@@ -4,14 +4,12 @@ import type {
   ExecutionJob,
   LatencyJobDetail,
   LatencyJobTarget,
-  ProbeMeasurementResponse,
-  RegionCode
+  ProbeMeasurementResponse
 } from '@webperf/contracts';
 import { isIP } from 'node:net';
 import {
   jsonValueSchema,
   probeMeasurementResponseSchema,
-  regionCodeSchema,
   signedProbeMeasurementRequestSchema
 } from '@webperf/contracts';
 import { isLoopbackHostname } from '@webperf/config/selfhost-executor';
@@ -38,51 +36,32 @@ export type NetworkHandlerOptions = {
   client: ExecutorApiClient;
   leaseOwner: string;
   probeSharedSecret: string;
-  probeBaseUrls: Partial<Record<RegionCode, string>>;
+  // Phase 1 of issue #14: one standalone deployment measures from one fixed
+  // probe origin. The legacy region->origin map was replaced by a single
+  // credential-free HTTP(S) origin string.
+  probeBaseUrl: string;
   allowInsecureProbeHttp?: boolean;
   requestImpl?: PinnedHttpRequest;
   logger?: { error(event: Record<string, unknown>): void };
 };
 
-export const parseProbeBaseUrls = (
-  json: string,
+export const parseProbeBaseUrl = (
+  baseUrl: string,
   { allowInsecureHttp = false }: { allowInsecureHttp?: boolean } = {}
-): Partial<Record<RegionCode, string>> => {
-  let value: unknown;
-
-  try {
-    value = JSON.parse(json);
-  } catch {
-    throw new Error('Executor probe origins must be valid JSON');
+): string => {
+  if (typeof baseUrl !== 'string' || baseUrl.length === 0) {
+    throw new Error('Executor probe origin must be a non-empty string');
   }
 
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Executor probe origins must be a JSON object');
-  }
-
-  const entries = Object.entries(value).map(([region, baseUrl]) => {
-    const parsedRegion = regionCodeSchema.safeParse(region);
-
-    if (!parsedRegion.success || typeof baseUrl !== 'string') {
-      throw new Error('Executor probe origins contain an invalid region entry');
-    }
-
-    const endpoint = resolveProbeMeasureUrl(baseUrl, allowInsecureHttp);
-    return [parsedRegion.data, endpoint.origin] as const;
-  });
-
-  if (entries.length === 0) {
-    throw new Error('Executor requires at least one probe origin');
-  }
-
-  return Object.fromEntries(entries);
+  const endpoint = resolveProbeMeasureUrl(baseUrl, allowInsecureHttp);
+  return endpoint.origin;
 };
 
 export const createNetworkExecutionHandler = ({
   client,
   leaseOwner,
   probeSharedSecret,
-  probeBaseUrls,
+  probeBaseUrl,
   allowInsecureProbeHttp = false,
   requestImpl = requestPinnedHttp,
   logger = defaultNetworkLogger
@@ -116,7 +95,7 @@ export const createNetworkExecutionHandler = ({
       job,
       persist,
       probeSharedSecret,
-      probeBaseUrls,
+      probeBaseUrl,
       allowInsecureProbeHttp,
       requestImpl,
       logger,
@@ -166,7 +145,7 @@ const processNetworkJob = async ({
   job,
   persist,
   probeSharedSecret,
-  probeBaseUrls,
+  probeBaseUrl,
   allowInsecureProbeHttp,
   requestImpl,
   logger,
@@ -176,7 +155,7 @@ const processNetworkJob = async ({
   job: LatencyJobDetail;
   persist: () => Promise<void>;
   probeSharedSecret: string;
-  probeBaseUrls: Partial<Record<RegionCode, string>>;
+  probeBaseUrl: string;
   allowInsecureProbeHttp: boolean;
   requestImpl: PinnedHttpRequest;
   logger: { error(event: Record<string, unknown>): void };
@@ -202,10 +181,11 @@ const processNetworkJob = async ({
     target.updatedAt = now;
     await recomputeAndPersistJob(job, persist);
 
-    const probeBaseUrl = probeBaseUrls[target.region];
-
+    // Phase 1 of issue #14: the deployment owns one fixed probe origin. The
+    // previous per-target region lookup was removed; if the operator has not
+    // configured an origin, mark the target as missing-probe-origin.
     if (!probeBaseUrl) {
-      markTargetFailed(target, 'missing_probe_region', 'No probe is configured for this region');
+      markTargetFailed(target, 'missing_probe_origin', 'No probe origin is configured for this deployment');
       await recomputeAndPersistJob(job, persist);
       continue;
     }

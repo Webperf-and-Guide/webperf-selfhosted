@@ -6,7 +6,7 @@ import type {
   LatencyJobDetail
 } from '@webperf/contracts';
 import type { ExecutorApiClient } from './client';
-import { createNetworkExecutionHandler, parseProbeBaseUrls } from './network-handler';
+import { createNetworkExecutionHandler, parseProbeBaseUrl } from './network-handler';
 import { OutboundHttpPolicyError } from './outbound-http';
 import { ExecutionFailure } from './runner';
 
@@ -47,10 +47,10 @@ const queuedJob = (): LatencyJobDetail => ({
   startedAt: null,
   completedAt: null,
   requesterIp: null,
-  selectedRegions: ['tokyo'],
+  region: 'local',
   targets: [{
     jobId: 'job_network',
-    region: 'tokyo',
+    region: 'local',
     status: 'queued',
     attemptNo: 0,
     maxAttempts: 1,
@@ -62,8 +62,8 @@ const queuedJob = (): LatencyJobDetail => ({
     execution: {
       runnerType: 'network_probe',
       provider: 'selfhost',
-      locationMode: 'best_effort',
-      region: 'tokyo',
+      locationMode: 'fixed',
+      region: 'local',
       city: null,
       runnerVersion: 'probe-rs'
     },
@@ -124,7 +124,7 @@ describe('network execution handler', () => {
       client,
       leaseOwner: 'executor-network',
       probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrls: { tokyo: 'http://probe:8080' },
+      probeBaseUrl: 'http://probe:8080',
       allowInsecureProbeHttp: true,
       requestImpl: async (input, init) => {
         probeRequest = new Request(input, {
@@ -136,7 +136,7 @@ describe('network execution handler', () => {
         expect(init.addressPolicy).toBe('trusted-private');
         return Response.json({
           measurement: {
-            region: 'tokyo',
+            region: 'local',
             url: 'https://example.com/',
             latencyMs: 123,
             measuredAt: '2026-07-22T00:00:05.000Z',
@@ -181,7 +181,7 @@ describe('network execution handler', () => {
       client: createClient({ savedResults }),
       leaseOwner: 'executor-network',
       probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrls: { tokyo: 'http://probe.test:8080' },
+      probeBaseUrl: 'http://probe.test:8080',
       allowInsecureProbeHttp: true,
       requestImpl: async (_input, init) => {
         expect(init.addressPolicy).toBe('public');
@@ -210,27 +210,13 @@ describe('network execution handler', () => {
     expect(JSON.stringify(savedResults)).not.toContain('raw-sensitive-probe-error');
   });
 
-  test('validates configured probe origins as region-keyed HTTP origins', () => {
-    expect(parseProbeBaseUrls('{"tokyo":"https://probe.example.com"}')).toEqual({
-      tokyo: 'https://probe.example.com'
-    });
-    expect(parseProbeBaseUrls('{"tokyo":"http://127.0.0.1:8080"}')).toEqual({
-      tokyo: 'http://127.0.0.1:8080'
-    });
-    expect(() => parseProbeBaseUrls('{"tokyo":"http://probe:8080"}')).toThrow(
-      ExecutionFailure
-    );
-    expect(parseProbeBaseUrls('{"tokyo":"http://probe:8080"}', {
-      allowInsecureHttp: true
-    })).toEqual({
-      tokyo: 'http://probe:8080'
-    });
-    expect(() => parseProbeBaseUrls('{"unknown":"https://probe.example.com"}')).toThrow(
-      'invalid region entry'
-    );
-    expect(() => parseProbeBaseUrls('{"tokyo":"https://user:secret@probe.example.com"}')).toThrow(
-      ExecutionFailure
-    );
+  test('validates the configured single probe origin as a credential-free HTTP(S) origin', () => {
+    expect(parseProbeBaseUrl('https://probe.example.com')).toBe('https://probe.example.com');
+    expect(parseProbeBaseUrl('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080');
+    expect(() => parseProbeBaseUrl('http://probe:8080')).toThrow(ExecutionFailure);
+    expect(parseProbeBaseUrl('http://probe:8080', { allowInsecureHttp: true })).toBe('http://probe:8080');
+    expect(() => parseProbeBaseUrl('https://user:secret@probe.example.com')).toThrow(ExecutionFailure);
+    expect(() => parseProbeBaseUrl('')).toThrow('non-empty');
   });
 
   test('persists a terminal failure when DNS resolves outside the configured trust boundary', async () => {
@@ -239,7 +225,7 @@ describe('network execution handler', () => {
       client: createClient({ savedResults }),
       leaseOwner: 'executor-network',
       probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrls: { tokyo: 'https://probe.example.test' },
+      probeBaseUrl: 'https://probe.example.test',
       requestImpl: async () => {
         throw new OutboundHttpPolicyError(
           'address_blocked',

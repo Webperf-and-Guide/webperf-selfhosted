@@ -70,3 +70,27 @@ If a migration was applied, do not point an older image at the upgraded
 database. Stop all writers, restore the pre-upgrade SQLite snapshot and its
 matching artifact snapshot, then start the old release. Forward-schema refusal
 is a safety feature; bypassing it risks irreversible corruption.
+
+## Phase 1 of issue #14: single-region runtime location
+
+Phase 1 replaced the 41-city catalog and Region Pack resources with one fixed
+runtime location per deployment. The legacy configuration variables
+(`SELFHOST_ACTIVE_REGION_CODES_JSON`, `SELFHOST_REGION_IDS_JSON`,
+`SELFHOST_PROBE_BASE_URLS_JSON`) and the probe's `REGION_CODE`/Tokyo default
+were removed without a compatibility parser because there is no production
+data to preserve.
+
+Before starting the upgraded stack, replace the three legacy JSON variables in
+`.env` with the single-region trio:
+
+```dotenv
+SELFHOST_REGION_ID=local
+SELFHOST_REGION_LABEL=
+SELFHOST_PROBE_BASE_URL=http://probe:8080
+```
+
+Set `SELFHOST_REGION_ID` to a stable identifier for this deployment's actual
+location (for example `kr-seoul-office` or `aws-ap-northeast-2`). The probe
+reads the same value from `REGION_ID`. The `/v1/region-packs` and
+`/v1/region-sets` routes now return `410 Gone`, and the Console `/regions`
+page reports the single runtime location instead of a city catalog.

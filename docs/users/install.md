@@ -87,6 +87,6 @@ reverse proxy.
 
 - Review every setting in [Configure](./configure.md).
 - Read [Security](./security.md) before remote access.
-- Add real probe locations with [Regions](./regions.md).
+- Configure the deployment's runtime location with [Regions](./regions.md).
 - Establish a recovery point with [Backup and restore](./backup-restore.md).
 - Enable the optional [Browser Audit](./browser-audits.md) only when needed.

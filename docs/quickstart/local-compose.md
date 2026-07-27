@@ -67,8 +67,8 @@ from the current checkout.
 - `BROWSER_AUDIT_SHARED_SECRET`: shared secret used for signed browser-audit requests when the optional worker is enabled
 - `BROWSER_AUDIT_SHARED_SECRET_NEXT`: optional rollover secret accepted alongside the current browser-audit key
 - `BROWSER_AUDIT_ALLOW_NO_SANDBOX`: explicit opt-in for local runtimes that cannot keep Chrome sandboxing enabled
-- `SELFHOST_ACTIVE_REGION_CODES_JSON`: active region list
-- `SELFHOST_PROBE_BASE_URLS_JSON`: region to probe URL map
+- `SELFHOST_REGION_ID`: stable runtime location identifier (default `local`)
+- `SELFHOST_PROBE_BASE_URL`: probe origin the executor calls
 - `SELFHOST_DATABASE_PATH`: SQLite file path inside the API container
 - `SELFHOST_ARTIFACTS_PATH`: Browser Audit artifact root inside the API container
 - `SELFHOST_ARTIFACT_UPLOAD_BASE_URL`: internal API origin reachable by the runner

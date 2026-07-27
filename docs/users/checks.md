@@ -4,16 +4,19 @@ The operator workflow separates reusable inputs from execution history:
 
 - a **Site** owns the base public origin;
 - a **Route Group** contains representative paths;
-- a **Region Set** selects one to four active probes;
 - a **Check** combines those resources with request, monitor, alert, schedule,
   and optional Browser Audit policy;
 - a **Run** is one immutable execution attempt and its target results.
 
+One standalone deployment measures from one fixed runtime location, so every
+Check runs from that single region automatically. There is no Region Set step;
+the configured `SELFHOST_REGION_ID` is stamped onto every target as provenance.
+
 ## Start with a manual run
 
 Use **Run** for a one-off public URL before creating reusable resources. This
-confirms that the target passes SSRF policy, the selected probes are healthy,
-and the latency or uptime rule is sensible.
+confirms that the target passes SSRF policy, the probe is healthy, and the
+latency or uptime rule is sensible.
 
 Fast Check evaluates status after redirects and measures through response
 headers. A 2xx or 3xx response is the supported success rule. Latency policy
@@ -23,9 +26,8 @@ can add a positive millisecond threshold; uptime policy focuses on outcome.
 
 1. In **Resources**, create the Site.
 2. Add a Route Group with the small set of routes that represent a deploy.
-3. Add a Region Set containing active probes.
-4. In **Checks**, select those three resources and name the gate.
-5. Optionally add an interval of at least five minutes, request overrides, a
+3. In **Checks**, select those two resources and name the gate.
+4. Optionally add an interval of at least five minutes, request overrides, a
    latency threshold, and webhook targets.
 
 Custom requests support `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and
@@ -67,5 +69,5 @@ Use **Reports** to browse persisted comparisons, deterministic analyses, JSON
 or CSV exports, and optional Browser Audits separately from configuration.
 Compatibility API names such as `properties` and `check-profiles` are
 migration-only; new integrations should use canonical `sites`, `routeGroups`,
-`regionSets`, and `checks` resources documented in the
+and `checks` resources documented in the
 [public API surface](../architecture/public-api-surface.md).

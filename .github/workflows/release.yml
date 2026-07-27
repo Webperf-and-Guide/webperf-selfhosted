@@ -161,22 +161,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: console
-            image: webperf-console
+          - name: webperf
+            image: webperf
             context: .
-            file: apps/console/Dockerfile
-          - name: api
-            image: webperf-api
-            context: .
-            file: apps/api/Dockerfile
-          - name: scheduler
-            image: webperf-scheduler
-            context: .
-            file: apps/scheduler/Dockerfile
-          - name: executor
-            image: webperf-executor
-            context: .
-            file: apps/executor/Dockerfile
+            file: infra/docker/Dockerfile.webperf
           - name: probe
             image: webperf-probe
             context: ./apps/probe-rs

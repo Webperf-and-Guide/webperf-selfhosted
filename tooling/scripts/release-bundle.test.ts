@@ -158,7 +158,7 @@ npm/@webperf/contracts: patch
       .toThrow('Sampo changeset has an unsafe release description: unsafe.md');
   });
 
-  test('renders a complete digest-pinned bundle from six image records', () => {
+  test('renders a complete digest-pinned bundle from three image records', () => {
     const root = makeTemporaryDirectory();
     const version = repositoryReleaseVersion();
     const output = join(root, `webperf-selfhosted-v${version}`);
@@ -175,10 +175,12 @@ npm/@webperf/contracts: patch
       readFileSync(join(output, 'runtime-metadata.json'), 'utf8')
     );
 
-    expect(result.imageCount).toBe(6);
+    expect(result.imageCount).toBe(3);
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
     expect(compose).toContain(`WEBPERF_RUNTIME_VERSION: "${version}"`);
+    // 5 services using webperf + probe + browser-audit + 2 debug = 8 image lines
+    // (console/api/scheduler/executor share one webperf digest)
     expect(validateReleaseComposeImages(compose)).toHaveLength(8);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);
@@ -189,17 +191,17 @@ npm/@webperf/contracts: patch
         )).toContain('SPDXRef-DOCUMENT');
       }
     }
-    expect(runtimeMetadata.images).toHaveLength(6);
+    expect(runtimeMetadata.images).toHaveLength(3);
     expect(runtimeMetadata.images[0].sboms).toEqual([
       {
         platform: 'linux/amd64',
         digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-        file: `console-${version}.spdx.json`
+        file: `webperf-${version}.spdx.json`
       },
       {
         platform: 'linux/arm64',
         digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-        file: `console-${version}-linux-arm64.spdx.json`
+        file: `webperf-${version}-linux-arm64.spdx.json`
       }
     ]);
     expect(readFileSync(join(output, '.env.example'), 'utf8')).not.toContain(
@@ -233,7 +235,7 @@ npm/@webperf/contracts: patch
   test('identifies every invalid release metadata field', () => {
     const root = makeTemporaryDirectory();
     const input = writeValidReleaseInputs(root, '0.2.0', 'a'.repeat(40));
-    const metadataPath = join(input, 'console.json');
+    const metadataPath = join(input, 'webperf.json');
     const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as Record<string, unknown>;
     metadata.tag = '0.2.1';
     metadata.sbom = 'wrong.spdx.json';
@@ -244,7 +246,7 @@ npm/@webperf/contracts: patch
       inputDirectory: input,
       outputDirectory: join(root, 'output')
     })).toThrow(
-      'tag must be 0.2.0; sbom must be console-0.2.0.spdx.json'
+      'tag must be 0.2.0; sbom must be webperf-0.2.0.spdx.json'
     );
   });
 

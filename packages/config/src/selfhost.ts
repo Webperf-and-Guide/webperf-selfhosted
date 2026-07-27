@@ -1,9 +1,6 @@
 import { z } from 'zod';
 import {
-  defaultRegionIdsJson,
   defaultSelfhostProbeBaseUrl,
-  defaultSelfhostProbeBaseUrlsJson,
-  defaultSelfhostRegionCodesJson,
   defaultSelfhostRegionId,
   emptyStringToUndefined
 } from './shared';
@@ -45,12 +42,6 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_ADMIN_TOKEN_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
   SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
   SELFHOST_INTERNAL_SECRET_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
-  SELFHOST_ACTIVE_REGION_CODES_JSON: z.string().default(defaultSelfhostRegionCodesJson),
-  SELFHOST_REGION_IDS_JSON: z.string().default(defaultRegionIdsJson),
-  SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
-  // Issue #14 Phase 1 single-region runtime identity and probe origin.
-  // Added in parallel with the legacy JSON map above; PR2 of Phase 1 removes
-  // the legacy map and makes this the only configuration path.
   SELFHOST_REGION_ID: runtimeRegionIdSchema.default(defaultSelfhostRegionId),
   SELFHOST_REGION_LABEL: emptyStringToUndefined(runtimeRegionLabelSchema),
   SELFHOST_PROBE_BASE_URL: z.string().url().default(defaultSelfhostProbeBaseUrl),
@@ -132,9 +123,6 @@ export const parseSelfhostApiVars = (
     SELFHOST_ADMIN_TOKEN_NEXT: input.SELFHOST_ADMIN_TOKEN_NEXT,
     SELFHOST_INTERNAL_SECRET: input.SELFHOST_INTERNAL_SECRET,
     SELFHOST_INTERNAL_SECRET_NEXT: input.SELFHOST_INTERNAL_SECRET_NEXT,
-    SELFHOST_ACTIVE_REGION_CODES_JSON: input.SELFHOST_ACTIVE_REGION_CODES_JSON,
-    SELFHOST_REGION_IDS_JSON: input.SELFHOST_REGION_IDS_JSON,
-    SELFHOST_PROBE_BASE_URLS_JSON: input.SELFHOST_PROBE_BASE_URLS_JSON,
     SELFHOST_REGION_ID: input.SELFHOST_REGION_ID,
     SELFHOST_REGION_LABEL: input.SELFHOST_REGION_LABEL,
     SELFHOST_PROBE_BASE_URL: input.SELFHOST_PROBE_BASE_URL,

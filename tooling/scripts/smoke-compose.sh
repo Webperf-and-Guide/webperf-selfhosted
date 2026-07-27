@@ -180,16 +180,18 @@ done
 
 # Final check — if console still unreachable, dump diagnostics before failing.
 if ! curl -fsS "${console_url}/" >/dev/null 2>&1; then
-  echo "=== CONSOLE UNREACHABLE — diagnostics ==="
-  echo "--- compose port console 3000 ---"
-  compose "${profile_args[@]}" port console 3000 2>&1 || true
-  echo "--- console container logs ---"
-  compose "${profile_args[@]}" logs --no-log-prefix --tail 30 console 2>&1 || true
-  echo "--- api container logs ---"
-  compose "${profile_args[@]}" logs --no-log-prefix --tail 15 api 2>&1 || true
-  echo "--- docker ps ---"
-  docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' 2>&1 || true
-  echo "=== END diagnostics ==="
+  echo "=== CONSOLE UNREACHABLE — diagnostics ===" >&2
+  echo "--- compose port console 3000 ---" >&2
+  compose "${profile_args[@]}" port console 3000 >&2 2>&1 || true
+  echo "--- docker ps ---" >&2
+  docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' >&2 2>&1 || true
+  echo "--- console container logs (last 30) ---" >&2
+  docker logs --tail 30 "$(compose "${profile_args[@]}" ps -q console 2>/dev/null)" >&2 2>&1 || true
+  echo "--- api container logs (last 15) ---" >&2
+  docker logs --tail 15 "$(compose "${profile_args[@]}" ps -q api 2>/dev/null)" >&2 2>&1 || true
+  echo "--- docker exec console curl localhost:3000 ---" >&2
+  docker exec "$(compose "${profile_args[@]}" ps -q console 2>/dev/null)" curl -sS http://127.0.0.1:3000/ >&2 2>&1 || echo "(exec failed)" >&2
+  echo "=== END diagnostics ===" >&2
   echo "Console failed to respond at ${console_url}" >&2
   exit 1
 fi

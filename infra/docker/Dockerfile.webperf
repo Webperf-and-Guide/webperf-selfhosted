@@ -27,7 +27,9 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 # Console is the only app that needs a build step (vite → SvelteKit adapter-node).
-RUN bun run --cwd apps/console build
+# Run svelte-kit sync first because .dockerignore excludes **/.svelte-kit and
+# bun install's prepare hook ran before the source was copied.
+RUN bun run --cwd apps/console prepare && bun run --cwd apps/console build
 
 # --- Stage 2: runtime ---
 FROM oven/bun:1.3.13

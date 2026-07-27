@@ -16,9 +16,6 @@ Treat this document as the current freeze line:
 - `GET /v1/route-groups`
 - `POST /v1/route-groups`
 - `GET /v1/route-groups/:routeGroupId`
-- `GET /v1/region-sets`
-- `POST /v1/region-sets`
-- `GET /v1/region-sets/:regionSetId`
 - `GET /v1/checks`
 - `POST /v1/checks`
 - `GET /v1/checks/:checkId`
@@ -60,8 +57,12 @@ The older self-host aliases remain supported:
 
 - `/v1/properties`
 - `/v1/route-sets`
-- `/v1/region-packs`
 - `/v1/check-profiles`
+
+`/v1/region-packs` and `/v1/region-sets` were removed in Phase 1 of issue #14
+and now return `410 Gone`. One standalone deployment measures from one fixed
+runtime location reported by `GET /v1/regions`, so there is no region-set
+resource to migrate to.
 
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
 Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
@@ -102,7 +103,7 @@ Current stabilization focus is on keeping this list contract consistent across:
 
 - `checks`
 - `checks/:checkId/runs`
-- compatibility aliases for `properties`, `route-sets`, `region-packs`, and `check-profiles`
+- compatibility aliases for `properties`, `route-sets`, and `check-profiles`
 - `comparisons`
 - `exports`
 - `analyses`

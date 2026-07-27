@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import {
   defaultRegionIdsJson,
+  defaultSelfhostProbeBaseUrl,
   defaultSelfhostProbeBaseUrlsJson,
   defaultSelfhostRegionCodesJson,
+  defaultSelfhostRegionId,
   emptyStringToUndefined
 } from './shared';
+import { runtimeRegionIdSchema, runtimeRegionLabelSchema } from '@webperf/contracts';
 
 export const defaultSelfhostMaxArtifactBytes = 25_000_000;
 export const maximumSelfhostMaxArtifactBytes = 250_000_000;
@@ -45,6 +48,12 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_ACTIVE_REGION_CODES_JSON: z.string().default(defaultSelfhostRegionCodesJson),
   SELFHOST_REGION_IDS_JSON: z.string().default(defaultRegionIdsJson),
   SELFHOST_PROBE_BASE_URLS_JSON: z.string().default(defaultSelfhostProbeBaseUrlsJson),
+  // Issue #14 Phase 1 single-region runtime identity and probe origin.
+  // Added in parallel with the legacy JSON map above; PR2 of Phase 1 removes
+  // the legacy map and makes this the only configuration path.
+  SELFHOST_REGION_ID: runtimeRegionIdSchema.default(defaultSelfhostRegionId),
+  SELFHOST_REGION_LABEL: emptyStringToUndefined(runtimeRegionLabelSchema),
+  SELFHOST_PROBE_BASE_URL: z.string().url().default(defaultSelfhostProbeBaseUrl),
   SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
   SELFHOST_MAX_TARGET_ATTEMPTS: z.preprocess(
     (value) => value ?? '3',
@@ -69,6 +78,41 @@ export const selfhostApiEnvSchema = z.object({
       });
     }
   }
+
+  // SELFHOST_PROBE_BASE_URL must be a credential-free HTTP(S) origin. The
+  // executor appends the signed /measure path itself, matching the existing
+  // contract for the legacy SELFHOST_PROBE_BASE_URLS_JSON entries.
+  // Zod's `.url()` regex and the WHATWG URL constructor are not perfectly
+  // aligned, so a value can pass the schema and still throw here; guard it
+  // the same way the executor parser does to keep the failure a clean
+  // ZodIssue instead of an uncaught exception during parse.
+  let probeBaseUrl: URL | null = null;
+  try {
+    probeBaseUrl = new URL(config.SELFHOST_PROBE_BASE_URL);
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message: 'Probe base URL is invalid',
+      path: ['SELFHOST_PROBE_BASE_URL']
+    });
+  }
+  if (
+    probeBaseUrl
+    && (
+      !['http:', 'https:'].includes(probeBaseUrl.protocol)
+      || probeBaseUrl.username
+      || probeBaseUrl.password
+      || probeBaseUrl.pathname !== '/'
+      || probeBaseUrl.search
+      || probeBaseUrl.hash
+    )
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Probe base URL must be a credential-free HTTP(S) origin without path, query, or fragment',
+      path: ['SELFHOST_PROBE_BASE_URL']
+    });
+  }
 });
 
 export const parseSelfhostApiVars = (
@@ -91,6 +135,9 @@ export const parseSelfhostApiVars = (
     SELFHOST_ACTIVE_REGION_CODES_JSON: input.SELFHOST_ACTIVE_REGION_CODES_JSON,
     SELFHOST_REGION_IDS_JSON: input.SELFHOST_REGION_IDS_JSON,
     SELFHOST_PROBE_BASE_URLS_JSON: input.SELFHOST_PROBE_BASE_URLS_JSON,
+    SELFHOST_REGION_ID: input.SELFHOST_REGION_ID,
+    SELFHOST_REGION_LABEL: input.SELFHOST_REGION_LABEL,
+    SELFHOST_PROBE_BASE_URL: input.SELFHOST_PROBE_BASE_URL,
     SELFHOST_BROWSER_AUDIT_BASE_URL: input.SELFHOST_BROWSER_AUDIT_BASE_URL,
     SELFHOST_MAX_TARGET_ATTEMPTS: input.SELFHOST_MAX_TARGET_ATTEMPTS
   });

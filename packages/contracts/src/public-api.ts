@@ -13,6 +13,16 @@ import { regionCodes, regionCodeSchema } from './regions';
 
 export { regionCodes, regionCodeSchema } from './regions';
 export type { RegionCode } from './regions';
+export {
+  runtimeRegionIdSchema,
+  runtimeRegionLabelSchema,
+  runtimeLocationSchema
+} from './regions';
+export type {
+  RuntimeRegionId,
+  RuntimeRegionLabel,
+  RuntimeLocation
+} from './regions';
 
 export const targetStatusValues = [
   'queued',

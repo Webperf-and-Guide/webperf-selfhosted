@@ -82,14 +82,30 @@ export const selfhostApiEnvSchema = z.object({
   // SELFHOST_PROBE_BASE_URL must be a credential-free HTTP(S) origin. The
   // executor appends the signed /measure path itself, matching the existing
   // contract for the legacy SELFHOST_PROBE_BASE_URLS_JSON entries.
-  const probeBaseUrl = new URL(config.SELFHOST_PROBE_BASE_URL);
+  // Zod's `.url()` regex and the WHATWG URL constructor are not perfectly
+  // aligned, so a value can pass the schema and still throw here; guard it
+  // the same way the executor parser does to keep the failure a clean
+  // ZodIssue instead of an uncaught exception during parse.
+  let probeBaseUrl: URL | null = null;
+  try {
+    probeBaseUrl = new URL(config.SELFHOST_PROBE_BASE_URL);
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message: 'Probe base URL is invalid',
+      path: ['SELFHOST_PROBE_BASE_URL']
+    });
+  }
   if (
-    !['http:', 'https:'].includes(probeBaseUrl.protocol)
-    || probeBaseUrl.username
-    || probeBaseUrl.password
-    || probeBaseUrl.pathname !== '/'
-    || probeBaseUrl.search
-    || probeBaseUrl.hash
+    probeBaseUrl
+    && (
+      !['http:', 'https:'].includes(probeBaseUrl.protocol)
+      || probeBaseUrl.username
+      || probeBaseUrl.password
+      || probeBaseUrl.pathname !== '/'
+      || probeBaseUrl.search
+      || probeBaseUrl.hash
+    )
   ) {
     context.addIssue({
       code: 'custom',

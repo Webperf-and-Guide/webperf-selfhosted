@@ -39,12 +39,13 @@ export type RuntimeRegionLabel = z.infer<typeof runtimeRegionLabelSchema>;
  * Resolved runtime location for one deployment.
  *
  * `regionId` is the stable serialized identifier; `label` is the optional
- * display name. Result provenance records this object so historical reads
- * keep their original region values even after a future reconfiguration.
+ * display name that consumers resolve to the region id when omitted. Result
+ * provenance records this object so historical reads keep their original
+ * region values even after a future reconfiguration.
  */
 export const runtimeLocationSchema = z.object({
   regionId: runtimeRegionIdSchema,
-  label: runtimeRegionLabelSchema
+  label: runtimeRegionLabelSchema.optional()
 });
 export type RuntimeLocation = z.infer<typeof runtimeLocationSchema>;
 

@@ -1326,7 +1326,7 @@ const routeRequest = async (request: Request) => {
       {
         ok: false,
         message:
-          'Use /health, /v1/capabilities, /v1/sites, /v1/route-groups, /v1/region-sets, /v1/checks, /v1/checks/:checkId/runs, /v1/runs/:runId, /v1/comparisons, /v1/exports, /v1/analyses, or /v1/browser-audits'
+          'Use /health, /v1/capabilities, /v1/sites, /v1/route-groups, /v1/checks, /v1/checks/:checkId/runs, /v1/runs/:runId, /v1/comparisons, /v1/exports, /v1/analyses, or /v1/browser-audits'
       },
       { status: 404 }
     );
@@ -3666,7 +3666,9 @@ function json(data: unknown, init: ResponseInit = {}) {
 const compatibilityRouteMappings = [
   { legacy: '/v1/properties', canonical: '/v1/sites' },
   { legacy: '/v1/route-sets', canonical: '/v1/route-groups' },
-  { legacy: '/v1/region-packs', canonical: '/v1/region-sets' },
+  // Phase 1 of issue #14: /v1/region-packs and /v1/region-sets were both
+  // removed and now return 410 Gone. No successor deprecation header is
+  // attached because there is no canonical region-set surface to migrate to.
   { legacy: '/v1/check-profiles', canonical: '/v1/checks' }
 ] as const;
 

@@ -238,7 +238,7 @@ export const publicApiPaths = [
   '/v1/scheduler/dispatch'
 ] as const;
 
-export const createLatencyJobSchema = z.object({
+export const createLatencyJobSchema = z.strictObject({
   url: z.string().url(),
   note: z.string().max(200).optional(),
   request: customRequestConfigSchema.optional(),
@@ -246,7 +246,9 @@ export const createLatencyJobSchema = z.object({
   // Managed-cloud bot protection such as Turnstile is intentionally not an OSS contract field.
   // Region selection was removed in Phase 1 of issue #14: one standalone
   // deployment measures from one fixed runtime location, stamped onto every
-  // result as provenance at execution time.
+  // result as provenance at execution time. strictObject rejects legacy
+  // `regions` payloads so old clients fail fast with a clear validation error
+  // instead of silently dropping the field.
   monitorPolicy: monitorPolicySchema.optional()
 });
 export type CreateLatencyJobInput = z.infer<typeof createLatencyJobSchema>;

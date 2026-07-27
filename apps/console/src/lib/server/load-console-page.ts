@@ -28,7 +28,10 @@ export const loadConsolePage = async ({ fetch }: { fetch: LoaderFetch }): Promis
   const savedChecks = await loadSavedChecks(fetch);
 
   return {
-    runtimeLocation: regionsPayload?.runtimeLocation ?? { regionId: 'local' },
+    // When the regions endpoint is unreachable we surface an empty runtime
+    // location instead of fabricating `local`, so the UI can distinguish a
+    // genuine configuration from a failed load.
+    runtimeLocation: regionsPayload?.runtimeLocation ?? { regionId: '' },
     capabilities: {
       browserAuditDirectRun: Boolean(capabilitiesPayload?.features?.browserAuditDirectRun)
     },

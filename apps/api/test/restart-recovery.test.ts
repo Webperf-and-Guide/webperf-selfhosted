@@ -55,7 +55,7 @@ describe('durable execution restart recovery', () => {
         authorization: `Bearer ${testAdminToken}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ url: 'https://example.com/', regions: ['tokyo'] })
+      body: JSON.stringify({ url: 'https://example.com/' })
     });
     expect(createJobResponse.status).toBe(201);
     const createdJob = await createJobResponse.json() as { job: { id: string } };

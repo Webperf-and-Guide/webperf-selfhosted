@@ -186,7 +186,9 @@ services:
       - ALL
     environment:
       PROBE_LISTEN_ADDR: "0.0.0.0:8080"
-      REGION_ID: "${PROBE_REGION_ID:-local}"
+      # The probe reports the same region identity as the deployment so its
+      # measurements match the runtime location stamped by the API/executor.
+      REGION_ID: "${SELFHOST_REGION_ID:-local}"
       PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET in infra/docker-compose/.env}"
       PROBE_SHARED_SECRET_NEXT: "${PROBE_SHARED_SECRET_NEXT:-}"
     expose:

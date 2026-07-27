@@ -5,7 +5,7 @@ import {
   runScheduler,
   SchedulerDispatchError,
   type SchedulerLogger
-} from './scheduler';
+} from '../src/scheduler-loop';
 
 const dispatchPayload = {
   dispatchedAt: '2026-07-22T00:00:00.000Z',

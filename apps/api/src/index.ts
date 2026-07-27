@@ -141,6 +141,12 @@ import {
 import { authorizeApiRequest } from './auth';
 import { describeSafeError } from './diagnostics';
 import {
+  describeSchedulerError,
+  dispatchScheduledChecks,
+  runScheduler,
+  type SchedulerLogger
+} from '@webperf/domain-core';
+import {
   isSensitiveHeaderName,
   redactJsonResponse,
   redactSensitiveData,
@@ -165,6 +171,8 @@ type SelfhostRuntime = {
   runtimeLocation: RuntimeLocationReport;
   probeBaseUrl: string;
   maxTargetAttempts: number;
+  schedulerMode: 'embedded' | 'external' | 'disabled';
+  schedulerPollIntervalSeconds: number;
 };
 
 type MutableTarget = LatencyJobTarget;
@@ -1366,9 +1374,64 @@ console.log(
     probeBaseUrl: runtime.probeBaseUrl,
     databasePath: runtime.databasePath,
     artifactsPath: runtime.artifactsPath,
-    retainedDays: runtime.retentionDays
+    retainedDays: runtime.retentionDays,
+    schedulerMode: runtime.schedulerMode
   })
 );
+
+// Phase 3 of issue #14: when schedulerMode is 'embedded', run the scheduler
+// dispatch loop inside the API process so the default standalone topology
+// needs no separate scheduler container. The loop calls the same internal
+// dispatch endpoint as the standalone scheduler, using loopback origin and
+// the internal secret already present in the API process.
+if (runtime.schedulerMode === 'embedded') {
+  const schedulerLogger: SchedulerLogger = {
+    info: (event) => console.log(JSON.stringify({
+      service: 'webperf-api',
+      component: 'embedded-scheduler',
+      level: 'info',
+      ...event
+    })),
+    error: (event) => console.error(JSON.stringify({
+      service: 'webperf-api',
+      component: 'embedded-scheduler',
+      level: 'error',
+      ...event
+    }))
+  };
+
+  const schedulerAbort = new AbortController();
+  const schedulerPollIntervalMs = runtime.schedulerPollIntervalSeconds * 1_000;
+
+  schedulerLogger.info({
+    event: 'embedded_scheduler_started',
+    pollIntervalSeconds: runtime.schedulerPollIntervalSeconds
+  });
+
+  runScheduler({
+    dispatch: (signal) => dispatchScheduledChecks({
+      apiBaseUrl: `http://127.0.0.1:${runtime.port}`,
+      internalSecret: runtime.internalSecret,
+      signal
+    }),
+    pollIntervalMs: schedulerPollIntervalMs,
+    signal: schedulerAbort.signal,
+    logger: schedulerLogger
+  }).catch((error) => {
+    schedulerLogger.error({
+      event: 'embedded_scheduler_fatal',
+      ...describeSchedulerError(error)
+    });
+  });
+
+  const stopEmbeddedScheduler = (signal: NodeJS.Signals) => {
+    if (!schedulerAbort.signal.aborted) {
+      schedulerAbort.abort(new Error(`Embedded scheduler shutdown on ${signal}`));
+    }
+  };
+  process.once('SIGINT', stopEmbeddedScheduler);
+  process.once('SIGTERM', stopEmbeddedScheduler);
+}
 
 async function handleCreateJob(request: Request) {
   const body = await parseJsonBody<CreateLatencyJobInput>(request);
@@ -3553,7 +3616,9 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
       label: parsed.SELFHOST_REGION_LABEL
     }),
     probeBaseUrl: parsed.SELFHOST_PROBE_BASE_URL,
-    maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS
+    maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS,
+    schedulerMode: parsed.SELFHOST_SCHEDULER_MODE,
+    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   };
 }
 

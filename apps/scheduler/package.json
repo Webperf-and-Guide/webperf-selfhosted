@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@webperf/config": "workspace:*",
-    "@webperf/contracts": "workspace:*"
+    "@webperf/contracts": "workspace:*",
+    "@webperf/domain-core": "workspace:*"
   }
 }

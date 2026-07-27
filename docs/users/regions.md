@@ -20,8 +20,10 @@ SELFHOST_PROBE_BASE_URL=http://probe:8080
 - `SELFHOST_REGION_ID` is the stable serialized identifier. It must be 1–64
   lowercase ASCII letters, digits, or hyphens, starting and ending with a
   letter or digit. The default `local` makes no city claim.
-- `SELFHOST_REGION_LABEL` is the optional display name shown in the console
-  and reports. It defaults to the region id when omitted.
+- `SELFHOST_REGION_LABEL` is the optional display name shown on the Console
+  Runtime Location card. It defaults to the region id when omitted. Persisted
+  targets, Browser Audits, and comparison reports carry the serialized region
+  id, not the label.
 - `SELFHOST_PROBE_BASE_URL` is the credential-free HTTP(S) origin of the
   Rust probe. The executor appends the signed `/measure` path itself.
 
@@ -52,6 +54,12 @@ measure from a remote location instead:
 4. Set `SELFHOST_PROBE_BASE_URL` to the probe's HTTPS origin on the API and
    executor.
 5. Set `SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP=false` for remote probes.
+6. Recreate the API and executor containers so they pick up the new
+   environment:
+
+   ```sh
+   docker compose --env-file .env -f compose.yml up -d --force-recreate api executor
+   ```
 
 The executor appends the signed `/measure` path itself; configure only an
 origin, without credentials, path, query, or fragment.

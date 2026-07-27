@@ -23,7 +23,6 @@ import type {
   CreateBrowserAuditInput,
   CreateLatencyJobInput,
   CreatePropertyInput,
-  CreateRegionPackInput,
   CreateRouteSetInput,
   ComparisonListResponse,
   JobListResponse,
@@ -34,9 +33,6 @@ import type {
   ListQuery,
   Property,
   PropertyListResponse,
-  RegionCode,
-  RegionPack,
-  RegionPackListResponse,
   ReportExportFormat,
   ExportResource,
   ExportListResponse,
@@ -48,7 +44,6 @@ import type {
   SetCheckProfileBaselineInput,
   UpdateCheckProfileInput,
   UpdatePropertyInput,
-  UpdateRegionPackInput,
   UpdateRouteSetInput
 } from '@webperf/contracts';
 import {
@@ -76,7 +71,6 @@ import {
   createExportInputSchema,
   createLatencyJobSchema,
   createPropertySchema,
-  createRegionPackSchema,
   createRouteSetSchema,
   exportListResponseSchema,
   exportResourceSchema,
@@ -98,7 +92,6 @@ import {
   listQuerySchema,
   propertyListResponseSchema,
   comparisonResourceSchema,
-  regionPackListResponseSchema,
   reportExportFormatSchema,
   routeSetListResponseSchema,
   setCheckProfileBaselineSchema,
@@ -106,8 +99,11 @@ import {
   publicContract,
   updateCheckProfileSchema,
   updatePropertySchema,
-  updateRegionPackSchema,
-  updateRouteSetSchema
+  updateRouteSetSchema,
+  runtimeLocationReportSchema,
+  regionsResponseSchema,
+  type RuntimeLocationReport,
+  type RuntimeRegionId
 } from '@webperf/contracts';
 import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi';
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
@@ -121,10 +117,8 @@ import { RPCHandler } from '@orpc/server/fetch';
 import { isDeepStrictEqual } from 'node:util';
 import {
   applyListQuery,
-  buildRegionAvailabilityList,
-  dedupeRegions,
   parseListQueryFromSearchParams,
-  resolveRequestedRegions,
+  resolveRuntimeLocation,
   validateMeasurementUrl
 } from '@webperf/domain-core';
 import { parseSelfhostApiVars } from '@webperf/config/selfhost';
@@ -168,9 +162,8 @@ type SelfhostRuntime = {
   internalSecret: string;
   internalSecretNext?: string;
   browserAuditBaseUrl?: string;
-  activeRegionCodes: RegionCode[];
-  regionIds: Partial<Record<RegionCode, string>>;
-  probeBaseUrls: Partial<Record<RegionCode, string>>;
+  runtimeLocation: RuntimeLocationReport;
+  probeBaseUrl: string;
   maxTargetAttempts: number;
 };
 
@@ -197,50 +190,6 @@ type CreatedProfileJob = {
   job: MutableJob;
 };
 
-const regionCodeSet = new Set<string>([
-  'ashburn',
-  'atlanta',
-  'boston',
-  'chicago',
-  'dallas',
-  'denver',
-  'losangeles',
-  'miami',
-  'newyork',
-  'sanjose',
-  'seattle',
-  'toronto',
-  'amsterdam',
-  'athens',
-  'bucharest',
-  'copenhagen',
-  'frankfurt',
-  'london',
-  'madrid',
-  'milan',
-  'paris',
-  'prague',
-  'stockholm',
-  'vienna',
-  'warsaw',
-  'zagreb',
-  'bangkok',
-  'hongkong',
-  'istanbul',
-  'jakarta',
-  'kualalumpur',
-  'manila',
-  'singapore',
-  'telaviv',
-  'tokyo',
-  'bogota',
-  'mexicocity',
-  'saopaulo',
-  'sydney',
-  'johannesburg',
-  'lagos'
-]);
-
 export const runtime = parseRuntime(process.env);
 export const repository = createSqliteJobRepository({
   databasePath: runtime.databasePath,
@@ -256,8 +205,8 @@ await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorage
 const buildHealthPayload = () => ({
   service: 'webperf-api',
   ok: true,
-  activeRegions: runtime.activeRegionCodes,
-  configuredProbeRegions: Object.keys(runtime.probeBaseUrls),
+  runtimeLocation: runtime.runtimeLocation,
+  probeBaseUrl: runtime.probeBaseUrl,
   maxTargetAttempts: runtime.maxTargetAttempts,
   storage: {
     kind: 'sqlite' as const,
@@ -274,7 +223,6 @@ const buildHealthPayload = () => ({
   savedConfigs: {
     properties: repository.listProperties().length,
     routeSets: repository.listRouteSets().length,
-    regionPacks: repository.listRegionPacks().length,
     checkProfiles: repository.listCheckProfiles().length,
     scheduledProfiles: repository
       .listCheckProfiles()
@@ -347,20 +295,6 @@ const buildRouteSetListResponse = (query?: ListQuery): RouteSetListResponse =>
     ]).pageInfo
   });
 
-const buildRegionPackListResponse = (query?: ListQuery): RegionPackListResponse =>
-  regionPackListResponseSchema.parse({
-    regionPacks: applyListQuery(repository.listRegionPacks(), query, (regionPack) => [
-      regionPack.id,
-      regionPack.name,
-      ...regionPack.regions
-    ]).items,
-    pageInfo: applyListQuery(repository.listRegionPacks(), query, (regionPack) => [
-      regionPack.id,
-      regionPack.name,
-      ...regionPack.regions
-    ]).pageInfo
-  });
-
 const buildCheckProfileListResponse = (query?: ListQuery): CheckProfileListResponse =>
   checkProfileListResponseSchema.parse({
     checkProfiles: applyListQuery(repository.listCheckProfiles(), query, (profile) => [
@@ -368,16 +302,14 @@ const buildCheckProfileListResponse = (query?: ListQuery): CheckProfileListRespo
       profile.name,
       profile.note,
       profile.propertyId,
-      profile.routeSetId,
-      profile.regionPackId
+      profile.routeSetId
     ]).items,
     pageInfo: applyListQuery(repository.listCheckProfiles(), query, (profile) => [
       profile.id,
       profile.name,
       profile.note,
       profile.propertyId,
-      profile.routeSetId,
-      profile.regionPackId
+      profile.routeSetId
     ]).pageInfo
   });
 
@@ -389,7 +321,7 @@ const buildJobListResponse = (query?: ListQuery): JobListResponse =>
       job.status,
       job.note,
       job.requesterIp,
-      ...job.selectedRegions
+      job.region
     ]).items,
     pageInfo: applyListQuery(repository.listJobs(), query, (job) => [
       job.id,
@@ -397,7 +329,7 @@ const buildJobListResponse = (query?: ListQuery): JobListResponse =>
       job.status,
       job.note,
       job.requesterIp,
-      ...job.selectedRegions
+      job.region
     ]).pageInfo
   });
 
@@ -517,14 +449,6 @@ const toRouteGroupsPayload = (query?: ListQuery) => {
   const payload = buildRouteSetListResponse(query);
   return {
     routeGroups: payload.routeSets,
-    pageInfo: payload.pageInfo
-  };
-};
-
-const toRegionSetsPayload = (query?: ListQuery) => {
-  const payload = buildRegionPackListResponse(query);
-  return {
-    regionSets: payload.regionPacks,
     pageInfo: payload.pageInfo
   };
 };
@@ -825,7 +749,7 @@ const routeRequest = async (request: Request) => {
 
     if (pathname === '/v1/regions' && request.method === 'GET') {
       return json({
-        regions: getRegionAvailability()
+        runtimeLocation: getRuntimeLocationReport()
       });
     }
 
@@ -887,27 +811,20 @@ const routeRequest = async (request: Request) => {
       return json({ routeGroup: (payload as { routeSet: RouteSet }).routeSet }, { status: response.status });
     }
 
-    if (pathname === '/v1/region-packs' && request.method === 'GET') {
-      return json(buildRegionPackListResponse(parseListQueryFromSearchParams(url.searchParams)));
-    }
-
-    if (pathname === '/v1/region-packs' && request.method === 'POST') {
-      return handleCreateRegionPack(request);
-    }
-
-    if (pathname === '/v1/region-sets' && request.method === 'GET') {
-      return json(toRegionSetsPayload(parseListQueryFromSearchParams(url.searchParams)));
-    }
-
-    if (pathname === '/v1/region-sets' && request.method === 'POST') {
-      const response = await handleCreateRegionPack(request);
-      const payload = await readResponsePayload(response);
-
-      if (!response.ok) {
-        return json(payload, { status: response.status });
-      }
-
-      return json({ regionSet: (payload as { regionPack: RegionPack }).regionPack }, { status: response.status });
+    // Phase 1 of issue #14 removed the multi-region Region Pack / Region Set
+    // resources. One standalone deployment owns a single runtime location
+    // reported via /v1/regions. These routes now return 410 Gone so stale
+    // clients fail fast instead of receiving a silent fallback.
+    if (
+      (pathname === '/v1/region-packs' || pathname === '/v1/region-sets')
+      && (request.method === 'GET' || request.method === 'POST')
+    ) {
+      return json(
+        {
+          error: 'Region packs and region sets were removed in Phase 1 of issue #14. One standalone deployment measures from one runtime location reported by GET /v1/regions.'
+        },
+        { status: 410 }
+      );
     }
 
     if (pathname === '/v1/check-profiles' && request.method === 'GET') {
@@ -1143,43 +1060,16 @@ const routeRequest = async (request: Request) => {
       }
     }
 
-    const regionPackMatch = pathname.match(/^\/v1\/region-packs\/([^/]+)$/);
-    if (regionPackMatch?.[1]) {
-      if (request.method === 'GET') {
-        const regionPack = repository.getRegionPack(regionPackMatch[1]);
-        return regionPack ? json(regionPack) : json({ error: 'Region pack not found' }, { status: 404 });
-      }
-
-      if (request.method === 'PUT') {
-        return handleUpdateRegionPack(regionPackMatch[1], request);
-      }
-
-      if (request.method === 'DELETE') {
-        return handleDeleteRegionPack(regionPackMatch[1]);
-      }
-    }
-
-    const regionSetMatch = pathname.match(/^\/v1\/region-sets\/([^/]+)$/);
-    if (regionSetMatch?.[1]) {
-      if (request.method === 'GET') {
-        const regionSet = repository.getRegionPack(regionSetMatch[1]);
-        return regionSet ? json(regionSet) : json({ error: 'Region set not found' }, { status: 404 });
-      }
-
-      if (request.method === 'PATCH') {
-        const response = await handleUpdateRegionPack(regionSetMatch[1], request);
-        const payload = await readResponsePayload(response);
-
-        if (!response.ok) {
-          return json(payload, { status: response.status });
-        }
-
-        return json({ regionSet: (payload as { regionPack: RegionPack }).regionPack }, { status: response.status });
-      }
-
-      if (request.method === 'DELETE') {
-        return handleDeleteRegionPack(regionSetMatch[1]);
-      }
+    // Phase 1 of issue #14: per-id Region Pack / Region Set routes return
+    // 410 Gone. The collection routes above share the same response.
+    const regionPackIdMatch = pathname.match(/^\/v1\/(?:region-packs|region-sets)\/([^/]+)$/);
+    if (regionPackIdMatch?.[1]) {
+      return json(
+        {
+          error: 'Region packs and region sets were removed in Phase 1 of issue #14.'
+        },
+        { status: 410 }
+      );
     }
 
     const checkProfileBaselineMatch = pathname.match(/^\/v1\/check-profiles\/([^/]+)\/baseline$/);
@@ -1472,7 +1362,8 @@ console.log(
   JSON.stringify({
     service: 'webperf-api',
     listeningOn: `http://${runtime.host}:${runtime.port}`,
-    activeRegions: runtime.activeRegionCodes,
+    runtimeLocation: runtime.runtimeLocation,
+    probeBaseUrl: runtime.probeBaseUrl,
     databasePath: runtime.databasePath,
     artifactsPath: runtime.artifactsPath,
     retainedDays: runtime.retentionDays
@@ -1503,7 +1394,6 @@ async function handleCreateJob(request: Request) {
   try {
     job = createJobRecord({
       url: parsed.data.url,
-      regions: parsed.data.regions,
       note: parsed.data.note ?? null,
       requestConfig: normalizeCustomRequestConfig(parsed.data.request),
       monitorPolicy: normalizeMonitorPolicy(parsed.data.monitorPolicy),
@@ -2105,10 +1995,6 @@ async function handleCreateRouteSet(request: Request) {
   return handleUpsertRouteSet(request);
 }
 
-async function handleCreateRegionPack(request: Request) {
-  return handleUpsertRegionPack(request);
-}
-
 async function handleCreateCheckProfile(request: Request) {
   return handleUpsertCheckProfile(request);
 }
@@ -2131,16 +2017,6 @@ async function handleUpdateRouteSet(routeSetId: string, request: Request) {
   }
 
   return handleUpsertRouteSet(request, routeSet);
-}
-
-async function handleUpdateRegionPack(regionPackId: string, request: Request) {
-  const regionPack = repository.getRegionPack(regionPackId);
-
-  if (!regionPack) {
-    return json({ error: 'Region pack not found' }, { status: 404 });
-  }
-
-  return handleUpsertRegionPack(request, regionPack);
 }
 
 async function handleUpdateCheckProfile(profileId: string, request: Request) {
@@ -2202,31 +2078,6 @@ function handleDeleteRouteSet(routeSetId: string) {
   }
 
   repository.deleteRouteSet(routeSet.id);
-  return json({ ok: true }, { status: 200 });
-}
-
-function handleDeleteRegionPack(regionPackId: string) {
-  const regionPack = repository.getRegionPack(regionPackId);
-
-  if (!regionPack) {
-    return json({ error: 'Region pack not found' }, { status: 404 });
-  }
-
-  const dependentProfiles = repository.listCheckProfiles().filter((profile) => profile.regionPackId === regionPack.id);
-
-  if (dependentProfiles.length > 0) {
-    return json(
-      {
-        error: 'Delete or reassign check profiles that use this region pack first.',
-        dependencies: {
-          checkProfiles: dependentProfiles.length
-        }
-      },
-      { status: 409 }
-    );
-  }
-
-  repository.deleteRegionPack(regionPack.id);
   return json({ ok: true }, { status: 200 });
 }
 
@@ -2451,55 +2302,6 @@ async function handleUpsertRouteSet(request: Request, existing?: RouteSet) {
   }
 }
 
-async function handleUpsertRegionPack(request: Request, existing?: RegionPack) {
-  const body = await parseJsonBody<CreateRegionPackInput | UpdateRegionPackInput>(request);
-
-  if (!body.ok) {
-    return body.response;
-  }
-
-  const parsed = (existing ? updateRegionPackSchema : createRegionPackSchema).safeParse(body.data);
-
-  if (!parsed.success) {
-    return json(
-      {
-        error: 'Invalid region pack payload',
-        issues: parsed.error.flatten()
-      },
-      { status: 400 }
-    );
-  }
-
-  try {
-    const now = new Date().toISOString();
-    const name = requireTrimmedText(parsed.data.name, 'Region pack name');
-    const regions = resolveRequestedRegions({
-      requestedRegions: dedupeRegions(parsed.data.regions),
-      availability: getRegionAvailability(),
-      fallbackRegions: runtime.activeRegionCodes
-    });
-    ensureUniqueRegionPack({ id: existing?.id ?? null, name });
-
-    const regionPack: RegionPack = {
-      id: existing?.id ?? `regionpack_${crypto.randomUUID()}`,
-      name,
-      regions,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    };
-
-    repository.saveRegionPack(regionPack);
-    return json({ regionPack }, { status: existing ? 200 : 201 });
-  } catch (error) {
-    return json(
-      {
-        error: error instanceof Error ? error.message : 'Region pack is invalid'
-      },
-      { status: error instanceof DuplicateEntityError ? 409 : 400 }
-    );
-  }
-}
-
 async function handleUpsertCheckProfile(request: Request, existing?: CheckProfile) {
   const body = await parseJsonBody<CreateCheckProfileInput | UpdateCheckProfileInput>(request);
 
@@ -2529,11 +2331,6 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     return json({ error: 'Route set not found for property' }, { status: 404 });
   }
 
-  const regionPack = repository.getRegionPack(parsed.data.regionPackId);
-  if (!regionPack) {
-    return json({ error: 'Region pack not found' }, { status: 404 });
-  }
-
   try {
     const now = new Date().toISOString();
     const name = requireTrimmedText(parsed.data.name, 'Check profile name');
@@ -2551,7 +2348,6 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
       id: existing?.id ?? `profile_${crypto.randomUUID()}`,
       propertyId: property.id,
       routeSetId: routeSet.id,
-      regionPackId: regionPack.id,
       name,
       note,
       request: requestConfig,
@@ -2559,7 +2355,7 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
       alerts,
       browserAuditPolicy: existing?.browserAuditPolicy ?? null,
       schedule: buildProfileSchedule(existing, parsed.data.scheduleIntervalMinutes, now),
-      baseline: resolveUpdatedProfileBaseline(existing, routeSet.id, regionPack.id),
+      baseline: resolveUpdatedProfileBaseline(existing, routeSet.id),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -2878,7 +2674,9 @@ async function handleCreateBrowserAudit(request: Request) {
   const browserAudit = browserAuditResourceSchema.parse({
     id: executionId,
     targetUrl: input.targetUrl,
-    region: input.region ?? null,
+    // Phase 1 of issue #14: Browser Audits run from the deployment's single
+    // configured runtime location and record it as provenance automatically.
+    region: runtime.runtimeLocation.regionId,
     status: 'queued',
     requestedAt,
     startedAt: null,
@@ -3189,14 +2987,12 @@ function buildCheckProfileReport(profile: CheckProfile): CheckProfileReportRespo
 
 function createJobRecord({
   url,
-  regions: requestedRegions,
   note,
   requestConfig,
   monitorPolicy,
   requesterIp
 }: {
   url: string;
-  regions?: RegionCode[];
   note: string | null;
   requestConfig?: CreateLatencyJobInput['request'];
   monitorPolicy?: CreateLatencyJobInput['monitorPolicy'];
@@ -3204,15 +3000,13 @@ function createJobRecord({
 }) {
   validateMeasurementUrl(url);
 
-  const regions = resolveRequestedRegions({
-    requestedRegions,
-    availability: getRegionAvailability(),
-    fallbackRegions: runtime.activeRegionCodes
-  });
-
+  // Phase 1 of issue #14: one standalone deployment measures from one fixed
+  // runtime location. The resolved region id is stamped onto the job and
+  // every target as provenance.
+  const region: RuntimeRegionId = runtime.runtimeLocation.regionId;
   const now = new Date().toISOString();
   const jobId = `job_${crypto.randomUUID()}`;
-  const targets = regions.map<MutableTarget>((region: RegionCode) => ({
+  const target: MutableTarget = {
     jobId,
     region,
     status: 'queued',
@@ -3226,7 +3020,7 @@ function createJobRecord({
     execution: {
       runnerType: 'network_probe',
       provider: 'selfhost',
-      locationMode: 'best_effort',
+      locationMode: 'fixed',
       region,
       city: null,
       runnerVersion: 'probe-rs'
@@ -3238,7 +3032,9 @@ function createJobRecord({
     startedAt: null,
     finishedAt: null,
     updatedAt: now
-  }));
+  };
+
+  const targets = [target];
 
   const job: MutableJob = {
     id: jobId,
@@ -3251,7 +3047,7 @@ function createJobRecord({
     startedAt: null,
     completedAt: null,
     requesterIp,
-    selectedRegions: regions,
+    region,
     targets,
     evaluation: null,
     summary: summarizeTargets(targets)
@@ -3329,11 +3125,6 @@ function createJobsForProfile(profile: CheckProfile, requesterIp: string | null)
     throw new Error('Route set not found for profile');
   }
 
-  const regionPack = repository.getRegionPack(profile.regionPackId);
-  if (!regionPack) {
-    throw new Error('Region pack not found for profile');
-  }
-
   return routeSet.routes.map((route) =>
     ({
       routeId: route.id,
@@ -3341,7 +3132,6 @@ function createJobsForProfile(profile: CheckProfile, requesterIp: string | null)
       url: route.url,
       job: createJobRecord({
         url: route.url,
-        regions: regionPack.regions,
         note: buildProfileRunNote(profile.name, route.label, profile.note),
         requestConfig: profile.request,
         monitorPolicy: profile.monitorPolicy,
@@ -3633,22 +3423,6 @@ function ensureUniqueRouteSet({
   }
 }
 
-function ensureUniqueRegionPack({
-  id,
-  name
-}: {
-  id: string | null;
-  name: string;
-}) {
-  const duplicate = repository.listRegionPacks().find(
-    (regionPack) => regionPack.id !== id && regionPack.name.toLowerCase() === name.toLowerCase()
-  );
-
-  if (duplicate) {
-    throw new DuplicateEntityError('Region pack names must be unique.');
-  }
-}
-
 function ensureUniqueCheckProfile({
   id,
   propertyId,
@@ -3741,14 +3515,13 @@ function buildProfileSchedule(
 
 function resolveUpdatedProfileBaseline(
   existing: CheckProfile | undefined,
-  nextRouteSetId: string,
-  nextRegionPackId: string
+  nextRouteSetId: string
 ) {
   if (!existing?.baseline) {
     return null;
   }
 
-  if (existing.routeSetId !== nextRouteSetId || existing.regionPackId !== nextRegionPackId) {
+  if (existing.routeSetId !== nextRouteSetId) {
     return null;
   }
 
@@ -3775,9 +3548,11 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     internalSecret: parsed.SELFHOST_INTERNAL_SECRET,
     internalSecretNext: parsed.SELFHOST_INTERNAL_SECRET_NEXT,
     browserAuditBaseUrl: parsed.SELFHOST_BROWSER_AUDIT_BASE_URL,
-    activeRegionCodes: parseRegionCodes(parsed.SELFHOST_ACTIVE_REGION_CODES_JSON),
-    regionIds: parseRegionMap(parsed.SELFHOST_REGION_IDS_JSON),
-    probeBaseUrls: parseRegionMap(parsed.SELFHOST_PROBE_BASE_URLS_JSON),
+    runtimeLocation: resolveRuntimeLocation({
+      regionId: parsed.SELFHOST_REGION_ID,
+      label: parsed.SELFHOST_REGION_LABEL
+    }),
+    probeBaseUrl: parsed.SELFHOST_PROBE_BASE_URL,
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS
   };
 }
@@ -3799,51 +3574,11 @@ function resolveArtifactUploadBaseUrl(value: string) {
   return url.origin;
 }
 
-function getRegionAvailability() {
-  return buildRegionAvailabilityList({
-    activeRegionCodes: runtime.activeRegionCodes,
-    regionHints: runtime.regionIds
+function getRuntimeLocationReport(): RuntimeLocationReport {
+  return runtimeLocationReportSchema.parse({
+    regionId: runtime.runtimeLocation.regionId,
+    label: runtime.runtimeLocation.label
   });
-}
-
-function parseRegionCodes(jsonValue: string): RegionCode[] {
-  try {
-    const parsed = JSON.parse(jsonValue);
-
-    if (!Array.isArray(parsed)) {
-      return ['tokyo'];
-    }
-
-    const values = parsed.filter(
-      (value): value is RegionCode => typeof value === 'string' && regionCodeSet.has(value)
-    );
-
-    return values.length > 0 ? values : ['tokyo'];
-  } catch {
-    return ['tokyo'];
-  }
-}
-
-function parseRegionMap(jsonValue: string): Partial<Record<RegionCode, string>> {
-  try {
-    const parsed = JSON.parse(jsonValue);
-
-    if (!parsed || typeof parsed !== 'object') {
-      return {};
-    }
-
-    return Object.fromEntries(
-      Object.entries(parsed).flatMap(([key, value]) => {
-        if (!regionCodeSet.has(key) || typeof value !== 'string' || value.length === 0) {
-          return [];
-        }
-
-        return [[key, value]];
-      })
-    ) as Partial<Record<RegionCode, string>>;
-  } catch {
-    return {};
-  }
 }
 
 async function parseJsonBody<T>(request: Request, maxBytes = 1_024 * 1_024) {
@@ -4045,7 +3780,7 @@ const requesterIpFromContext = (context: OrpcContext) =>
 const controlRouter = control.router({
   health: control.health.handler(async () => buildHealthPayload()),
   regions: control.regions.handler(async () => ({
-    regions: getRegionAvailability()
+    runtimeLocation: getRuntimeLocationReport()
   })),
   jobs: {
     list: control.jobs.list.handler(async (): Promise<JobListResponse> =>
@@ -4146,44 +3881,6 @@ const controlRouter = control.router({
     ),
     delete: control.routeSets.delete.handler(async ({ input }) =>
       unwrapJsonResponse<{ ok: boolean }>(handleDeleteRouteSet(input.params.id))
-    )
-  },
-  regionPacks: {
-    list: control.regionPacks.list.handler(async (): Promise<RegionPackListResponse> =>
-      buildRegionPackListResponse()
-    ),
-    create: control.regionPacks.create.handler(async ({ input }) =>
-      unwrapJsonResponse<{ regionPack: RegionPack }>(
-        await handleCreateRegionPack(
-          createInternalRequest('/v1/region-packs', {
-            method: 'POST',
-            body: input
-          })
-        )
-      )
-    ),
-    get: control.regionPacks.get.handler(async ({ input }) => {
-      const regionPack = repository.getRegionPack(input.params.id);
-
-      if (!regionPack) {
-        throw new ORPCError('NOT_FOUND', { message: 'Region pack not found' });
-      }
-
-      return regionPack;
-    }),
-    update: control.regionPacks.update.handler(async ({ input }) =>
-      unwrapJsonResponse<{ regionPack: RegionPack }>(
-        await handleUpdateRegionPack(
-          input.params.id,
-          createInternalRequest(`/v1/region-packs/${input.params.id}`, {
-            method: 'PUT',
-            body: input.body
-          })
-        )
-      )
-    ),
-    delete: control.regionPacks.delete.handler(async ({ input }) =>
-      unwrapJsonResponse<{ ok: boolean }>(handleDeleteRegionPack(input.params.id))
     )
   },
   checkProfiles: {
@@ -4318,7 +4015,7 @@ const publicRouter = publicApi.router({
   },
   regions: {
     list: publicApi.regions.list.handler(async () => ({
-      regions: getRegionAvailability()
+      runtimeLocation: getRuntimeLocationReport()
     }))
   },
   sites: {
@@ -4391,42 +4088,6 @@ const publicRouter = publicApi.router({
     }),
     remove: publicApi.routeGroups.remove.handler(async ({ input }) =>
       unwrapJsonResponse<{ ok: boolean }>(handleDeleteRouteSet(input.params.routeGroupId))
-    )
-  },
-  regionSets: {
-    list: publicApi.regionSets.list.handler(async ({ input }) => toRegionSetsPayload(input.query)),
-    create: publicApi.regionSets.create.handler(async ({ input }) => {
-      const response = await handleCreateRegionPack(
-        createInternalRequest('/v1/region-packs', {
-          method: 'POST',
-          body: input
-        })
-      );
-      const payload = await unwrapJsonResponse<{ regionPack: RegionPack }>(response);
-      return { regionSet: payload.regionPack };
-    }),
-    get: publicApi.regionSets.get.handler(async ({ input }) => {
-      const regionSet = repository.getRegionPack(input.params.regionSetId);
-
-      if (!regionSet) {
-        throw new ORPCError('NOT_FOUND', { message: 'Region set not found' });
-      }
-
-      return regionSet;
-    }),
-    update: publicApi.regionSets.update.handler(async ({ input }) => {
-      const response = await handleUpdateRegionPack(
-        input.params.regionSetId,
-        createInternalRequest(`/v1/region-packs/${input.params.regionSetId}`, {
-          method: 'PUT',
-          body: input.body
-        })
-      );
-      const payload = await unwrapJsonResponse<{ regionPack: RegionPack }>(response);
-      return { regionSet: payload.regionPack };
-    }),
-    remove: publicApi.regionSets.remove.handler(async ({ input }) =>
-      unwrapJsonResponse<{ ok: boolean }>(handleDeleteRegionPack(input.params.regionSetId))
     )
   },
   checks: {
@@ -4615,7 +4276,7 @@ const appRouter = appApi.router({
   system: {
     health: appApi.system.health.handler(async () => buildHealthPayload()),
     regions: appApi.system.regions.handler(async () => ({
-      regions: getRegionAvailability()
+      runtimeLocation: getRuntimeLocationReport()
     }))
   },
   properties: {
@@ -4692,44 +4353,6 @@ const appRouter = appApi.router({
     ),
     delete: appApi.routeSets.delete.handler(async ({ input }) =>
       unwrapJsonResponse<{ ok: boolean }>(handleDeleteRouteSet(input.params.id))
-    )
-  },
-  regionPacks: {
-    list: appApi.regionPacks.list.handler(async ({ input }): Promise<RegionPackListResponse> =>
-      buildRegionPackListResponse(input.query)
-    ),
-    create: appApi.regionPacks.create.handler(async ({ input }) =>
-      unwrapJsonResponse<{ regionPack: RegionPack }>(
-        await handleCreateRegionPack(
-          createInternalRequest('/v1/region-packs', {
-            method: 'POST',
-            body: input
-          })
-        )
-      )
-    ),
-    get: appApi.regionPacks.get.handler(async ({ input }) => {
-      const regionPack = repository.getRegionPack(input.params.id);
-
-      if (!regionPack) {
-        throw new ORPCError('NOT_FOUND', { message: 'Region pack not found' });
-      }
-
-      return regionPack;
-    }),
-    update: appApi.regionPacks.update.handler(async ({ input }) =>
-      unwrapJsonResponse<{ regionPack: RegionPack }>(
-        await handleUpdateRegionPack(
-          input.params.id,
-          createInternalRequest(`/v1/region-packs/${input.params.id}`, {
-            method: 'PUT',
-            body: input.body
-          })
-        )
-      )
-    ),
-    delete: appApi.regionPacks.delete.handler(async ({ input }) =>
-      unwrapJsonResponse<{ ok: boolean }>(handleDeleteRegionPack(input.params.id))
     )
   },
   checkProfiles: {
@@ -4892,7 +4515,7 @@ const opsRouter = opsApi.router({
   system: {
     health: opsApi.system.health.handler(async () => buildHealthPayload()),
     regions: opsApi.system.regions.handler(async () => ({
-      regions: getRegionAvailability()
+      runtimeLocation: getRuntimeLocationReport()
     }))
   },
   scheduler: {

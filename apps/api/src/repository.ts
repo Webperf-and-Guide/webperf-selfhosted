@@ -15,7 +15,6 @@ import type {
   LatencyJob,
   LatencyJobDetail,
   Property,
-  RegionPack,
   RouteSet
 } from '@webperf/contracts';
 import {
@@ -42,7 +41,6 @@ import {
   exportResourceSchema,
   latencyJobDetailSchema,
   propertySchema,
-  regionPackSchema,
   routeSetSchema
 } from '@webperf/contracts';
 import type { Database } from 'bun:sqlite';
@@ -122,10 +120,6 @@ export type JobRepository = {
   listRouteSets(): RouteSet[];
   saveRouteSet(routeSet: RouteSet): void;
   deleteRouteSet(id: string): boolean;
-  getRegionPack(id: string): RegionPack | null;
-  listRegionPacks(): RegionPack[];
-  saveRegionPack(regionPack: RegionPack): void;
-  deleteRegionPack(id: string): boolean;
   getCheckProfile(id: string): CheckProfile | null;
   listCheckProfiles(): CheckProfile[];
   saveCheckProfile(checkProfile: CheckProfile): void;
@@ -204,7 +198,6 @@ export type BrowserAuditArtifactRecord = {
 type EntityKind =
   | 'property'
   | 'route_set'
-  | 'region_pack'
   | 'check_profile'
   | 'comparison'
   | 'export'
@@ -954,7 +947,7 @@ export const createSqliteJobRepository = ({
           startedAt: job.startedAt,
           completedAt: job.completedAt,
           requesterIp: job.requesterIp,
-          selectedRegions: job.selectedRegions
+          region: job.region
         }));
     },
     saveJob(job) {
@@ -995,18 +988,6 @@ export const createSqliteJobRepository = ({
     },
     deleteRouteSet(id) {
       return deleteEntity('route_set', id);
-    },
-    getRegionPack(id) {
-      return getEntity('region_pack', id, regionPackSchema);
-    },
-    listRegionPacks() {
-      return listEntities('region_pack', regionPackSchema);
-    },
-    saveRegionPack(regionPack) {
-      saveEntity('region_pack', regionPack);
-    },
-    deleteRegionPack(id) {
-      return deleteEntity('region_pack', id);
     },
     getCheckProfile(id) {
       return getEntity('check_profile', id, checkProfileSchema);

@@ -105,7 +105,7 @@ describe('durable execution restart recovery', () => {
       client: secondExecutor,
       leaseOwner: secondLease.leaseOwner,
       probeSharedSecret: testProbeSecret,
-      probeBaseUrls: { tokyo: `http://127.0.0.1:${probe.port}` }
+      probeBaseUrl: `http://127.0.0.1:${probe.port}`
     });
     await processExecutionJob({
       client: secondExecutor,

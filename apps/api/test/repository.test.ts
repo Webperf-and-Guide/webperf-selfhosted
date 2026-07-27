@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
-import type { CheckProfile, CheckProfileRun, LatencyJobDetail, Property, RegionPack, RouteSet } from '@webperf/contracts';
+import type { CheckProfile, CheckProfileRun, LatencyJobDetail, Property, RouteSet } from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,7 +51,7 @@ const createJob = (overrides: Partial<LatencyJobDetail> = {}): LatencyJobDetail 
   startedAt: '2026-04-08T00:00:01.000Z',
   completedAt: '2026-04-08T00:00:05.000Z',
   requesterIp: '127.0.0.1',
-  selectedRegions: ['tokyo'],
+  region: 'local',
   targets: [
     {
       jobId: 'job_test',
@@ -153,20 +153,10 @@ const createRouteSet = (overrides: Partial<RouteSet> = {}): RouteSet => ({
   ...overrides
 });
 
-const createRegionPack = (overrides: Partial<RegionPack> = {}): RegionPack => ({
-  id: 'regionpack_test',
-  name: 'Core 2',
-  regions: ['tokyo', 'singapore'],
-  createdAt: '2026-04-08T00:00:00.000Z',
-  updatedAt: '2026-04-08T00:00:00.000Z',
-  ...overrides
-});
-
 const createCheckProfile = (overrides: Partial<CheckProfile> = {}): CheckProfile => ({
   id: 'profile_test',
   propertyId: 'property_test',
   routeSetId: 'routeset_test',
-  regionPackId: 'regionpack_test',
   name: 'Release gate',
   note: 'critical pages',
   request: {
@@ -380,7 +370,6 @@ describe('sqlite control repository', () => {
       const repository = createRepository(databasePath);
       repository.saveProperty(createProperty());
       repository.saveRouteSet(createRouteSet());
-      repository.saveRegionPack(createRegionPack());
       repository.saveCheckProfile(createCheckProfile());
       repository.saveCheckProfileRun(createCheckProfileRun());
       repository.close();
@@ -390,11 +379,9 @@ describe('sqlite control repository', () => {
       const repository = createRepository(databasePath);
       expect(repository.getProperty('property_test')?.name).toBe('Main site');
       expect(repository.getRouteSet('routeset_test')?.routes[0]?.label).toBe('Homepage');
-      expect(repository.getRegionPack('regionpack_test')?.regions).toEqual(['tokyo', 'singapore']);
       expect(repository.getCheckProfile('profile_test')?.routeSetId).toBe('routeset_test');
       expect(repository.listProperties()).toHaveLength(1);
       expect(repository.listRouteSets()).toHaveLength(1);
-      expect(repository.listRegionPacks()).toHaveLength(1);
       expect(repository.listCheckProfiles()).toHaveLength(1);
       expect(repository.getCheckProfileRun('run_test')?.profileId).toBe('profile_test');
       expect(repository.listCheckProfileRuns('profile_test')).toHaveLength(1);
@@ -408,7 +395,6 @@ describe('sqlite control repository', () => {
 
     repository.saveProperty(createProperty());
     repository.saveRouteSet(createRouteSet());
-    repository.saveRegionPack(createRegionPack());
     repository.saveCheckProfile(createCheckProfile());
     repository.saveCheckProfileRun(createCheckProfileRun());
 
@@ -420,11 +406,9 @@ describe('sqlite control repository', () => {
     expect(repository.listCheckProfileRuns('profile_test')).toEqual([]);
 
     expect(repository.deleteRouteSet('routeset_test')).toBe(true);
-    expect(repository.deleteRegionPack('regionpack_test')).toBe(true);
     expect(repository.deleteProperty('property_test')).toBe(true);
     expect(repository.listProperties()).toEqual([]);
     expect(repository.listRouteSets()).toEqual([]);
-    expect(repository.listRegionPacks()).toEqual([]);
 
     repository.close();
   });

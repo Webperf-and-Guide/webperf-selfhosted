@@ -57,6 +57,7 @@ RUN bun install --frozen-lockfile --no-save
 COPY --from=build /app/apps ./apps
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/tooling ./tooling
+COPY --from=build /app/infra ./infra
 
 # /data is the persistence volume mount point for the API role.
 RUN mkdir -p /data && chown -R bun:bun /app /data

@@ -71,7 +71,8 @@ curl --fail --show-error http://127.0.0.1:5173/
 ```
 
 Open `http://127.0.0.1:5173`, launch a one-off check against a public URL, and
-confirm that its Tokyo target reaches a terminal state.
+confirm that its target reaches a terminal state. The default deployment
+measures from the `local` runtime location.
 
 ## Default exposure
 

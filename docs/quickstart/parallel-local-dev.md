@@ -28,7 +28,6 @@ Parallel OSS:
 - `SELFHOST_PARALLEL_CONSOLE_PORT`
 - `SELFHOST_PARALLEL_PROBE_PORT`
 - `SELFHOST_PARALLEL_PROBE_BASE_URL`
-- `SELFHOST_PARALLEL_PROBE_BASE_URLS_JSON`
 
 The helper scripts preflight these ports before booting so collisions fail fast instead of half-starting the stack.
 

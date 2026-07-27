@@ -35,6 +35,7 @@ Treat this document as the current freeze line:
 - `POST /v1/browser-audits`
 - `GET /v1/browser-audits/:id`
 - `GET /v1/browser-audits/:id/artifacts/:artifactId`
+- `GET /v1/regions`
 - `GET /v1/capabilities`
 
 Authentication boundary:

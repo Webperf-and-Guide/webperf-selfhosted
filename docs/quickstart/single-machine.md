@@ -42,8 +42,8 @@ Use the console to:
 
 1. launch a manual run
 2. inspect live target results
-3. define reusable sites, route groups, region sets, and checks
-4. review reports and region coverage
+3. define reusable sites, route groups, and checks
+4. review reports and runtime location
 
 ## Optional Browser Audit
 

@@ -148,6 +148,10 @@ values['BROWSER_AUDIT_SHARED_SECRET'] = os.environ['SMOKE_BROWSER_AUDIT_SECRET']
 values['CONSOLE_PUBLIC_PORT'] = '0'
 values['SELFHOST_API_DEBUG_PORT'] = '0'
 values['BROWSER_AUDIT_DEBUG_PORT'] = '0'
+# Disable the embedded scheduler in smoke tests so the API's /health
+# healthcheck passes faster; the scheduler dispatch loop is not under
+# test here.
+values['SELFHOST_SCHEDULER_MODE'] = 'disabled'
 
 if profile == 'browser-audit':
     values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'

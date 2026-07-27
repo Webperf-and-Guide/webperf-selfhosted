@@ -115,7 +115,7 @@ pub fn run_local_healthcheck(listen_addr: &str) -> Result<()> {
 async fn handle_healthz(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
         "ok": true,
-        "region": state.config.region_code,
+        "region": state.config.region_id,
         "probeImpl": ProbeImplementation::Rust,
     }))
 }
@@ -155,11 +155,10 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
         return plain_text_response(StatusCode::UNAUTHORIZED, "invalid signature");
     }
 
-    let measurement =
-        measure_url(&state.config.region_code, &body.url, body.request.as_ref()).await;
+    let measurement = measure_url(&state.config.region_id, &body.url, body.request.as_ref()).await;
     info!(
         probe_impl = "rust",
-        region = %state.config.region_code,
+        region = %state.config.region_id,
         target_id = %body.target_id,
         request_method = %body.request.as_ref().map(|request| request.method.as_str()).unwrap_or("GET"),
         status_code = ?measurement.status_code,

@@ -145,7 +145,7 @@ impl Harness {
         let port = open_port()?;
         let config = Config {
             listen_addr: format!("127.0.0.1:{port}"),
-            region_code: "tokyo".to_string(),
+            region_id: "local".to_string(),
             shared_secret: SHARED_SECRET.to_string(),
             shared_secret_next: None,
         };
@@ -191,8 +191,8 @@ impl Drop for Harness {
 fn sample_request(target: &str) -> MeasureRequest {
     MeasureRequest {
         job_id: "job_1".to_string(),
-        target_id: "job_1:tokyo".to_string(),
-        region: "tokyo".to_string(),
+        target_id: "job_1:local".to_string(),
+        region: "local".to_string(),
         url: target.to_string(),
         request: None,
         timestamp: chrono::Utc::now().to_rfc3339(),

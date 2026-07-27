@@ -14,7 +14,7 @@ use url::Url;
 type HmacSha256 = Hmac<Sha256>;
 
 const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
-const DEFAULT_REGION_CODE: &str = "tokyo";
+const DEFAULT_REGION_ID: &str = "local";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
@@ -31,7 +31,7 @@ pub enum ConfigError {
 #[derive(Clone)]
 pub struct Config {
     pub listen_addr: String,
-    pub region_code: String,
+    pub region_id: String,
     pub shared_secret: String,
     pub shared_secret_next: Option<String>,
 }
@@ -41,7 +41,7 @@ impl fmt::Debug for Config {
         formatter
             .debug_struct("Config")
             .field("listen_addr", &self.listen_addr)
-            .field("region_code", &self.region_code)
+            .field("region_id", &self.region_id)
             .field("shared_secret", &"[REDACTED]")
             .field(
                 "shared_secret_next",
@@ -67,8 +67,11 @@ impl Config {
         Ok(Self {
             listen_addr: env::var("PROBE_LISTEN_ADDR")
                 .unwrap_or_else(|_| DEFAULT_LISTEN_ADDR.to_string()),
-            region_code: env::var("REGION_CODE")
-                .unwrap_or_else(|_| DEFAULT_REGION_CODE.to_string()),
+            // Phase 1 of issue #14: probe region identity is generic and
+            // defaults to `local` instead of claiming a specific city. The
+            // previous REGION_CODE/region_code naming was renamed to match
+            // the runtime region id model used across the deployment.
+            region_id: env::var("REGION_ID").unwrap_or_else(|_| DEFAULT_REGION_ID.to_string()),
             shared_secret,
             shared_secret_next,
         })
@@ -420,8 +423,8 @@ mod tests {
     fn sample_request() -> MeasureRequest {
         MeasureRequest {
             job_id: "job_1".to_string(),
-            target_id: "job_1:tokyo".to_string(),
-            region: "tokyo".to_string(),
+            target_id: "job_1:local".to_string(),
+            region: "local".to_string(),
             url: "https://example.com".to_string(),
             request: None,
             timestamp: "2026-04-07T00:00:00Z".to_string(),
@@ -478,7 +481,7 @@ mod tests {
     fn config_debug_redacts_current_and_next_secrets() {
         let config = Config {
             listen_addr: DEFAULT_LISTEN_ADDR.to_string(),
-            region_code: DEFAULT_REGION_CODE.to_string(),
+            region_id: DEFAULT_REGION_ID.to_string(),
             shared_secret: "current-probe-secret".to_string(),
             shared_secret_next: Some("next-probe-secret".to_string()),
         };

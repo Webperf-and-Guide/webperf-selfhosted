@@ -9,7 +9,8 @@ import {
   browserAuditRunSummarySchema
 } from './browser-audit';
 import { probeImplementationSchema, probeMeasurementSchema } from './probe-model';
-import { runtimeRegionIdSchema } from './regions';
+import { runtimeRegionIdSchema, runtimeLocationSchema } from './regions';
+import type { RuntimeLocation } from './regions';
 
 export {
   runtimeRegionIdSchema,
@@ -21,6 +22,11 @@ export type {
   RuntimeRegionLabel,
   RuntimeLocation
 } from './regions';
+// Phase 1 of issue #14: capability/health/provenance responses reuse the
+// canonical runtimeLocationSchema rather than redefining its shape, so any
+// future constraint change lives in one place.
+export { runtimeLocationSchema as runtimeLocationReportSchema };
+export type RuntimeLocationReport = RuntimeLocation;
 
 export const targetStatusValues = [
   'queued',
@@ -452,13 +458,10 @@ export type CheckProfileRunListResponse = z.infer<typeof checkProfileRunListResp
 
 // Phase 1 of issue #14 replaced the 41-city availability catalog with a
 // single runtime location for one standalone deployment. Capabilities,
-// health, and result provenance report this object instead of an availability
-// list. The previous RegionAvailability/regionLaunchStage types were removed.
-export const runtimeLocationReportSchema = z.object({
-  regionId: runtimeRegionIdSchema,
-  label: z.string().trim().min(1).max(120).optional()
-});
-export type RuntimeLocationReport = z.infer<typeof runtimeLocationReportSchema>;
+// health, and result provenance report `runtimeLocationReportSchema`
+// (re-exported above as an alias of `runtimeLocationSchema`) instead of an
+// availability list. The previous RegionAvailability/regionLaunchStage types
+// were removed.
 
 export const latencyJobTargetSchema = z.object({
   jobId: z.string().min(1),
@@ -795,7 +798,7 @@ export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 // Phase 1 of issue #14 replaced the multi-region availability list response
 // with a single runtime location report for one standalone deployment.
 export const regionsResponseSchema = z.object({
-  runtimeLocation: runtimeLocationReportSchema
+  runtimeLocation: runtimeLocationSchema
 });
 export type RegionsResponse = z.infer<typeof regionsResponseSchema>;
 

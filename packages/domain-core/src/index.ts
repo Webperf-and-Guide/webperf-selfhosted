@@ -8,7 +8,7 @@ import type {
   RuntimeRegionId,
   SignedProbeMeasurementRequest
 } from '@webperf/contracts';
-import { listQuerySchema } from '@webperf/contracts';
+import { listQuerySchema, runtimeRegionIdSchema } from '@webperf/contracts';
 
 /**
  * Resolve the runtime location for one standalone deployment.
@@ -28,10 +28,13 @@ export const resolveRuntimeLocation = ({
 }: {
   regionId: RuntimeRegionId;
   label?: string;
-}): RuntimeLocation => ({
-  regionId,
-  label: label && label.trim().length > 0 ? label.trim() : regionId
-});
+}): RuntimeLocation => {
+  const validatedRegionId = runtimeRegionIdSchema.parse(regionId);
+  return {
+    regionId: validatedRegionId,
+    label: label?.trim() || validatedRegionId
+  };
+};
 
 export const parseListQuery = (input: {
   pageSize?: number | string | null | undefined;

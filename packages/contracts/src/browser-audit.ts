@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { regionCodeSchema } from './regions';
+import { runtimeRegionIdSchema } from './regions';
 
 export const browserAuditDslVersion = 'v1' as const;
 export const browserAuditProtocolVersion = 'v1' as const;
@@ -557,7 +557,7 @@ export type BrowserAuditRunSummary = z.infer<typeof browserAuditRunSummarySchema
 export const browserAuditExecutionSummarySchema = z.object({
   executionId: z.string().min(1),
   status: browserAuditExecutionStatusSchema,
-  region: regionCodeSchema.nullable().default(null),
+  region: runtimeRegionIdSchema.nullable().default(null),
   result: browserAuditResultSchema.nullable().default(null),
   requestedAt: z.string().datetime(),
   startedAt: z.string().datetime().nullable().default(null),
@@ -577,7 +577,7 @@ export type BrowserAuditArtifactUploadConfig = z.infer<typeof browserAuditArtifa
 export const browserAuditWorkerRequestSchema = z.object({
   executionId: z.string().min(1),
   targetUrl: z.string().url(),
-  region: regionCodeSchema.nullable().default(null),
+  region: runtimeRegionIdSchema.nullable().default(null),
   policy: browserAuditPolicySchema,
   customHeaders: z.array(browserAuditHeaderSchema).max(20).default([]),
   cookies: z.array(browserAuditCookieSchema).max(20).default([]),

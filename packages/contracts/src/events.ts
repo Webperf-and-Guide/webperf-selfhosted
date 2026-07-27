@@ -5,13 +5,13 @@ import {
   browserAuditHeaderSchema,
   browserAuditPolicySchema
 } from './browser-audit';
-import { regionCodeSchema } from './regions';
+import { runtimeRegionIdSchema } from './regions';
 
 export const measurementQueuedEventSchema = z.object({
   type: z.literal('measurement.queued'),
   jobId: z.string().min(1),
   targetId: z.string().min(1),
-  region: regionCodeSchema,
+  region: runtimeRegionIdSchema,
   url: z.string().url()
 });
 export type MeasurementQueuedEvent = z.infer<typeof measurementQueuedEventSchema>;
@@ -23,7 +23,7 @@ export const browserAuditQueuedEventSchema = z.object({
   runId: z.string().min(1).nullable().default(null),
   routeId: z.string().min(1).nullable().default(null),
   jobId: z.string().min(1).nullable().default(null),
-  region: regionCodeSchema.nullable().default(null),
+  region: runtimeRegionIdSchema.nullable().default(null),
   url: z.string().url(),
   policy: browserAuditPolicySchema,
   customHeaders: z.array(browserAuditHeaderSchema).max(20).default([]),

@@ -9,10 +9,8 @@ import {
   browserAuditRunSummarySchema
 } from './browser-audit';
 import { probeImplementationSchema, probeMeasurementSchema } from './probe-model';
-import { regionCodes, regionCodeSchema } from './regions';
+import { runtimeRegionIdSchema } from './regions';
 
-export { regionCodes, regionCodeSchema } from './regions';
-export type { RegionCode } from './regions';
 export {
   runtimeRegionIdSchema,
   runtimeRegionLabelSchema,
@@ -43,10 +41,6 @@ export type ErrorClass = z.infer<typeof errorClassSchema>;
 export const jobStatusValues = [...targetStatusValues, 'partial'] as const;
 export const jobStatusSchema = z.enum(jobStatusValues);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
-
-export const regionLaunchStageValues = ['core', 'catalog'] as const;
-export const regionLaunchStageSchema = z.enum(regionLaunchStageValues);
-export type RegionLaunchStage = z.infer<typeof regionLaunchStageSchema>;
 
 export const requestMethodValues = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const requestMethodSchema = z.enum(requestMethodValues);
@@ -176,7 +170,7 @@ export const executionMetaSchema = z.object({
   runnerType: executionRunnerTypeSchema,
   provider: executionProviderSchema,
   locationMode: locationModeSchema,
-  region: regionCodeSchema.nullable().default(null),
+  region: runtimeRegionIdSchema.nullable().default(null),
   city: z.string().min(1).nullable().default(null),
   runnerVersion: z.string().min(1).nullable().default(null)
 });
@@ -240,11 +234,13 @@ export const publicApiPaths = [
 
 export const createLatencyJobSchema = z.object({
   url: z.string().url(),
-  regions: z.array(regionCodeSchema).min(1).max(4).optional(),
   note: z.string().max(200).optional(),
   request: customRequestConfigSchema.optional(),
   // Self-host job creation is admin-token protected at the HTTP boundary.
   // Managed-cloud bot protection such as Turnstile is intentionally not an OSS contract field.
+  // Region selection was removed in Phase 1 of issue #14: one standalone
+  // deployment measures from one fixed runtime location, stamped onto every
+  // result as provenance at execution time.
   monitorPolicy: monitorPolicySchema.optional()
 });
 export type CreateLatencyJobInput = z.infer<typeof createLatencyJobSchema>;
@@ -300,23 +296,10 @@ export type CreateRouteSetInput = z.infer<typeof createRouteSetSchema>;
 export const updateRouteSetSchema = createRouteSetSchema;
 export type UpdateRouteSetInput = z.infer<typeof updateRouteSetSchema>;
 
-export const regionPackSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(120),
-  regions: z.array(regionCodeSchema).min(1).max(4),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime()
-});
-export type RegionPack = z.infer<typeof regionPackSchema>;
-
-export const createRegionPackSchema = z.object({
-  name: z.string().min(1).max(120),
-  regions: z.array(regionCodeSchema).min(1).max(4)
-});
-export type CreateRegionPackInput = z.infer<typeof createRegionPackSchema>;
-
-export const updateRegionPackSchema = createRegionPackSchema;
-export type UpdateRegionPackInput = z.infer<typeof updateRegionPackSchema>;
+// Region Packs were removed in Phase 1 of issue #14. One standalone
+// deployment owns a single runtime location and no longer fans out across a
+// selectable region set. The managed Cloud product may keep its own
+// managed-region catalog, but that belongs outside this public contract.
 
 export const checkProfileScheduleSchema = z.object({
   intervalMinutes: z.number().int().min(5),
@@ -339,7 +322,6 @@ export const checkProfileSchema = z.object({
   id: z.string().min(1),
   propertyId: z.string().min(1),
   routeSetId: z.string().min(1),
-  regionPackId: z.string().min(1),
   name: z.string().min(1).max(120),
   note: z.string().max(200).nullable(),
   request: customRequestConfigSchema.optional(),
@@ -356,7 +338,6 @@ export type CheckProfile = z.infer<typeof checkProfileSchema>;
 export const createCheckProfileSchema = z.object({
   propertyId: z.string().min(1),
   routeSetId: z.string().min(1),
-  regionPackId: z.string().min(1),
   name: z.string().min(1).max(120),
   note: z.string().max(200).optional(),
   request: customRequestConfigSchema.optional(),
@@ -414,7 +395,9 @@ export type CheckProfileRun = z.infer<typeof checkProfileRunSchema>;
 
 export const createBrowserAuditInputSchema = z.object({
   targetUrl: z.string().url(),
-  region: regionCodeSchema.nullable().optional().default(null),
+  // Region input was removed in Phase 1 of issue #14: Browser Audits run from
+  // the deployment's single configured runtime location and record it as
+  // provenance automatically.
   policy: browserAuditPolicySchema,
   customHeaders: z.array(browserAuditHeaderSchema).max(20).default([]),
   cookies: z.array(browserAuditCookieSchema).max(20).default([])
@@ -424,7 +407,7 @@ export type CreateBrowserAuditInput = z.infer<typeof createBrowserAuditInputSche
 export const browserAuditResourceSchema = z.object({
   id: z.string().min(1),
   targetUrl: z.string().url(),
-  region: regionCodeSchema.nullable().default(null),
+  region: runtimeRegionIdSchema.nullable().default(null),
   status: browserAuditExecutionStatusSchema,
   requestedAt: z.string().datetime(),
   startedAt: z.string().datetime().nullable().default(null),
@@ -455,12 +438,6 @@ export const routeSetListResponseSchema = z.object({
 });
 export type RouteSetListResponse = z.infer<typeof routeSetListResponseSchema>;
 
-export const regionPackListResponseSchema = z.object({
-  regionPacks: z.array(regionPackSchema),
-  pageInfo: pageInfoSchema
-});
-export type RegionPackListResponse = z.infer<typeof regionPackListResponseSchema>;
-
 export const checkProfileListResponseSchema = z.object({
   checkProfiles: z.array(checkProfileSchema),
   pageInfo: pageInfoSchema
@@ -473,22 +450,19 @@ export const checkProfileRunListResponseSchema = z.object({
 });
 export type CheckProfileRunListResponse = z.infer<typeof checkProfileRunListResponseSchema>;
 
-export const regionAvailabilitySchema = z.object({
-  code: regionCodeSchema,
-  label: z.string().min(1),
-  city: z.string().min(1),
-  continent: z.string().min(1),
-  selectable: z.boolean(),
-  defaultSelected: z.boolean(),
-  launchStage: regionLaunchStageSchema,
-  rolloutTrack: z.enum(['core', 'catalog']),
-  providerRegionHint: z.string().min(1).optional()
+// Phase 1 of issue #14 replaced the 41-city availability catalog with a
+// single runtime location for one standalone deployment. Capabilities,
+// health, and result provenance report this object instead of an availability
+// list. The previous RegionAvailability/regionLaunchStage types were removed.
+export const runtimeLocationReportSchema = z.object({
+  regionId: runtimeRegionIdSchema,
+  label: z.string().trim().min(1).max(120).optional()
 });
-export type RegionAvailability = z.infer<typeof regionAvailabilitySchema>;
+export type RuntimeLocationReport = z.infer<typeof runtimeLocationReportSchema>;
 
 export const latencyJobTargetSchema = z.object({
   jobId: z.string().min(1),
-  region: regionCodeSchema,
+  region: runtimeRegionIdSchema,
   status: targetStatusSchema,
   attemptNo: z.number().int().nonnegative(),
   maxAttempts: z.number().int().positive(),
@@ -519,7 +493,10 @@ export const latencyJobSchema = z.object({
   startedAt: z.string().datetime().nullable(),
   completedAt: z.string().datetime().nullable(),
   requesterIp: z.string().min(1).nullable(),
-  selectedRegions: z.array(regionCodeSchema).min(1)
+  // Phase 1 of issue #14 removed the multi-region `selectedRegions` field.
+  // One standalone deployment measures from one runtime location; the
+  // resolved region id is stamped onto each target as provenance.
+  region: runtimeRegionIdSchema
 });
 export type LatencyJob = z.infer<typeof latencyJobSchema>;
 
@@ -552,7 +529,7 @@ const nullableNumberSchema = z.number().nullable();
 const nullableStatusCodeSchema = z.number().int().min(100).max(599).nullable();
 
 export const checkProfileRegionComparisonSchema = z.object({
-  region: regionCodeSchema,
+  region: runtimeRegionIdSchema,
   currentJobId: z.string().min(1).nullable(),
   previousJobId: z.string().min(1).nullable(),
   currentStatus: jobStatusSchema.nullable(),
@@ -815,8 +792,10 @@ export const jobListResponseSchema = z.object({
 });
 export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 
+// Phase 1 of issue #14 replaced the multi-region availability list response
+// with a single runtime location report for one standalone deployment.
 export const regionsResponseSchema = z.object({
-  regions: z.array(regionAvailabilitySchema)
+  runtimeLocation: runtimeLocationReportSchema
 });
 export type RegionsResponse = z.infer<typeof regionsResponseSchema>;
 

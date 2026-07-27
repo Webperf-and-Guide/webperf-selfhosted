@@ -54,7 +54,7 @@ const baseLatencyJob = {
   startedAt: null,
   completedAt: null,
   requesterIp: null,
-  selectedRegions: ['tokyo'],
+  region: 'local',
   targets: [],
   summary: { total: 0, succeeded: 0, failed: 0, inflight: 0 }
 };

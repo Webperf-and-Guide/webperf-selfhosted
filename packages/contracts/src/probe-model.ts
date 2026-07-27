@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { regionCodeSchema } from './regions';
+import { runtimeRegionIdSchema } from './regions';
 
 export const probeImplementationValues = ['go', 'rust'] as const;
 export const probeImplementationSchema = z.enum(probeImplementationValues);
@@ -25,7 +25,7 @@ export const probeTlsMetadataSchema = z.object({
 export type ProbeTlsMetadata = z.infer<typeof probeTlsMetadataSchema>;
 
 export const probeMeasurementSchema = z.object({
-  region: regionCodeSchema,
+  region: runtimeRegionIdSchema,
   url: z.string().url(),
   latencyMs: z.number().nonnegative(),
   measuredAt: z.string().datetime(),

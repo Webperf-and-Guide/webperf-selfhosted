@@ -13,22 +13,19 @@ import {
   createCheckProfileSchema,
   createLatencyJobSchema,
   createPropertySchema,
-  createRegionPackSchema,
   createRouteSetSchema,
   jobListResponseSchema,
   latencyJobDetailSchema,
   propertyListResponseSchema,
   propertySchema,
-  regionPackListResponseSchema,
-  regionPackSchema,
   regionsResponseSchema,
   routeSetListResponseSchema,
   routeSetSchema,
+  runtimeLocationReportSchema,
   schedulerDispatchResponseSchema,
   setCheckProfileBaselineSchema,
   updateCheckProfileSchema,
   updatePropertySchema,
-  updateRegionPackSchema,
   updateRouteSetSchema
 } from './public-api';
 
@@ -76,12 +73,6 @@ const withRouteSetUpdate = () =>
     body: updateRouteSetSchema
   });
 
-const withRegionPackUpdate = () =>
-  z.object({
-    params: idSchema,
-    body: updateRegionPackSchema
-  });
-
 const withCheckProfileUpdate = () =>
   z.object({
     params: idSchema,
@@ -120,10 +111,6 @@ const routeSetMutationResponseSchema = z.object({
   routeSet: routeSetSchema
 });
 
-const regionPackMutationResponseSchema = z.object({
-  regionPack: regionPackSchema
-});
-
 const checkProfileMutationResponseSchema = z.object({
   profile: checkProfileSchema
 });
@@ -140,8 +127,8 @@ const deleteCheckProfileResponseSchema = z.object({
 export const selfhostControlHealthSchema = z.object({
   service: z.string().min(1),
   ok: z.boolean(),
-  activeRegions: z.array(z.string().min(1)),
-  configuredProbeRegions: z.array(z.string().min(1)),
+  runtimeLocation: runtimeLocationReportSchema,
+  probeBaseUrl: z.string().min(1),
   maxTargetAttempts: z.number().int().positive(),
   storage: z.object({
     kind: z.literal('sqlite'),
@@ -152,7 +139,6 @@ export const selfhostControlHealthSchema = z.object({
   savedConfigs: z.object({
     properties: z.number().int().nonnegative(),
     routeSets: z.number().int().nonnegative(),
-    regionPacks: z.number().int().nonnegative(),
     checkProfiles: z.number().int().nonnegative(),
     scheduledProfiles: z.number().int().nonnegative()
   }),
@@ -170,7 +156,6 @@ export const CONTROL_OPENAPI_TAG_DEFINITIONS = [
   { name: 'jobs', description: 'Manual checks and run snapshots.' },
   { name: 'properties', description: 'Managed property configuration.' },
   { name: 'routeSets', description: 'Representative route collections.' },
-  { name: 'regionPacks', description: 'Named region groupings.' },
   { name: 'checkProfiles', description: 'Saved checks, runs, baselines, and reports.' }
 ] as const;
 
@@ -292,41 +277,6 @@ export const controlContract = populateContractRouterPaths(
         inputStructure: 'detailed',
         summary: 'Delete route set',
         tags: ['routeSets']
-      })
-    }),
-    regionPacks: oc.router({
-      list: oc.input(orpcType<void>()).output(regionPackListResponseSchema).route({
-        method: 'GET',
-        path: '/v1/region-packs',
-        summary: 'List region packs',
-        tags: ['regionPacks']
-      }),
-      create: oc.input(createRegionPackSchema).output(regionPackMutationResponseSchema).route({
-        method: 'POST',
-        path: '/v1/region-packs',
-        summary: 'Create region pack',
-        tags: ['regionPacks']
-      }),
-      get: oc.input(withIdParams()).output(regionPackSchema).route({
-        method: 'GET',
-        path: '/v1/region-packs/{id}',
-        inputStructure: 'detailed',
-        summary: 'Get region pack',
-        tags: ['regionPacks']
-      }),
-      update: oc.input(withRegionPackUpdate()).output(regionPackMutationResponseSchema).route({
-        method: 'PUT',
-        path: '/v1/region-packs/{id}',
-        inputStructure: 'detailed',
-        summary: 'Update region pack',
-        tags: ['regionPacks']
-      }),
-      delete: oc.input(withIdParams()).output(deleteResponseSchema).route({
-        method: 'DELETE',
-        path: '/v1/region-packs/{id}',
-        inputStructure: 'detailed',
-        summary: 'Delete region pack',
-        tags: ['regionPacks']
       })
     }),
     checkProfiles: oc.router({

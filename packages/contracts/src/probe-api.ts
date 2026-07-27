@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { probeMeasurementSchema } from './probe-model';
-import { regionCodeSchema } from './regions';
+import { runtimeRegionIdSchema } from './regions';
 import { customRequestConfigSchema } from './public-api';
 
 export const probeApiPaths = ['/healthz', '/measure'] as const;
@@ -8,7 +8,7 @@ export const probeApiPaths = ['/healthz', '/measure'] as const;
 export const signedProbeMeasurementRequestSchema = z.object({
   jobId: z.string().min(1),
   targetId: z.string().min(1),
-  region: regionCodeSchema,
+  region: runtimeRegionIdSchema,
   url: z.string().url(),
   request: customRequestConfigSchema.optional(),
   timestamp: z.string().datetime(),

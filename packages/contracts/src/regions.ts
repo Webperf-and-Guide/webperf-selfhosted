@@ -3,11 +3,12 @@ import { z } from 'zod';
 /**
  * Generic runtime region identity for one self-hosted deployment.
  *
- * Issue #14 Phase 1 introduces this in parallel with the legacy 41-city
- * `regionCodeSchema` enum. PR2 of Phase 1 will remove the enum and keep only
- * this generic identifier, because one standalone deployment represents one
- * fixed measurement region and the operator chooses its identity
- * (e.g. `kr-seoul-office`, `aws-ap-northeast-2`, `home-lab`).
+ * One standalone deployment represents one fixed measurement region, and the
+ * operator chooses its identity (e.g. `kr-seoul-office`,
+ * `aws-ap-northeast-2`, `home-lab`). The previous 41-city catalog and
+ * `regionCodeSchema` enum were removed in Phase 1 of issue #14 because that
+ * SaaS fan-out model belongs to the managed Cloud orchestrator, not to one
+ * standalone regional installation.
  *
  * Constraints:
  * - lowercase ascii letters, digits, and hyphens only
@@ -48,50 +49,3 @@ export const runtimeLocationSchema = z.object({
   label: runtimeRegionLabelSchema.optional()
 });
 export type RuntimeLocation = z.infer<typeof runtimeLocationSchema>;
-
-export const regionCodes = [
-  'ashburn',
-  'atlanta',
-  'boston',
-  'chicago',
-  'dallas',
-  'denver',
-  'losangeles',
-  'miami',
-  'newyork',
-  'sanjose',
-  'seattle',
-  'toronto',
-  'amsterdam',
-  'athens',
-  'bucharest',
-  'copenhagen',
-  'frankfurt',
-  'london',
-  'madrid',
-  'milan',
-  'paris',
-  'prague',
-  'stockholm',
-  'vienna',
-  'warsaw',
-  'zagreb',
-  'bangkok',
-  'hongkong',
-  'istanbul',
-  'jakarta',
-  'kualalumpur',
-  'manila',
-  'singapore',
-  'telaviv',
-  'tokyo',
-  'bogota',
-  'mexicocity',
-  'saopaulo',
-  'sydney',
-  'johannesburg',
-  'lagos'
-] as const;
-
-export const regionCodeSchema = z.enum(regionCodes);
-export type RegionCode = z.infer<typeof regionCodeSchema>;

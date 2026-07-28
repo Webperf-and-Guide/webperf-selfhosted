@@ -39,9 +39,11 @@ docker compose --env-file .env -f compose.yml cp \
 cp .env backups/current/webperf.env
 chmod 600 backups/current/webperf.env backups/current/webperf.sqlite
 
-# Restart the stack. If you use the external-scheduler profile, add
-# --profile external-scheduler so the scheduler container restarts too.
+# Restart the stack. Add --profile external-scheduler if you use that mode
+# so the standalone scheduler container also restarts; without it, the
+# scheduler stays stopped and scheduled Checks will not dispatch.
 docker compose --env-file .env -f compose.yml up -d
+# For external-scheduler mode: docker compose --env-file .env -f compose.yml --profile external-scheduler up -d
 ```
 
 The backup command refuses to overwrite an existing file, writes mode `0600`,

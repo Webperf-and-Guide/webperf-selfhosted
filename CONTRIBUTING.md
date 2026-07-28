@@ -51,6 +51,6 @@ bun run check:release
 ```
 
 Pushes to `main` publish `main` and source-SHA development tags only after
-required CI passes. Tagged releases publish all six versioned images and a
+required CI passes. Tagged releases publish all three versioned images and a
 digest-bearing `runtime-metadata.json`; managed consumers fetch that file from
 a specific GitHub Release.

@@ -1,13 +1,14 @@
 # Runtime images and releases
 
-`webperf-selfhosted` builds the six Linux image families used by the
+`webperf-selfhosted` builds the three Linux image families used by the
 self-hosted product. Every published runtime reference is a multi-platform OCI
 index for `linux/amd64` and `linux/arm64`:
 
-- `ghcr.io/webperf-and-guide/webperf-console`
-- `ghcr.io/webperf-and-guide/webperf-api`
-- `ghcr.io/webperf-and-guide/webperf-scheduler`
-- `ghcr.io/webperf-and-guide/webperf-executor`
+- `ghcr.io/webperf-and-guide/webperf` — single multi-role Bun image covering
+  console, API, scheduler, and executor. The active role is selected at
+  container start by the `WEBPERF_ROLE` environment variable (`console`, `api`,
+  `scheduler`, or `executor`) via the `tooling/scripts/webperf-role.ts`
+  dispatcher.
 - `ghcr.io/webperf-and-guide/webperf-probe`
 - `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`
 
@@ -18,7 +19,7 @@ Merging a Sampo-generated release PR dispatches the
 `VERSION` and exact release-PR merge commit. The workflow runs the same required
 CI used by pull requests against that pinned source and waits for the protected
 `release` GitHub Environment. Once approved, it creates or verifies the matching
-`v0.x.y` repository tag, publishes all six images with version and source-SHA
+`v0.x.y` repository tag, publishes images with version and source-SHA
 tags, generates a distinct SPDX SBOM for each published amd64 and arm64
 manifest, attests those SBOMs to their matching child digests, and creates a
 GitHub Release. A manually pushed annotated `v0.x.y` tag enters the same
@@ -52,7 +53,7 @@ mutable file from the default branch.
 ## Development channel
 
 After required CI passes on `main`, the
-[CI workflow](../../.github/workflows/ci.yml) publishes all six images as:
+[CI workflow](../../.github/workflows/ci.yml) publishes all three images as:
 
 - `:main`
 - `:sha-<commit>`
@@ -109,6 +110,10 @@ for a local image load:
 
 ```sh
 WEBPERF_PLATFORM=linux/arm64 # or linux/amd64
+
+docker buildx build --platform "$WEBPERF_PLATFORM" --load \
+  -f infra/docker/Dockerfile.webperf \
+  -t webperf:dev .
 
 docker buildx build --platform "$WEBPERF_PLATFORM" --load \
   -f apps/browser-audit-lighthouse/Dockerfile \

@@ -1,11 +1,11 @@
 # Docker image sources
 
-The Dockerfiles in this repository build the six self-host runtime images:
+The Dockerfiles in this repository build the three self-host runtime images:
 
-- console
-- API
-- scheduler
-- executor
+- `webperf` — a single multi-role Bun image covering the console, API,
+  scheduler, and executor. The active role is selected at container start by
+  the `WEBPERF_ROLE` environment variable (`console`, `api`, `scheduler`, or
+  `executor`) via the `tooling/scripts/webperf-role.ts` dispatcher.
 - Rust probe
 - optional Lighthouse reference runner
 

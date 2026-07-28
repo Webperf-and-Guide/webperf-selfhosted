@@ -11,12 +11,12 @@ synchronizing the source Compose `WEBPERF_VERSION`.
 
 Each release contains:
 
-- six multi-platform (`linux/amd64` and `linux/arm64`) GHCR image indexes,
+- three multi-platform (`linux/amd64` and `linux/arm64`) GHCR image indexes,
   tagged with the release version and source SHA;
 - OCI-native SBOM and max-mode provenance attestations;
 - GitHub provenance bound to each image index plus SPDX SBOM attestations bound
   to each amd64 and arm64 platform manifest;
-- a tarball whose `compose.yml` pins all six image repositories by digest;
+- a tarball whose `compose.yml` pins all three image repositories by digest;
 - the root `VERSION` released by the tag;
 - the `browser-audit-seccomp.json` referenced by that Compose file;
 - `runtime-metadata.json` following `runtime-metadata.schema.json`;

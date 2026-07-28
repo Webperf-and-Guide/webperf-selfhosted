@@ -40,6 +40,42 @@ reads the same value from `REGION_ID`. The `/v1/region-packs` and
 `/v1/region-sets` routes now return `410 Gone`, and the Console `/regions`
 page reports the single runtime location instead of a city catalog.
 
+### Phase 2+3 of issue #14: migrate to the three-image runtime set
+
+Phase 2+3 consolidated the four Bun runtime images (`webperf-console`,
+`webperf-api`, `webperf-scheduler`, `webperf-executor`) into a single
+multi-role `webperf` image. The active role is selected at container start by
+the `WEBPERF_ROLE` environment variable (`console`, `api`, `scheduler`, or
+`executor`) through the `tooling/scripts/webperf-role.ts` dispatcher, so all
+four services now share one image. The scheduler also defaults to embedded
+mode inside the API process (`SELFHOST_SCHEDULER_MODE=embedded`); external mode
+remains available for operators who want to keep the dispatch loop in its own
+container.
+
+**Before starting the upgraded stack**, replace any
+`webperf-console`/`webperf-api`/`webperf-scheduler`/`webperf-executor` image
+references in your Compose file or release directory with the single `webperf`
+image, and set `WEBPERF_ROLE` on each of those services. The release bundle's
+`compose.yml` already reflects this; operators maintaining a custom Compose
+file should mirror the same mapping:
+
+```dotenv
+# console service
+WEBPERF_ROLE=console
+# api service
+WEBPERF_ROLE=api
+# scheduler service (only needed if you keep SELFHOST_SCHEDULER_MODE=external)
+WEBPERF_ROLE=scheduler
+# executor service
+WEBPERF_ROLE=executor
+```
+
+If you previously relied on a standalone scheduler container, either remove it
+and accept the default embedded mode, or keep it and set
+`SELFHOST_SCHEDULER_MODE=external` on the API service. The probe
+(`webperf-probe`) and optional Lighthouse runner
+(`webperf-browser-audit-lighthouse`) images are unchanged.
+
 ## 2. Pull and stop
 
 From the new release directory:

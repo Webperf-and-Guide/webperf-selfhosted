@@ -1,7 +1,7 @@
 # Install WebPerf self-hosted
 
 The supported operator path is a tagged GitHub Release bundle. It contains a
-Compose file with all six runtime images pinned by OCI digest, an environment
+Compose file with all three runtime images pinned by OCI digest, an environment
 template, runtime metadata, SPDX SBOMs, checksums, security notes, and the
 license.
 

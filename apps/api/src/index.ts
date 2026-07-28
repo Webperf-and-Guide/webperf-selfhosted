@@ -199,6 +199,10 @@ type CreatedProfileJob = {
 };
 
 export const runtime = parseRuntime(process.env);
+
+// Phase 3: abort controller for the embedded scheduler loop, declared early
+// at module scope so both the startup block and shutdown() can reach it.
+let embeddedSchedulerAbort: AbortController | null = null;
 export const repository = createSqliteJobRepository({
   databasePath: runtime.databasePath,
   encryptionSecret: runtime.internalSecret,
@@ -1402,7 +1406,7 @@ if (runtime.schedulerMode === 'embedded') {
     }))
   };
 
-  const schedulerAbort = new AbortController();
+  embeddedSchedulerAbort = new AbortController();
   const schedulerPollIntervalMs = runtime.schedulerPollIntervalSeconds * 1_000;
 
   schedulerLogger.info({
@@ -1410,14 +1414,20 @@ if (runtime.schedulerMode === 'embedded') {
     pollIntervalSeconds: runtime.schedulerPollIntervalSeconds
   });
 
+  // The embedded scheduler dispatches to this API process internally.
+  // When the server binds to 0.0.0.0 (wildcard), connect via loopback.
+  const dispatchHost = runtime.host === '0.0.0.0' || runtime.host === '::'
+    ? '127.0.0.1'
+    : runtime.host;
+
   runScheduler({
     dispatch: (signal) => dispatchScheduledChecks({
-      apiBaseUrl: `http://127.0.0.1:${runtime.port}`,
+      apiBaseUrl: `http://${dispatchHost}:${runtime.port}`,
       internalSecret: runtime.internalSecret,
       signal
     }),
     pollIntervalMs: schedulerPollIntervalMs,
-    signal: schedulerAbort.signal,
+    signal: embeddedSchedulerAbort?.signal,
     logger: schedulerLogger
   }).catch((error) => {
     schedulerLogger.error({
@@ -1427,9 +1437,7 @@ if (runtime.schedulerMode === 'embedded') {
   });
 
   const stopEmbeddedScheduler = (signal: NodeJS.Signals) => {
-    if (!schedulerAbort.signal.aborted) {
-      schedulerAbort.abort(new Error(`Embedded scheduler shutdown on ${signal}`));
-    }
+    embeddedSchedulerAbort?.abort(new Error(`Embedded scheduler shutdown on ${signal}`));
   };
   process.once('SIGINT', stopEmbeddedScheduler);
   process.once('SIGTERM', stopEmbeddedScheduler);
@@ -4692,6 +4700,7 @@ export const shutdown = (signal = 'manual') => {
   if (!shutdownPromise) {
     shutdownPromise = (async () => {
       console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.started', signal }));
+      embeddedSchedulerAbort?.abort(new Error(`Embedded scheduler shutdown on ${signal}`));
       let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
       const forceStop = new Promise<void>((resolve, reject) => {
         forceStopTimer = setTimeout(() => {

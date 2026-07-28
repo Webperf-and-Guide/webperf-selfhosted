@@ -44,10 +44,12 @@ const resolveRole = (): string => {
 const role = resolveRole();
 const entrypoint = ROLE_ENTRYPOINTS[role];
 
-// Only the db role accepts extra arguments (migrate, backup, etc.). Other
-// roles reject stray argv so a typo in a Compose command array fails fast
-// instead of silently propagating to the entrypoint.
-const extraArgs = process.argv.slice(3);
+// Determine which argv position holds the role and which holds extra args.
+// When the role comes from WEBPERF_ROLE env var, argv[2] is the first extra
+// arg (e.g. `docker run -e WEBPERF_ROLE=db <image> backup`). When the role
+// comes from argv[2], extra args start at argv[3].
+const roleFromEnv = Boolean(process.env.WEBPERF_ROLE?.trim());
+const extraArgs = process.argv.slice(roleFromEnv ? 2 : 3);
 if (extraArgs.length > 0 && role !== 'db') {
   throw new Error(
     `Role '${role}' does not accept extra arguments, but received: ${extraArgs.join(' ')}`

@@ -79,6 +79,8 @@ services:
       SELFHOST_PROBE_BASE_URL: "${SELFHOST_PROBE_BASE_URL:-http://probe:8080}"
       SELFHOST_BROWSER_AUDIT_BASE_URL: "${SELFHOST_BROWSER_AUDIT_BASE_URL:-}"
       SELFHOST_MAX_TARGET_ATTEMPTS: "${SELFHOST_MAX_TARGET_ATTEMPTS:-3}"
+      SELFHOST_SCHEDULER_MODE: "${SELFHOST_SCHEDULER_MODE:-embedded}"
+      SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
     expose:
       - "${SELFHOST_API_PORT:-8788}"
     volumes:
@@ -105,6 +107,8 @@ services:
 
   scheduler:
     <<: [*service-defaults, *bun-read-only]
+    profiles:
+      - external-scheduler
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     depends_on:
       api:

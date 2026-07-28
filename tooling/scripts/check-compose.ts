@@ -42,7 +42,9 @@ const browserSeccompFile = resolve(repositoryRoot, 'infra/docker-compose/browser
 const browserAppArmorFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit.apparmor');
 const composeRenderTimeoutMs = 30_000;
 const maximumTmpfsBytes = 2 * 1024 ** 3;
-const defaultServiceNames = ['api', 'console', 'executor', 'probe', 'scheduler'];
+// Phase 3: scheduler moved to the external-scheduler profile because the
+// default topology embeds it inside the API process.
+const defaultServiceNames = ['api', 'console', 'executor', 'probe'];
 const expectedImages: Record<string, string> = {
   api: 'webperf',
   console: 'webperf',
@@ -69,11 +71,11 @@ for (const unsafeUser of ['0', '0:1000', '1000:0']) {
 const production = renderCompose([productionFile]);
 const productionWithProfiles = renderCompose(
   [productionFile],
-  ['browser-audit', 'debug']
+  ['browser-audit', 'debug', 'external-scheduler']
 );
 const developmentWithProfiles = renderCompose(
   [productionFile, developmentFile],
-  ['browser-audit', 'debug']
+  ['browser-audit', 'debug', 'external-scheduler']
 );
 const developmentWithAppArmorProfiles = renderCompose(
   [productionFile, developmentFile, appArmorComposeFile],

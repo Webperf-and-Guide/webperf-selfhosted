@@ -19,6 +19,9 @@ const ROLE_ENTRYPOINTS: Record<string, string[]> = {
   api: ['bun', './apps/api/src/index.ts'],
   executor: ['bun', './apps/executor/src/index.ts'],
   scheduler: ['bun', './apps/scheduler/src/index.ts'],
+  // Phase 4 of issue #14: regional-runtime uses the same API entrypoint
+  // but with SELFHOST_RUNTIME_MODE=regional-runtime configured via env.
+  'regional-runtime': ['bun', './apps/api/src/index.ts'],
   // db is a passthrough to selfhost-database.ts; extra argv becomes the
   // subcommand (migrate, backup, restore, doctor, maintenance, optimize).
   db: ['bun', './tooling/scripts/selfhost-database.ts']

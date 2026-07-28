@@ -173,6 +173,7 @@ type SelfhostRuntime = {
   maxTargetAttempts: number;
   schedulerMode: 'embedded' | 'external' | 'disabled';
   schedulerPollIntervalSeconds: number;
+  runtimeMode: 'full' | 'regional-runtime';
 };
 
 type MutableTarget = LatencyJobTarget;
@@ -1379,7 +1380,8 @@ console.log(
     databasePath: runtime.databasePath,
     artifactsPath: runtime.artifactsPath,
     retainedDays: runtime.retentionDays,
-    schedulerMode: runtime.schedulerMode
+    schedulerMode: runtime.schedulerMode,
+    runtimeMode: runtime.runtimeMode
   })
 );
 
@@ -3635,7 +3637,8 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     probeBaseUrl: parsed.SELFHOST_PROBE_BASE_URL,
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS,
     schedulerMode: parsed.SELFHOST_SCHEDULER_MODE,
-    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
+    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS,
+    runtimeMode: parsed.SELFHOST_RUNTIME_MODE
   };
 }
 

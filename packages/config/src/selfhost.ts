@@ -56,7 +56,11 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: z.preprocess(
     (value) => value ?? '60',
     z.coerce.number().int().positive().max(86_400)
-  )
+  ),
+  // Phase 4 of issue #14: a deployment can serve as a regional runtime for
+  // the managed Cloud. 'full' is the default self-host product mode;
+  // 'regional-runtime' restricts the API to the regional handoff surface.
+  SELFHOST_RUNTIME_MODE: z.enum(['full', 'regional-runtime']).default('full')
 }).superRefine((config, context) => {
   if (config.SELFHOST_ARTIFACT_UPLOAD_BASE_URL) {
     const url = new URL(config.SELFHOST_ARTIFACT_UPLOAD_BASE_URL);
@@ -136,5 +140,6 @@ export const parseSelfhostApiVars = (
     SELFHOST_BROWSER_AUDIT_BASE_URL: input.SELFHOST_BROWSER_AUDIT_BASE_URL,
     SELFHOST_MAX_TARGET_ATTEMPTS: input.SELFHOST_MAX_TARGET_ATTEMPTS,
     SELFHOST_SCHEDULER_MODE: input.SELFHOST_SCHEDULER_MODE,
-    SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: input.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
+    SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: input.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS,
+    SELFHOST_RUNTIME_MODE: input.SELFHOST_RUNTIME_MODE
   });

@@ -6,7 +6,7 @@ import {
   dispatchScheduledChecks,
   runScheduler,
   type SchedulerLogger
-} from './scheduler';
+} from '@webperf/domain-core';
 
 const defaultProcessHeartbeatPath = '/tmp/webperf-scheduler-heartbeat';
 

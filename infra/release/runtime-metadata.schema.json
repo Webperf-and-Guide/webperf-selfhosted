@@ -16,14 +16,11 @@
     },
     "images": {
       "type": "array",
-      "minItems": 6,
-      "maxItems": 6,
+      "minItems": 3,
+      "maxItems": 3,
       "uniqueItems": true,
       "allOf": [
-        { "contains": { "properties": { "name": { "const": "console" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
-        { "contains": { "properties": { "name": { "const": "api" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
-        { "contains": { "properties": { "name": { "const": "scheduler" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
-        { "contains": { "properties": { "name": { "const": "executor" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "properties": { "name": { "const": "webperf" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
         { "contains": { "properties": { "name": { "const": "probe" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 },
         { "contains": { "properties": { "name": { "const": "browser-audit-lighthouse" } }, "required": ["name"] }, "minContains": 1, "maxContains": 1 }
       ],
@@ -33,9 +30,9 @@
         "required": ["name", "image", "tag", "digest", "reference", "platform", "sbom"],
         "properties": {
           "name": {
-            "enum": ["console", "api", "scheduler", "executor", "probe", "browser-audit-lighthouse"]
+            "enum": ["webperf", "probe", "browser-audit-lighthouse"]
           },
-          "image": { "type": "string", "pattern": "^ghcr\\.io/webperf-and-guide/webperf-[a-z-]+$" },
+          "image": { "type": "string", "pattern": "^ghcr\\.io/webperf-and-guide/webperf(?:-[a-z-]+)?$" },
           "tag": { "type": "string", "pattern": "^0\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|(?=[0-9A-Za-z-]*[A-Za-z-])[0-9A-Za-z-]+)(?:\\.(?:0|[1-9][0-9]*|(?=[0-9A-Za-z-]*[A-Za-z-])[0-9A-Za-z-]+))*)?$" },
           "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
           "reference": { "type": "string", "pattern": "^ghcr\\.io/.+@sha256:[a-f0-9]{64}$" },

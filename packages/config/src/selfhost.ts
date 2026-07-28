@@ -49,6 +49,13 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_MAX_TARGET_ATTEMPTS: z.preprocess(
     (value) => value ?? '3',
     z.coerce.number().int().positive().max(20)
+  ),
+  // Phase 3 of issue #14: the scheduler can run embedded in the API process
+  // (default for standalone), as an external process, or be disabled.
+  SELFHOST_SCHEDULER_MODE: z.enum(['embedded', 'external', 'disabled']).default('embedded'),
+  SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: z.preprocess(
+    (value) => value ?? '60',
+    z.coerce.number().int().positive().max(86_400)
   )
 }).superRefine((config, context) => {
   if (config.SELFHOST_ARTIFACT_UPLOAD_BASE_URL) {
@@ -127,5 +134,7 @@ export const parseSelfhostApiVars = (
     SELFHOST_REGION_LABEL: input.SELFHOST_REGION_LABEL,
     SELFHOST_PROBE_BASE_URL: input.SELFHOST_PROBE_BASE_URL,
     SELFHOST_BROWSER_AUDIT_BASE_URL: input.SELFHOST_BROWSER_AUDIT_BASE_URL,
-    SELFHOST_MAX_TARGET_ATTEMPTS: input.SELFHOST_MAX_TARGET_ATTEMPTS
+    SELFHOST_MAX_TARGET_ATTEMPTS: input.SELFHOST_MAX_TARGET_ATTEMPTS,
+    SELFHOST_SCHEDULER_MODE: input.SELFHOST_SCHEDULER_MODE,
+    SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: input.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   });

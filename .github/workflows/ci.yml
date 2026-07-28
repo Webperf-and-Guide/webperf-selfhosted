@@ -97,51 +97,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: console
+          - name: webperf
             context: .
-            file: apps/console/Dockerfile
+            file: infra/docker/Dockerfile.webperf
             platform: linux/amd64
             arch: amd64
             runner: ubuntu-latest
-          - name: console
+          - name: webperf
             context: .
-            file: apps/console/Dockerfile
-            platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
-          - name: api
-            context: .
-            file: apps/api/Dockerfile
-            platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-          - name: api
-            context: .
-            file: apps/api/Dockerfile
-            platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
-          - name: scheduler
-            context: .
-            file: apps/scheduler/Dockerfile
-            platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-          - name: scheduler
-            context: .
-            file: apps/scheduler/Dockerfile
-            platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
-          - name: executor
-            context: .
-            file: apps/executor/Dockerfile
-            platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-          - name: executor
-            context: .
-            file: apps/executor/Dockerfile
+            file: infra/docker/Dockerfile.webperf
             platform: linux/arm64
             arch: arm64
             runner: ubuntu-24.04-arm
@@ -259,22 +223,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: console
-            image: webperf-console
+          - name: webperf
+            image: webperf
             context: .
-            file: apps/console/Dockerfile
-          - name: api
-            image: webperf-api
-            context: .
-            file: apps/api/Dockerfile
-          - name: scheduler
-            image: webperf-scheduler
-            context: .
-            file: apps/scheduler/Dockerfile
-          - name: executor
-            image: webperf-executor
-            context: .
-            file: apps/executor/Dockerfile
+            file: infra/docker/Dockerfile.webperf
           - name: probe
             image: webperf-probe
             context: ./apps/probe-rs

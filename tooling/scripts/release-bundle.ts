@@ -17,28 +17,10 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 
 export const releaseImages = [
   {
-    name: 'console',
-    image: 'ghcr.io/webperf-and-guide/webperf-console',
+    name: 'webperf',
+    image: 'ghcr.io/webperf-and-guide/webperf',
     context: '.',
-    file: 'apps/console/Dockerfile'
-  },
-  {
-    name: 'api',
-    image: 'ghcr.io/webperf-and-guide/webperf-api',
-    context: '.',
-    file: 'apps/api/Dockerfile'
-  },
-  {
-    name: 'scheduler',
-    image: 'ghcr.io/webperf-and-guide/webperf-scheduler',
-    context: '.',
-    file: 'apps/scheduler/Dockerfile'
-  },
-  {
-    name: 'executor',
-    image: 'ghcr.io/webperf-and-guide/webperf-executor',
-    context: '.',
-    file: 'apps/executor/Dockerfile'
+    file: 'infra/docker/Dockerfile.webperf'
   },
   {
     name: 'probe',

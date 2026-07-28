@@ -336,3 +336,7 @@ const isIpv6Private = (hostname: string) => {
     normalized.startsWith('feb0:')
   );
 };
+
+// Phase 3 of issue #14: scheduler dispatch loop shared between the
+// standalone scheduler app and the embedded scheduler inside the API.
+export * from './scheduler-loop';

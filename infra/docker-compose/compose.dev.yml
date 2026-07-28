@@ -1,27 +1,27 @@
+# Phase 2 of issue #14: all Bun services share one webperf image build.
+# Every Bun service defines the same build so compose up --build builds it
+# once (BuildKit cache) and reuses the result. Without build: on each
+# service, compose tries to pull the local-only :dev tag from a registry.
+x-webperf-build: &webperf-build
+  context: ../..
+  dockerfile: infra/docker/Dockerfile.webperf
+
 services:
   console:
-    image: webperf-console:dev
-    build:
-      context: ../..
-      dockerfile: apps/console/Dockerfile
+    image: webperf:dev
+    build: *webperf-build
 
   api:
-    image: webperf-api:dev
-    build:
-      context: ../..
-      dockerfile: apps/api/Dockerfile
+    image: webperf:dev
+    build: *webperf-build
 
   scheduler:
-    image: webperf-scheduler:dev
-    build:
-      context: ../..
-      dockerfile: apps/scheduler/Dockerfile
+    image: webperf:dev
+    build: *webperf-build
 
   executor:
-    image: webperf-executor:dev
-    build:
-      context: ../..
-      dockerfile: apps/executor/Dockerfile
+    image: webperf:dev
+    build: *webperf-build
 
   probe:
     image: webperf-probe:dev
@@ -36,13 +36,9 @@ services:
       dockerfile: apps/browser-audit-lighthouse/Dockerfile
 
   api-debug:
-    image: webperf-api:dev
-    build:
-      context: ../..
-      dockerfile: apps/api/Dockerfile
+    image: webperf:dev
+    build: *webperf-build
 
   browser-audit-debug:
-    image: webperf-api:dev
-    build:
-      context: ../..
-      dockerfile: apps/api/Dockerfile
+    image: webperf:dev
+    build: *webperf-build

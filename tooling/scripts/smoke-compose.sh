@@ -148,6 +148,10 @@ values['BROWSER_AUDIT_SHARED_SECRET'] = os.environ['SMOKE_BROWSER_AUDIT_SECRET']
 values['CONSOLE_PUBLIC_PORT'] = '0'
 values['SELFHOST_API_DEBUG_PORT'] = '0'
 values['BROWSER_AUDIT_DEBUG_PORT'] = '0'
+# Disable the embedded scheduler in smoke tests so the API's /health
+# healthcheck passes faster; the scheduler dispatch loop is not under
+# test here.
+values['SELFHOST_SCHEDULER_MODE'] = 'disabled'
 
 if profile == 'browser-audit':
     values['SELFHOST_BROWSER_AUDIT_BASE_URL'] = 'http://browser-audit-lighthouse:8080'
@@ -174,7 +178,15 @@ for _ in {1..90}; do
   sleep 2
 done
 
-curl -fsS "${console_url}/" >/dev/null
+# Final check — if console still unreachable, dump diagnostics before failing.
+if ! curl -fsS "${console_url}/" >/dev/null 2>&1; then
+  echo "Console failed to respond at ${console_url}" >&2
+  echo "--- docker ps ---" >&2
+  docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' >&2 2>&1 || true
+  echo "--- console container logs ---" >&2
+  docker logs --tail 20 "$(compose "${profile_args[@]}" ps -q console 2>/dev/null)" >&2 2>&1 || true
+  exit 1
+fi
 
 if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:* ]]; then
   echo "Expected console to bind on loopback, got ${console_mapping:-no mapping}" >&2

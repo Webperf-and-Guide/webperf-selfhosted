@@ -23,11 +23,12 @@ x-bun-read-only: &bun-read-only
 services:
   console:
     <<: [*service-defaults, *bun-read-only]
-    image: "ghcr.io/webperf-and-guide/webperf-console:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     depends_on:
       api:
         condition: service_healthy
     environment:
+      WEBPERF_ROLE: console
       CONTROL_BASE_URL: "${CONTROL_BASE_URL:-http://api:8788}"
       SELFHOST_ADMIN_TOKEN: "${SELFHOST_ADMIN_TOKEN:?set SELFHOST_ADMIN_TOKEN in infra/docker-compose/.env}"
       ORIGIN: "${CONSOLE_ORIGIN:-http://localhost:5173}"
@@ -57,8 +58,9 @@ services:
 
   api:
     <<: [*service-defaults, *bun-read-only]
-    image: "ghcr.io/webperf-and-guide/webperf-api:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     environment:
+      WEBPERF_ROLE: api
       SELFHOST_API_HOST: "${SELFHOST_API_HOST:-0.0.0.0}"
       SELFHOST_API_PORT: "${SELFHOST_API_PORT:-8788}"
       SELFHOST_DATABASE_PATH: "${SELFHOST_DATABASE_PATH:-/data/webperf.sqlite}"
@@ -103,11 +105,12 @@ services:
 
   scheduler:
     <<: [*service-defaults, *bun-read-only]
-    image: "ghcr.io/webperf-and-guide/webperf-scheduler:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     depends_on:
       api:
         condition: service_healthy
     environment:
+      WEBPERF_ROLE: scheduler
       SELFHOST_SCHEDULER_API_BASE_URL: "${SELFHOST_SCHEDULER_API_BASE_URL:-http://api:8788}"
       SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: "${SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS:-60}"
       SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET in infra/docker-compose/.env}"
@@ -132,7 +135,7 @@ services:
 
   executor:
     <<: [*service-defaults, *bun-read-only]
-    image: "ghcr.io/webperf-and-guide/webperf-executor:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     stop_grace_period: 16m
     depends_on:
       api:
@@ -140,6 +143,7 @@ services:
       probe:
         condition: service_healthy
     environment:
+      WEBPERF_ROLE: executor
       SELFHOST_EXECUTOR_API_BASE_URL: "${SELFHOST_EXECUTOR_API_BASE_URL:-http://api:8788}"
       SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: "${SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP:-true}"
       SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET in infra/docker-compose/.env}"
@@ -257,7 +261,7 @@ services:
     <<: [*service-defaults, *bun-read-only]
     profiles:
       - debug
-    image: "ghcr.io/webperf-and-guide/webperf-api:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     entrypoint: ["bun", "/app/infra/docker-compose/debug-proxy.ts"]
     depends_on:
       api:
@@ -289,7 +293,7 @@ services:
     <<: [*service-defaults, *bun-read-only]
     profiles:
       - debug
-    image: "ghcr.io/webperf-and-guide/webperf-api:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     entrypoint: ["bun", "/app/infra/docker-compose/debug-proxy.ts"]
     depends_on:
       browser-audit-lighthouse:

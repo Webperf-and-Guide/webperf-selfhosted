@@ -24,7 +24,7 @@ import { createExecutorApiClient } from '../../executor/src/client';
 import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
 import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
 import { createWebhookExecutionHandler } from '../../executor/src/webhook-handler';
-import { dispatchScheduledChecks } from '../../scheduler/src/scheduler';
+import { dispatchScheduledChecks } from '@webperf/domain-core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';

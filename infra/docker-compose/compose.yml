@@ -105,6 +105,11 @@ services:
       - control-plane
       - browser-runtime
 
+  # Standalone scheduler — opt-in for operators who want an external
+  # scheduler process instead of the default embedded loop in the API.
+  # Activate with: docker compose --profile external-scheduler up -d
+  # When enabled, set SELFHOST_SCHEDULER_MODE=external in .env so the API
+  # does not also run its own embedded loop concurrently.
   scheduler:
     <<: [*service-defaults, *bun-read-only]
     profiles:

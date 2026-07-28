@@ -18,13 +18,17 @@ WAL-aware snapshot:
 ```sh
 mkdir -m 700 -p backups/current
 
-# Stop the API first — the default embedded scheduler runs inside the API
-# process, so stopping the API prevents new scheduled Runs from starting.
-# If you run an external scheduler (--profile external-scheduler), stop it
-# explicitly as well.
+# Stop all writers to freeze new work. In the default embedded mode the
+# scheduler runs inside the API process, so the API must be stopped too.
+# If you run an external scheduler (--profile external-scheduler), stop
+# that container explicitly as well.
 docker compose --env-file .env -f compose.yml stop api executor
-docker compose --env-file .env -f compose.yml exec api \
-  bun /app/tooling/scripts/selfhost-database.ts backup \
+
+# Run the backup as a one-shot container. Override the entrypoint so the
+# role dispatcher does not start the API; the db subcommand bypasses it.
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --entrypoint bun api \
+  /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
   --output /data/webperf-backup.sqlite
 
@@ -35,7 +39,11 @@ docker compose --env-file .env -f compose.yml cp \
 cp .env backups/current/webperf.env
 chmod 600 backups/current/webperf.env backups/current/webperf.sqlite
 
+# Restart the stack. Add --profile external-scheduler if you use that mode
+# so the standalone scheduler container also restarts; without it, the
+# scheduler stays stopped and scheduled Checks will not dispatch.
 docker compose --env-file .env -f compose.yml up -d
+# For external-scheduler mode: docker compose --env-file .env -f compose.yml --profile external-scheduler up -d
 ```
 
 The backup command refuses to overwrite an existing file, writes mode `0600`,

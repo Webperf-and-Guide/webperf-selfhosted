@@ -38,6 +38,19 @@ Treat this document as the current freeze line:
 - `GET /v1/regions`
 - `GET /v1/capabilities`
 
+### Regional runtime handoff (v1 boundary decision)
+
+When `SELFHOST_RUNTIME_MODE=regional-runtime`, the API additionally exposes:
+
+- `GET /v1/regional-capabilities` — runtime capabilities for Cloud dispatch
+- `POST /v1/regional-executions` — idempotent execution request (HMAC-signed)
+- `GET /v1/regional-executions/:idempotencyKey` — status poll
+- `DELETE /v1/regional-executions/:idempotencyKey` — cancellation
+
+These routes are **not** part of the self-host product surface. They exist
+only when the deployment is configured as a regional runtime for managed
+Cloud orchestration. See [Regional runtime handoff](./regional-runtime-handoff.md).
+
 Authentication boundary:
 
 - `GET /health` is the unauthenticated, minimal process health probe.

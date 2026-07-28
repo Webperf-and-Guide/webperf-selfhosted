@@ -10,3 +10,4 @@ export * from './probe-api';
 export * from './events';
 export * from './execution';
 export * from './execution-resources';
+export * from './regional-runtime';

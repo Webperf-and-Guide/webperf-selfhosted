@@ -2,7 +2,7 @@
 
 Sampo changesets are the authoring source for public JS/TS package versions and
 release notes. The root `VERSION` advances independently for whole-repository
-releases, which use a protected `v0.x.y` tag, all six GHCR images, and a
+releases, which use a protected `v0.x.y` tag, all three GHCR images, and a
 digest-pinned Compose bundle.
 
 ## Add release metadata
@@ -100,7 +100,8 @@ lightweight `git tag v0.x.y` is rejected.
 The release workflow calls the reusable required CI workflow before the protected
 environment approval. After approval it:
 
-1. builds and publishes console, API, scheduler, executor, probe, and the
+1. builds and publishes the unified `webperf` image (serving the console, API,
+   scheduler, and executor roles via `WEBPERF_ROLE`), the Rust probe, and the
    Lighthouse reference runner for Linux/amd64;
 2. tags each image with the version and source SHA;
 3. emits OCI SBOM/provenance plus GitHub digest-bound attestations;

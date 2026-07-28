@@ -4,15 +4,22 @@ The product keeps contracts and reporting stable while leaving room for multiple
 
 ## Current Default
 
-Today the default execution path is:
+The scheduler runs **embedded inside the API process** by default
+(`SELFHOST_SCHEDULER_MODE=embedded`). In that mode the default execution path
+is:
 
-- `apps/api` stores configuration and run history
-- `apps/scheduler` only polls the internal-authenticated due-Check dispatch
-  endpoint
+- `apps/api` stores configuration and run history, and hosts the embedded
+  scheduler that polls the internal-authenticated due-Check dispatch endpoint
 - `apps/executor` claims durable SQLite-backed execution leases and owns probe,
   Browser Audit, evaluation, retry, and webhook work
 - `apps/probe-rs` performs network measurements
 - `packages/contracts` and `packages/report-core` shape the stored results
+
+The scheduler can also run as an **optional external** process
+(`SELFHOST_SCHEDULER_MODE=external`) that only polls the dispatch endpoint and
+otherwise behaves like the embedded loop. Embedded mode is the supported
+default for a small single-org installation; external mode exists for
+operators who want to scale or isolate the dispatch loop independently.
 
 Optional runtimes may live alongside that path without becoming a default dependency.
 Today that includes `apps/browser-audit-lighthouse`, which remains a standalone runtime surface.
@@ -27,8 +34,9 @@ Execution details should stay behind a small boundary:
 - contracts describe what ran and what came back
 - reports summarize and compare those results
 - the API stores state and exposes dispatch surfaces
-- the scheduler requests due-work dispatch on its configured interval; the API
-  atomically creates Runs and queue rows
+- the scheduler requests due-work dispatch on its configured interval and the API
+  atomically creates Runs and queue rows; in the default embedded mode the
+  scheduler is a loop inside the API process rather than a separate service
 - the executor owns execution leases and calls probe runtimes
 - Browser Audit upload credentials use a dedicated lease-bound grant endpoint;
   they are not embedded in the general execution context or persisted queue payload

@@ -18,22 +18,18 @@ WAL-aware snapshot:
 ```sh
 mkdir -m 700 -p backups/current
 
-# Stop the executor and the scheduler to freeze new work. In the default
-# embedded mode the scheduler runs inside the API process, so stopping
-# executor alone is not enough — we temporarily disable the scheduler
-# loop by setting SELFHOST_SCHEDULER_MODE=disabled for a one-shot backup.
+# Stop all writers to freeze new work. In the default embedded mode the
+# scheduler runs inside the API process, so the API must be stopped too.
 # If you run an external scheduler (--profile external-scheduler), stop
 # that container explicitly as well.
-docker compose --env-file .env -f compose.yml stop executor
+docker compose --env-file .env -f compose.yml stop api executor
 
-# Run the backup inside the still-running API container.
-docker compose --env-file .env -f compose.yml exec api \
+# Run the backup as a one-shot container so the database is not being
+# written to during the snapshot. This uses the same image and volume.
+docker compose --env-file .env -f compose.yml run --rm --no-deps api \
   bun /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
   --output /data/webperf-backup.sqlite
-
-# Now stop the API to ensure no writes happen during the file copy.
-docker compose --env-file .env -f compose.yml stop api
 
 docker compose --env-file .env -f compose.yml cp \
   api:/data/webperf-backup.sqlite backups/current/webperf.sqlite

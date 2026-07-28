@@ -24,10 +24,11 @@ mkdir -m 700 -p backups/current
 # that container explicitly as well.
 docker compose --env-file .env -f compose.yml stop api executor
 
-# Run the backup as a one-shot container so the database is not being
-# written to during the snapshot. This uses the same image and volume.
-docker compose --env-file .env -f compose.yml run --rm --no-deps api \
-  bun /app/tooling/scripts/selfhost-database.ts backup \
+# Run the backup as a one-shot container. Override the entrypoint so the
+# role dispatcher does not start the API; the db subcommand bypasses it.
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --entrypoint bun api \
+  /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
   --output /data/webperf-backup.sqlite
 
@@ -38,6 +39,8 @@ docker compose --env-file .env -f compose.yml cp \
 cp .env backups/current/webperf.env
 chmod 600 backups/current/webperf.env backups/current/webperf.sqlite
 
+# Restart the stack. If you use the external-scheduler profile, add
+# --profile external-scheduler so the scheduler container restarts too.
 docker compose --env-file .env -f compose.yml up -d
 ```
 

@@ -173,6 +173,7 @@ type SelfhostRuntime = {
   maxTargetAttempts: number;
   schedulerMode: 'embedded' | 'external' | 'disabled';
   schedulerPollIntervalSeconds: number;
+  runtimeMode: 'full' | 'regional-runtime';
 };
 
 type MutableTarget = LatencyJobTarget;
@@ -217,6 +218,7 @@ await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorage
 const buildHealthPayload = () => ({
   service: 'webperf-api',
   ok: true,
+  runtimeMode: runtime.runtimeMode,
   runtimeLocation: runtime.runtimeLocation,
   probeBaseUrl: runtime.probeBaseUrl,
   maxTargetAttempts: runtime.maxTargetAttempts,
@@ -252,13 +254,14 @@ const buildHealthPayload = () => ({
 
 const buildPublicCapabilitiesPayload = () => ({
   deploymentModel: 'selfhost' as const,
+  runtimeMode: runtime.runtimeMode,
   features: {
     managedRegions: false,
-    scheduledChecks: true,
-    baselineCompare: true,
-    reportExports: true,
-    webhookAlerts: true,
-    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl),
+    scheduledChecks: runtime.runtimeMode !== 'regional-runtime',
+    baselineCompare: runtime.runtimeMode !== 'regional-runtime',
+    reportExports: runtime.runtimeMode !== 'regional-runtime',
+    webhookAlerts: runtime.runtimeMode !== 'regional-runtime',
+    browserAuditDirectRun: runtime.runtimeMode !== 'regional-runtime' && Boolean(runtime.browserAuditBaseUrl),
     aiAnalyses: false,
     openApi: true,
     appRpc: true,
@@ -1379,7 +1382,8 @@ console.log(
     databasePath: runtime.databasePath,
     artifactsPath: runtime.artifactsPath,
     retainedDays: runtime.retentionDays,
-    schedulerMode: runtime.schedulerMode
+    schedulerMode: runtime.schedulerMode,
+    runtimeMode: runtime.runtimeMode
   })
 );
 
@@ -1388,7 +1392,10 @@ console.log(
 // needs no separate scheduler container. The loop calls the same internal
 // dispatch endpoint as the standalone scheduler, using loopback origin and
 // the internal secret already present in the API process.
-if (runtime.schedulerMode === 'embedded') {
+// In regional-runtime mode the scheduler is always disabled — a regional
+// runtime only accepts Cloud-submitted execution requests, not self-host
+// scheduled Checks.
+if (runtime.schedulerMode === 'embedded' && runtime.runtimeMode !== 'regional-runtime') {
   const schedulerBaseLogFields = {
     service: 'webperf-api',
     component: 'embedded-scheduler'
@@ -3635,7 +3642,8 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     probeBaseUrl: parsed.SELFHOST_PROBE_BASE_URL,
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS,
     schedulerMode: parsed.SELFHOST_SCHEDULER_MODE,
-    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
+    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS,
+    runtimeMode: parsed.SELFHOST_RUNTIME_MODE
   };
 }
 

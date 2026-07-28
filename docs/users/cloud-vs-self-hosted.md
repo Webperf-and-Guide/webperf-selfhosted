@@ -37,5 +37,15 @@ The decision rule is simple: if a self-host operator can use a feature
 independently, it belongs here; if its value depends on managed hosting,
 automation, tenancy, or billing, it belongs in the cloud product.
 
+## Regional runtime handoff
+
+A self-host deployment can serve as a **regional runtime** for the managed
+Cloud. In that role, the Cloud control plane submits signed, idempotent
+execution requests and the runtime returns results with provenance. The
+protocol is provider-neutral and defined in this repository — see
+[Regional runtime handoff](../architecture/regional-runtime-handoff.md).
+Cloud-only orchestration (global fan-out, cross-region aggregation, FCU
+metering, plan enforcement) stays in the managed product.
+
 See the detailed [product boundary](../comparison/cloud-vs-selfhosted.md) and
 [feature scope](../self-hosting/feature-scope.md).

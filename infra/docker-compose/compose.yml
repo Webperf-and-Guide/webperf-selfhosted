@@ -24,7 +24,6 @@ services:
   console:
     <<: [*service-defaults, *bun-read-only]
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
-    command: ["console"]
     depends_on:
       api:
         condition: service_healthy
@@ -60,7 +59,6 @@ services:
   api:
     <<: [*service-defaults, *bun-read-only]
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
-    command: ["api"]
     environment:
       WEBPERF_ROLE: api
       SELFHOST_API_HOST: "${SELFHOST_API_HOST:-0.0.0.0}"
@@ -108,7 +106,6 @@ services:
   scheduler:
     <<: [*service-defaults, *bun-read-only]
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
-    command: ["scheduler"]
     depends_on:
       api:
         condition: service_healthy
@@ -139,7 +136,6 @@ services:
   executor:
     <<: [*service-defaults, *bun-read-only]
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
-    command: ["executor"]
     stop_grace_period: 16m
     depends_on:
       api:

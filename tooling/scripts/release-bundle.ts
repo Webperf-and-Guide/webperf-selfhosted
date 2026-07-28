@@ -46,7 +46,7 @@ type ReleaseImageSbom = {
 };
 
 export type ReleaseImageMetadata = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   name: ReleaseImageName;
   image: string;
   tag: string;
@@ -316,7 +316,7 @@ export function writeReleaseImageMetadata({
   const sboms: ReleaseImageSbom[] = [amd64Sbom, arm64Sbom];
 
   const metadata: ReleaseImageMetadata = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: definition.name,
     image: definition.image,
     tag: version,
@@ -412,7 +412,7 @@ export function renderReleaseBundle({
   }
 
   const runtimeMetadata = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     version,
     tag: `v${version}`,
     sourceCommit: metadata[0].sourceCommit,
@@ -467,7 +467,7 @@ function readReleaseImageMetadata(
         === (hasPlatformSboms ? metadataKeys : legacyMetadataKeys).join('\n'),
       'metadata keys do not match the release schema'
     ],
-    [metadata.schemaVersion === 1, 'schemaVersion must be 1'],
+    [metadata.schemaVersion === 2, 'schemaVersion must be 2'],
     [metadata.name === definition.name, `name must be ${definition.name}`],
     [metadata.image === definition.image, `image must be ${definition.image}`],
     [metadata.tag === version, `tag must be ${version}`],

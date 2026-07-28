@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://webperf.and.guide/schemas/selfhost-release-runtime-metadata-v1.json",
+  "$id": "https://webperf.and.guide/schemas/selfhost-release-runtime-metadata-v2.json",
   "title": "WebPerf self-host release runtime metadata",
+  "description": "v2 schema for the consolidated three-image runtime model. v1 (six images) is preserved as an immutable frozen schema at ...-v1.json and must not be modified.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "version", "tag", "sourceCommit", "platform", "images"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "version": { "type": "string", "pattern": "^0\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|(?=[0-9A-Za-z-]*[A-Za-z-])[0-9A-Za-z-]+)(?:\\.(?:0|[1-9][0-9]*|(?=[0-9A-Za-z-]*[A-Za-z-])[0-9A-Za-z-]+))*)?$" },
     "tag": { "type": "string", "pattern": "^v0\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|(?=[0-9A-Za-z-]*[A-Za-z-])[0-9A-Za-z-]+)(?:\\.(?:0|[1-9][0-9]*|(?=[0-9A-Za-z-]*[A-Za-z-])[0-9A-Za-z-]+))*)?$" },
     "sourceCommit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },

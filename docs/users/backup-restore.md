@@ -18,12 +18,15 @@ WAL-aware snapshot:
 ```sh
 mkdir -m 700 -p backups/current
 
-docker compose --env-file .env -f compose.yml stop scheduler executor
+# Stop the API first — the default embedded scheduler runs inside the API
+# process, so stopping the API prevents new scheduled Runs from starting.
+# If you run an external scheduler (--profile external-scheduler), stop it
+# explicitly as well.
+docker compose --env-file .env -f compose.yml stop api executor
 docker compose --env-file .env -f compose.yml exec api \
   bun /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
   --output /data/webperf-backup.sqlite
-docker compose --env-file .env -f compose.yml stop api
 
 docker compose --env-file .env -f compose.yml cp \
   api:/data/webperf-backup.sqlite backups/current/webperf.sqlite

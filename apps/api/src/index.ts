@@ -1415,10 +1415,17 @@ if (runtime.schedulerMode === 'embedded') {
   });
 
   // The embedded scheduler dispatches to this API process internally.
-  // When the server binds to 0.0.0.0 (wildcard), connect via loopback.
-  const dispatchHost = runtime.host === '0.0.0.0' || runtime.host === '::'
+  // Normalize the bind address into a URL-safe connect target:
+  // - wildcard binds (0.0.0.0 / ::) connect via IPv4 loopback
+  // - IPv6 literals are wrapped in brackets for URL syntax
+  const rawHost = runtime.host;
+  const isWildcard = rawHost === '0.0.0.0' || rawHost === '::' || rawHost === '[::]';
+  const isIPv6Literal = rawHost.includes(':') && !rawHost.startsWith('[');
+  const dispatchHost = isWildcard
     ? '127.0.0.1'
-    : runtime.host;
+    : isIPv6Literal
+      ? `[${rawHost}]`
+      : rawHost;
 
   runScheduler({
     dispatch: (signal) => dispatchScheduledChecks({

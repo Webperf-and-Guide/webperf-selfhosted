@@ -1222,17 +1222,17 @@ export const createSqliteJobRepository = ({
         const hasInflight = executionJobs.some(
           (executionJob) =>
             executionJob
-            && !['succeeded', 'failed', 'cancelled'].includes(executionJob.status)
+            && !isTerminalExecutionJob(executionJob)
         );
         if (!hasInflight) {
+          // Cancellation and deadline expiry must never rewrite an execution
+          // that became terminal before this immediate transaction acquired
+          // the writer reservation.
           return record;
         }
 
         for (const executionJob of executionJobs) {
-          if (
-            !executionJob
-            || ['succeeded', 'failed', 'cancelled'].includes(executionJob.status)
-          ) {
+          if (!executionJob || isTerminalExecutionJob(executionJob)) {
             continue;
           }
           const cancelledRow = cancelExecutionJobStatement.get(
@@ -1510,6 +1510,9 @@ const assertNever = (value: never): never => {
   void value;
   throw new Error('Unsupported execution resource result kind');
 };
+
+const isTerminalExecutionJob = (executionJob: ExecutionJob) =>
+  ['succeeded', 'failed', 'cancelled'].includes(executionJob.status);
 
 const assertLeaseOwner = (leaseOwner: string) => {
   if (leaseOwner.length < 1 || leaseOwner.length > executionLeaseOwnerMaxLength) {

@@ -129,7 +129,9 @@ export const browserAuditArtifactUploadGrantSchema = browserAuditArtifactUploadC
 
 const networkProbeExecutionResultSchema = z.object({
   kind: z.literal('network_probe'),
-  jobs: z.array(latencyJobDetailSchema).min(1).max(20),
+  jobs: z.array(latencyJobDetailSchema)
+    .min(1)
+    .max(networkProbeMaxJobsPerExecution),
   run: checkProfileRunSchema.nullable()
 });
 
@@ -157,11 +159,15 @@ export const executionResourceResultRequestSchema = executionJobOwnerRequestSche
 export type ExecutionResourceResultRequest = z.infer<typeof executionResourceResultRequestSchema>;
 
 export const executionFollowupsRequestSchema = executionJobOwnerRequestSchema.extend({
-  jobs: z.array(enqueueExecutionJobSchema).min(1).max(20)
+  jobs: z.array(enqueueExecutionJobSchema)
+    .min(1)
+    .max(networkProbeMaxJobsPerExecution)
 });
 export type ExecutionFollowupsRequest = z.infer<typeof executionFollowupsRequestSchema>;
 
 export const executionFollowupsResponseSchema = z.object({
-  jobs: z.array(executionJobSchema).min(1).max(20)
+  jobs: z.array(executionJobSchema)
+    .min(1)
+    .max(networkProbeMaxJobsPerExecution)
 });
 export type ExecutionFollowupsResponse = z.infer<typeof executionFollowupsResponseSchema>;

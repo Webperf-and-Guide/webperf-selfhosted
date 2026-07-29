@@ -65,4 +65,23 @@ describe('regional execution record', () => {
       }]
     }).success).toBe(false);
   });
+
+  test('rejects invalid persisted lifecycle ordering', () => {
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      deadlineAt: record.acceptedAt
+    }).success).toBe(false);
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      updatedAt: '2026-07-28T23:59:59.999Z'
+    }).success).toBe(false);
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      cancelledAt: '2026-07-29T00:00:30.000Z'
+    }).success).toBe(false);
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      cancelledAt: '2026-07-29T00:00:00.100Z'
+    }).success).toBe(true);
+  });
 });

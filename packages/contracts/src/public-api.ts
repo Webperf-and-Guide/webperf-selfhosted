@@ -48,6 +48,13 @@ export const jobStatusValues = [...targetStatusValues, 'partial'] as const;
 export const jobStatusSchema = z.enum(jobStatusValues);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 
+export const latencyJobIdSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+export type LatencyJobId = z.infer<typeof latencyJobIdSchema>;
+
 export const requestMethodValues = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const requestMethodSchema = z.enum(requestMethodValues);
 export type RequestMethod = z.infer<typeof requestMethodSchema>;
@@ -383,7 +390,7 @@ export const checkProfileRunRouteSchema = z.object({
   routeId: z.string().min(1),
   routeLabel: z.string().min(1).max(120),
   url: z.string().url(),
-  jobId: z.string().min(1),
+  jobId: latencyJobIdSchema,
   browserAudit: browserAuditExecutionSummarySchema.nullable().default(null)
 });
 export type CheckProfileRunRoute = z.infer<typeof checkProfileRunRouteSchema>;
@@ -466,7 +473,7 @@ export type CheckProfileRunListResponse = z.infer<typeof checkProfileRunListResp
 // were removed.
 
 export const latencyJobTargetSchema = z.object({
-  jobId: z.string().min(1),
+  jobId: latencyJobIdSchema,
   region: runtimeRegionIdSchema,
   status: targetStatusSchema,
   attemptNo: z.number().int().nonnegative(),
@@ -488,7 +495,7 @@ export const latencyJobTargetSchema = z.object({
 export type LatencyJobTarget = z.infer<typeof latencyJobTargetSchema>;
 
 export const latencyJobSchema = z.object({
-  id: z.string().min(1),
+  id: latencyJobIdSchema,
   url: z.string().url(),
   status: jobStatusSchema,
   note: z.string().max(200).nullable(),

@@ -156,6 +156,15 @@ const createExecutionDeadlineSignal = (
     };
   }
 
+  const parsedDeadlineMs = Date.parse(deadlineAt);
+  if (Number.isNaN(parsedDeadlineMs)) {
+    throw new ExecutionFailure(
+      'regional_execution_invalid_deadline',
+      'Regional execution deadline is invalid',
+      false
+    );
+  }
+
   const controller = new AbortController();
   const abortFromParent = () => controller.abort(parentSignal.reason);
   if (parentSignal.aborted) {
@@ -169,14 +178,6 @@ const createExecutionDeadlineSignal = (
     'Regional execution exceeded its accepted deadline',
     false
   ));
-  const parsedDeadlineMs = Date.parse(deadlineAt);
-  if (Number.isNaN(parsedDeadlineMs)) {
-    throw new ExecutionFailure(
-      'regional_execution_invalid_deadline',
-      'Regional execution deadline is invalid',
-      false
-    );
-  }
   const remainingMs = parsedDeadlineMs - Date.now();
   let timeout: ReturnType<typeof setTimeout> | null = null;
   if (remainingMs <= 0) {

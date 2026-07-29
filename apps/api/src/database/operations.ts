@@ -86,6 +86,9 @@ const cleanupRegionalExecutionGroups = (
         JOIN execution_jobs AS execution
           ON execution.id = target_link.execution_job_id
         WHERE target_link.regional_execution_id = entity.id
+          -- The leased execution row is the lifecycle source of truth.
+          -- Cancellation can intentionally leave its display-only domain job
+          -- queued, and both rows are deleted atomically with this group.
           AND (
             execution.status NOT IN ('succeeded', 'failed', 'cancelled')
             OR execution.completed_at IS NULL

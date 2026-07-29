@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   executionJobIdSchema,
+  latencyJobIdSchema,
   regionalExecutionIdempotencyKeySchema,
   regionalExecutionProvenanceSchema,
   regionalExecutionRequestSchema,
@@ -11,7 +12,7 @@ import {
 
 export const regionalExecutionTargetLinkSchema = z.object({
   targetId: regionalExecutionTargetSchema.shape.targetId,
-  jobId: executionJobIdSchema,
+  jobId: latencyJobIdSchema,
   executionJobId: executionJobIdSchema
 });
 export type RegionalExecutionTargetLink = z.infer<typeof regionalExecutionTargetLinkSchema>;
@@ -45,6 +46,41 @@ export const regionalExecutionRecordSchema = z.object({
       message: 'Regional execution cannot be both cancelled and deadline-exceeded',
       path: ['cancelledAt']
     });
+  }
+
+  const acceptedAtMs = Date.parse(record.acceptedAt);
+  const deadlineAtMs = Date.parse(record.deadlineAt);
+  const createdAtMs = Date.parse(record.createdAt);
+  const updatedAtMs = Date.parse(record.updatedAt);
+  if (deadlineAtMs <= acceptedAtMs) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Regional execution deadline must follow acceptance',
+      path: ['deadlineAt']
+    });
+  }
+  if (updatedAtMs < createdAtMs) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Regional execution update must not precede creation',
+      path: ['updatedAt']
+    });
+  }
+  for (const terminalField of ['cancelledAt', 'deadlineExceededAt'] as const) {
+    const terminalAt = record[terminalField];
+    if (
+      terminalAt !== null
+      && (
+        Date.parse(terminalAt) < acceptedAtMs
+        || Date.parse(terminalAt) > updatedAtMs
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Regional execution terminal time must fall between acceptance and its last update',
+        path: [terminalField]
+      });
+    }
   }
 
   const requestTargetIds = record.request.targets.map((target) => target.targetId);

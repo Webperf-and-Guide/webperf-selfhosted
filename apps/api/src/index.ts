@@ -218,7 +218,7 @@ const browserAuditArtifactDownloadPathPattern =
   /^\/v1\/browser-audits\/([^/]+)\/artifacts\/([^/]+)$/;
 const regionalExecutionPathPattern = /^\/v1\/regional-executions\/([^/]+)$/;
 const regionalRetentionPruneIntervalMs = 60 * 60 * 1_000;
-let nextRegionalRetentionPruneAt = Date.now() + regionalRetentionPruneIntervalMs;
+let regionalRetentionPruneTimer: ReturnType<typeof setInterval> | null = null;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -1569,6 +1569,22 @@ console.log(
   })
 );
 
+if (runtime.runtimeMode === 'regional-runtime') {
+  regionalRetentionPruneTimer = setInterval(() => {
+    try {
+      repository.pruneRetainedData(runtime.retentionDays);
+    } catch (error) {
+      console.error(JSON.stringify({
+        service: 'webperf-api',
+        component: 'regional-retention',
+        event: 'regional_retention_prune_failed',
+        error: describeSafeError(error)
+      }));
+    }
+  }, regionalRetentionPruneIntervalMs);
+  regionalRetentionPruneTimer.unref?.();
+}
+
 // Phase 3 of issue #14: when schedulerMode is 'embedded', run the scheduler
 // dispatch loop inside the API process so the default standalone topology
 // needs no separate scheduler container. The loop calls the same internal
@@ -1828,14 +1844,6 @@ async function handleCreateRegionalExecution(request: Request) {
 
   let persisted: ReturnType<typeof repository.createRegionalExecution>;
   try {
-    // Regional records and their linked jobs/execution rows must cross the
-    // retention boundary together so a retained idempotency key can never
-    // reconstruct from partially deleted results.
-    const now = Date.now();
-    if (now >= nextRegionalRetentionPruneAt) {
-      repository.pruneRetainedData(runtime.retentionDays);
-      nextRegionalRetentionPruneAt = now + regionalRetentionPruneIntervalMs;
-    }
     persisted = repository.createRegionalExecution({ record, resources });
   } catch (error) {
     const incidentId = logRegionalExecutionCreationFailure(error, record.id);
@@ -5403,6 +5411,10 @@ export const shutdown = (signal = 'manual') => {
     shutdownPromise = (async () => {
       console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.started', signal }));
       embeddedSchedulerAbort?.abort(new Error(`Embedded scheduler shutdown on ${signal}`));
+      if (regionalRetentionPruneTimer !== null) {
+        clearInterval(regionalRetentionPruneTimer);
+        regionalRetentionPruneTimer = null;
+      }
       let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
       const forceStop = new Promise<void>((resolve, reject) => {
         forceStopTimer = setTimeout(() => {

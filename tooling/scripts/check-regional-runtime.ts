@@ -189,6 +189,7 @@ for (const container of profileContainers) {
   );
 }
 const profileApi = profileContainers.find(({ name }) => name === 'regional-api');
+const profileExecutor = profileContainers.find(({ name }) => name === 'regional-executor');
 const profileProbe = profileContainers.find(({ name }) => name === 'probe');
 assert(
   profileApi?.requiredDeploymentInputs?.includes('SELFHOST_REGION_ID'),
@@ -203,6 +204,17 @@ assert(
     && !profileProbe.requiredDeploymentInputs.includes('REGION_ID'),
   'managed profile must expose one region deployment input for API and probe'
 );
+for (const input of [
+  'SELFHOST_REGION_ID',
+  'WEBPERF_RUNTIME_VERSION',
+  'WEBPERF_RUNTIME_IMAGE_DIGEST',
+  'WEBPERF_PROBE_IMAGE_DIGEST'
+]) {
+  assert(
+    profileExecutor?.requiredDeploymentInputs?.includes(input),
+    `managed profile executor must require ${input}`
+  );
+}
 
 console.log(JSON.stringify({
   ok: true,

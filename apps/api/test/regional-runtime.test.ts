@@ -20,6 +20,11 @@ const internalSecret = 'regional-runtime-internal-secret';
 const probeSecret = 'regional-runtime-probe-secret';
 const regionalSecret = 'regional-runtime-cloud-secret';
 const regionalNextSecret = 'regional-runtime-cloud-next-secret';
+const initialProvenance = createRuntimeProvenance({
+  regionId: 'tokyo',
+  runtimeImageDigest: `sha256:${'a'.repeat(64)}`,
+  probeImageDigest: `sha256:${'b'.repeat(64)}`
+});
 const apiProcesses: Array<ReturnType<typeof Bun.spawn>> = [];
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 const tempDirectories: string[] = [];
@@ -218,7 +223,8 @@ describe('regional runtime handoff', () => {
       client: stagedClient,
       leaseOwner: stagedLease.leaseOwner,
       probeSharedSecret: probeSecret,
-      probeBaseUrl: `http://127.0.0.1:${probe.port!}`
+      probeBaseUrl: `http://127.0.0.1:${probe.port!}`,
+      regionalExecutionProvenance: initialProvenance
     });
     await stagedHandler(stagedRunning, new AbortController().signal);
 
@@ -436,6 +442,12 @@ describe('regional runtime handoff', () => {
       { headers: { authorization: `Bearer ${adminToken}` } }
     )).status).toBe(401);
 
+    const pendingAcrossRollout = createUnsignedRequest('rollout_pending:tokyo');
+    expect((await sendRegionalExecution(
+      harness.baseUrl,
+      pendingAcrossRollout
+    )).status).toBe(202);
+
     await stopApiProcess(harness.process);
     harness = await startRegionalRuntime(probe.port!, {
       directory: harness.directory,
@@ -444,6 +456,32 @@ describe('regional runtime handoff', () => {
       maxTargetAttempts: 1,
       runtimeImageDigest: `sha256:${'c'.repeat(64)}`,
       probeImageDigest: `sha256:${'d'.repeat(64)}`
+    });
+
+    await drainRegionalExecutions(
+      harness.baseUrl,
+      probe.port!,
+      createRuntimeProvenance({
+        regionId: 'frankfurt',
+        runtimeImageDigest: `sha256:${'c'.repeat(64)}`,
+        probeImageDigest: `sha256:${'d'.repeat(64)}`
+      })
+    );
+    const rolloutFailure = regionalExecutionResultSchema.parse(
+      await (await fetch(
+        `${harness.baseUrl}/v1/regional-executions/${
+          encodeURIComponent(pendingAcrossRollout.idempotencyKey)
+        }`,
+        { headers: regionalAuthorization() }
+      )).json()
+    );
+    expect(rolloutFailure).toMatchObject({
+      status: 'failed',
+      provenance: initialProvenance,
+      targets: [{
+        status: 'failed',
+        errorCode: 'regional_runtime_revision_changed'
+      }]
     });
 
     const replayAfterLimitChange = await sendRegionalExecution(harness.baseUrl, {
@@ -532,6 +570,30 @@ const expectVerifiedResult = async (
   )).toBe(true);
 };
 
+function createRuntimeProvenance({
+  regionId,
+  runtimeImageDigest,
+  probeImageDigest
+}: {
+  regionId: string;
+  runtimeImageDigest: string;
+  probeImageDigest: string;
+}) {
+  return {
+    regionId,
+    runnerType: 'network_probe' as const,
+    runtime: {
+      version: '0.3.0-test',
+      imageDigest: runtimeImageDigest
+    },
+    runner: {
+      id: 'probe-rs' as const,
+      implementation: 'rust' as const,
+      imageDigest: probeImageDigest
+    }
+  };
+}
+
 const startRegionalRuntime = async (
   probePort: number,
   options: {
@@ -591,7 +653,11 @@ const stopApiProcess = async (
   await subprocess.exited;
 };
 
-const drainRegionalExecutions = async (baseUrl: string, probePort: number) => {
+const drainRegionalExecutions = async (
+  baseUrl: string,
+  probePort: number,
+  provenance = initialProvenance
+) => {
   const client = createExecutorApiClient({
     baseUrl,
     internalSecret
@@ -601,7 +667,8 @@ const drainRegionalExecutions = async (baseUrl: string, probePort: number) => {
     client,
     leaseOwner,
     probeSharedSecret: probeSecret,
-    probeBaseUrl: `http://127.0.0.1:${probePort}`
+    probeBaseUrl: `http://127.0.0.1:${probePort}`,
+    regionalExecutionProvenance: provenance
   });
   const logger: ExecutorLogger = {
     info: () => {},

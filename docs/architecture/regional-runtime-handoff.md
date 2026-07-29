@@ -140,6 +140,14 @@ SQLite-backed jobs and records survive API/executor restart. If a process
 stops, an expired lease can be reclaimed by the executor and the same
 idempotency key continues to address the original work.
 
+The accepted execution also carries the immutable runtime and probe
+provenance expected by its executor. A deployment rollout may recover work
+only when the executor still reports that same region, runtime version, and
+image digests. Work left queued or leased across a revision change fails
+terminally with `regional_runtime_revision_changed` before contacting the
+probe. The Cloud must submit a new idempotency key against the replacement
+runtime instead of attributing a new measurement to the previous images.
+
 ## Deployment invariants
 
 Regional Runtime v1 requires:

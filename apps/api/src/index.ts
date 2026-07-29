@@ -34,6 +34,7 @@ import type {
   Property,
   PropertyListResponse,
   RegionalExecutionRequest,
+  RegionalExecutionProvenance,
   RegionalExecutionResult,
   RegionalExecutionTargetResult,
   ReportExportFormat,
@@ -1822,6 +1823,7 @@ async function handleCreateRegionalExecution(request: Request) {
   const deadlineAt = new Date(
     Date.parse(acceptedAt) + parsed.data.deadlineMs
   ).toISOString();
+  const provenance = buildRegionalExecutionProvenance();
   const jobIdPrefix = `reg_${requestDigest.slice(0, 32)}`;
   const jobs = parsed.data.targets.map((target, index) =>
     createJobRecord({
@@ -1844,7 +1846,8 @@ async function handleCreateRegionalExecution(request: Request) {
       resourceId: parsed.data.idempotencyKey,
       executionJobId,
       deadlineAt,
-      regionalExecutionId: parsed.data.idempotencyKey
+      regionalExecutionId: parsed.data.idempotencyKey,
+      expectedProvenance: provenance
     }));
     const requestTarget = parsed.data.targets[index];
     if (!requestTarget) {
@@ -1861,7 +1864,7 @@ async function handleCreateRegionalExecution(request: Request) {
     id: parsed.data.idempotencyKey,
     requestDigest,
     request: parsed.data,
-    provenance: buildRegionalExecutionProvenance(),
+    provenance,
     targetLinks,
     acceptedAt,
     deadlineAt,
@@ -3848,6 +3851,7 @@ function buildNetworkExecutionResourceInput(
     executionJobId?: string;
     deadlineAt?: string | null;
     regionalExecutionId?: string | null;
+    expectedProvenance?: RegionalExecutionProvenance | null;
   } = {}
 ) {
   const firstJob = jobs[0];
@@ -3872,7 +3876,8 @@ function buildNetworkExecutionResourceInput(
     checkId,
     runId: run?.id ?? null,
     regionalExecutionId: options.regionalExecutionId ?? null,
-    deadlineAt: options.deadlineAt ?? null
+    deadlineAt: options.deadlineAt ?? null,
+    expectedProvenance: options.expectedProvenance ?? null
   });
 
   return {

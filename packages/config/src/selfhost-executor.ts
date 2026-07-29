@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { isIP } from 'node:net';
-import { defaultSelfhostProbeBaseUrl, emptyStringToUndefined } from './shared';
+import {
+  defaultSelfhostProbeBaseUrl,
+  defaultSelfhostRegionId,
+  emptyStringToUndefined
+} from './shared';
+import { runtimeRegionIdSchema } from '@webperf/contracts';
 
 export const isLoopbackHostname = (hostname: string) => {
   const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
@@ -47,6 +52,14 @@ export const selfhostExecutorEnvSchema = z
       z.enum(['true', 'false']).transform((value) => value === 'true')
     ),
     SELFHOST_EXECUTOR_ID: emptyStringToUndefined(z.string().trim().min(1).max(120)),
+    SELFHOST_REGION_ID: runtimeRegionIdSchema.default(defaultSelfhostRegionId),
+    WEBPERF_RUNTIME_VERSION: emptyStringToUndefined(z.string().trim().min(1).max(120)),
+    WEBPERF_RUNTIME_IMAGE_DIGEST: emptyStringToUndefined(
+      z.string().regex(/^sha256:[a-f0-9]{64}$/)
+    ),
+    WEBPERF_PROBE_IMAGE_DIGEST: emptyStringToUndefined(
+      z.string().regex(/^sha256:[a-f0-9]{64}$/)
+    ),
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: z.preprocess(
       // This controls idle claim cadence only. Active lease renewal is governed
       // independently by SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS below.

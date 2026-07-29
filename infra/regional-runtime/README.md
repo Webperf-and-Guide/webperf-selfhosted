@@ -28,6 +28,9 @@ probe communicate through `127.0.0.1` on distinct ports.
 - Executor and probe ports remain private.
 - API and executor use the same immutable `webperf` release digest.
 - Probe uses the matching immutable `webperf-probe` release digest.
+- The API copies those identities into each accepted execution and the
+  executor refuses to resume it after a revision change. A managed
+  orchestrator must submit a new idempotency key after rollout.
 - A writable persistent volume is mounted at `/data` for SQLite durability.
 - The API and executor use an independent internal secret.
 - Cloud handoff and probe calls use separate current/next secrets.

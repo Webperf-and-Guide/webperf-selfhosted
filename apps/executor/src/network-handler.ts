@@ -4,7 +4,8 @@ import type {
   ExecutionJob,
   LatencyJobDetail,
   LatencyJobTarget,
-  ProbeMeasurementResponse
+  ProbeMeasurementResponse,
+  RegionalExecutionProvenance
 } from '@webperf/contracts';
 import { isIP } from 'node:net';
 import {
@@ -43,6 +44,7 @@ export type NetworkHandlerOptions = {
   allowInsecureProbeHttp?: boolean;
   requestImpl?: PinnedHttpRequest;
   logger?: { error(event: Record<string, unknown>): void };
+  regionalExecutionProvenance?: RegionalExecutionProvenance;
 };
 
 export const parseProbeBaseUrl = (
@@ -64,7 +66,8 @@ export const createNetworkExecutionHandler = ({
   probeBaseUrl,
   allowInsecureProbeHttp = false,
   requestImpl = requestPinnedHttp,
-  logger = defaultNetworkLogger
+  logger = defaultNetworkLogger,
+  regionalExecutionProvenance
 }: NetworkHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });
 
@@ -72,6 +75,19 @@ export const createNetworkExecutionHandler = ({
     throw new ExecutionFailure(
       'invalid_network_context',
       'Executor received an invalid network execution context',
+      false
+    );
+  }
+  if (
+    context.payload.expectedProvenance
+    && !sameRegionalExecutionProvenance(
+      context.payload.expectedProvenance,
+      regionalExecutionProvenance
+    )
+  ) {
+    throw new ExecutionFailure(
+      'regional_runtime_revision_changed',
+      'Regional execution cannot resume on a different runtime revision',
       false
     );
   }
@@ -144,6 +160,19 @@ export const createNetworkExecutionHandler = ({
     deadline.dispose();
   }
 };
+
+const sameRegionalExecutionProvenance = (
+  expected: RegionalExecutionProvenance,
+  actual: RegionalExecutionProvenance | undefined
+) =>
+  actual !== undefined
+  && expected.regionId === actual.regionId
+  && expected.runnerType === actual.runnerType
+  && expected.runtime.version === actual.runtime.version
+  && expected.runtime.imageDigest === actual.runtime.imageDigest
+  && expected.runner.id === actual.runner.id
+  && expected.runner.implementation === actual.runner.implementation
+  && expected.runner.imageDigest === actual.runner.imageDigest;
 
 const createExecutionDeadlineSignal = (
   deadlineAt: string | null,

@@ -49,7 +49,11 @@
       },
       "requiredDeploymentInputs": [
         "SELFHOST_INTERNAL_SECRET",
-        "PROBE_SHARED_SECRET"
+        "PROBE_SHARED_SECRET",
+        "SELFHOST_REGION_ID",
+        "WEBPERF_RUNTIME_VERSION",
+        "WEBPERF_RUNTIME_IMAGE_DIGEST",
+        "WEBPERF_PROBE_IMAGE_DIGEST"
       ]
     },
     {

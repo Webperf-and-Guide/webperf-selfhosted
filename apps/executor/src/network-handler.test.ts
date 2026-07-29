@@ -26,7 +26,8 @@ const executionJob: ExecutionJob = {
     checkId: null,
     runId: null,
     regionalExecutionId: null,
-    deadlineAt: null
+    deadlineAt: null,
+    expectedProvenance: null
   },
   error: null,
   createdAt: '2026-07-22T00:00:00.000Z',
@@ -90,7 +91,8 @@ const networkContext = (): ExecutionResourceContext => ({
     checkId: null,
     runId: null,
     regionalExecutionId: null,
-    deadlineAt: null
+    deadlineAt: null,
+    expectedProvenance: null
   },
   jobs: [queuedJob()],
   check: null,
@@ -282,6 +284,52 @@ describe('network execution handler', () => {
     await expect(handler(executionJob, new AbortController().signal))
       .rejects.toMatchObject({
         code: 'regional_execution_deadline_exceeded',
+        retryable: false
+      });
+    expect(savedResults).toHaveLength(0);
+  });
+
+  test('refuses to resume regional work on a different runtime revision', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const context = networkContext();
+    if (context.kind !== 'network_probe') {
+      throw new Error('Expected network context');
+    }
+    const expectedProvenance = {
+      regionId: 'tokyo',
+      runnerType: 'network_probe' as const,
+      runtime: {
+        version: '0.3.0',
+        imageDigest: `sha256:${'a'.repeat(64)}`
+      },
+      runner: {
+        id: 'probe-rs' as const,
+        implementation: 'rust' as const,
+        imageDigest: `sha256:${'b'.repeat(64)}`
+      }
+    };
+    context.payload.regionalExecutionId = 'regional_revision';
+    context.payload.expectedProvenance = expectedProvenance;
+    const handler = createNetworkExecutionHandler({
+      client: createClient({ context, savedResults }),
+      leaseOwner: 'executor-network',
+      probeSharedSecret: 'network-handler-probe-secret',
+      probeBaseUrl: 'https://probe.example.test',
+      regionalExecutionProvenance: {
+        ...expectedProvenance,
+        runtime: {
+          ...expectedProvenance.runtime,
+          imageDigest: `sha256:${'c'.repeat(64)}`
+        }
+      },
+      requestImpl: async () => {
+        throw new Error('Probe must not run after a deployment revision change');
+      }
+    });
+
+    await expect(handler(executionJob, new AbortController().signal))
+      .rejects.toMatchObject({
+        code: 'regional_runtime_revision_changed',
         retryable: false
       });
     expect(savedResults).toHaveLength(0);

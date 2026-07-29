@@ -105,7 +105,7 @@ export const regionalExecutionRequestConfigSchema = z.strictObject({
   }
 });
 
-export const regionalExecutionTargetSchema = z.object({
+export const regionalExecutionTargetSchema = z.strictObject({
   targetId: z.string().min(1).max(120),
   url: z.string().url(),
   /** Optional request overrides shared with the public Fast Check contract. */

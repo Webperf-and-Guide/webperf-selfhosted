@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/release-pr.yml'
       - '.sampo/changesets/**'
       - '.sampo/config.toml'
       - 'VERSION'
@@ -12,6 +13,7 @@ on:
       - 'package.json'
       - 'bun.lock'
       - 'packages/**/package.json'
+      - 'tooling/scripts/release-bundle.ts'
   workflow_dispatch:
 
 concurrency:
@@ -125,9 +127,22 @@ jobs:
           else
             echo 'pending=false' >> "$GITHUB_OUTPUT"
           fi
-      - name: Prepare repository version and changelog
+      - name: Prepare repository version and release PR plan
         if: ${{ steps.changesets.outputs.pending == 'true' }}
-        run: bun tooling/scripts/release-bundle.ts prepare-repository-release
+        id: release_pr_plan
+        env:
+          RELEASE_PR_PLAN: ${{ runner.temp }}/webperf-release-pr.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(
+            bun tooling/scripts/release-bundle.ts \
+              prepare-release-pull-request "$RELEASE_PR_PLAN"
+          )"
+          version="$(jq -er 'select(.ok == true) | .version' <<<"$result")"
+          path="$(jq -er 'select(.ok == true) | .path' <<<"$result")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "path=${path}" >> "$GITHUB_OUTPUT"
       - name: Apply pending Sampo changesets
         if: ${{ steps.changesets.outputs.pending == 'true' }}
         env:
@@ -146,6 +161,23 @@ jobs:
             exit 1
           fi
           bun run check:release
+      - name: Render release PR summary
+        if: ${{ steps.changesets.outputs.pending == 'true' }}
+        id: release_pr_metadata
+        env:
+          RELEASE_PR_BODY: ${{ runner.temp }}/webperf-release-pr.md
+          RELEASE_PR_PLAN: ${{ steps.release_pr_plan.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(
+            bun tooling/scripts/release-bundle.ts \
+              render-release-pull-request "$RELEASE_PR_PLAN" "$RELEASE_PR_BODY"
+          )"
+          title="$(jq -er 'select(.ok == true) | .title' <<<"$result")"
+          path="$(jq -er 'select(.ok == true) | .path' <<<"$result")"
+          echo "title=${title}" >> "$GITHUB_OUTPUT"
+          echo "body_path=${path}" >> "$GITHUB_OUTPUT"
       - name: Create or update Sampo release PR
         if: ${{ steps.changesets.outputs.pending == 'true' }}
         id: release_pr
@@ -155,18 +187,9 @@ jobs:
           base: main
           branch: release/sampo
           delete-branch: true
-          commit-message: 'chore(release): prepare WebPerf version'
-          title: 'chore(release): prepare WebPerf version'
-          body: |
-            Sampo-generated release preparation.
-
-            - consumes every pending `.sampo/changesets/*.md`
-            - updates affected public package versions and changelogs
-            - advances the independent repository `VERSION` and root changelog
-            - leaves registry publication to the protected WebPerf release workflow
-
-            Merge only after Required CI passes. The merge will dispatch the matching
-            formal WebPerf release when no `v<version>` tag exists yet.
+          commit-message: ${{ steps.release_pr_metadata.outputs.title }}
+          title: ${{ steps.release_pr_metadata.outputs.title }}
+          body-path: ${{ steps.release_pr_metadata.outputs.body_path }}
       - name: Ensure Required CI for the release PR
         if: >-
           ${{ steps.changesets.outputs.pending == 'true'

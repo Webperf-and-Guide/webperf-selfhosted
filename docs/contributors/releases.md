@@ -31,8 +31,11 @@ Package `minor` and `major` changes both advance the repository minor while
 WebPerf remains in public beta; an all-patch set advances the repository patch.
 The generated changelog entry carries a hidden changeset fingerprint so an
 interrupted local preparation can safely finish or rerun without advancing
-twice. It synchronizes the lockfile, then creates or refreshes one release PR.
-Feature PRs do not consume their own changesets. Because GitHub
+twice. It synchronizes the lockfile, then creates or refreshes one release PR
+whose title names the prepared WebPerf version. The generated PR body lists the
+pending changeset summaries, the root version transition, and every package
+version changed by Sampo, including dependency-propagated bumps. Feature PRs do
+not consume their own changesets. Because GitHub
 suppresses ordinary workflow events caused by its built-in token, the
 preparation workflow ensures Required CI runs against the generated branch. A
 manual retry reuses a successful or still-running check for the same commit and

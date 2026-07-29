@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+  regionalExecutionPayloadMaxBytes,
   regionalExecutionResultSchema,
   type RegionalExecutionRequest
 } from '@webperf/contracts';
@@ -111,6 +112,7 @@ describe('regional runtime handoff', () => {
       protocolVersion: 1,
       regionId: 'tokyo',
       runnerTypes: ['network_probe'],
+      maxPayloadBytes: regionalExecutionPayloadMaxBytes,
       runtime: {
         version: '0.3.0-test',
         imageDigest: `sha256:${'a'.repeat(64)}`

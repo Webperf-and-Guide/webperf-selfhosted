@@ -85,6 +85,7 @@ that policy and must not cache execution status.
 - one safe `idempotencyKey`;
 - `runnerType=network_probe`;
 - 1–100 unique targets;
+- a compact JSON payload no larger than the advertised `maxPayloadBytes`;
 - a deadline up to 15 minutes;
 - 1–20 attempts per target;
 - an RFC 3339 request timestamp;
@@ -92,6 +93,10 @@ that policy and must not cache execution status.
 - a lowercase hex HMAC-SHA256 signature.
 
 The runtime rejects request timestamps outside the five-minute replay window.
+The capabilities response advertises both the target-count and serialized-byte
+limits so a control plane can split large route sets before submission. The
+same byte ceiling is enforced by the public contract and by the HTTP body
+reader.
 The signature covers the canonical request fields with stable key ordering.
 URLs pass the same HTTP(S), port, credential, and special-address validation as
 standalone Fast Checks.
@@ -160,6 +165,7 @@ Regional Runtime v1 requires:
 - executor and probe remaining private;
 - API and executor using the same immutable `webperf` digest;
 - probe using the matching immutable `webperf-probe` digest.
+- executor runtime budget no shorter than the advertised 15-minute deadline.
 
 The single-replica requirement is deliberate. Separate pods have independent
 SQLite databases and cannot safely serve the same idempotency key. A future

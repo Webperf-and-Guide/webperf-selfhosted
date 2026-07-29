@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  regionalExecutionPayloadMaxBytes,
   regionalExecutionRequestSchema,
   regionalExecutionResultSchema,
   regionalRuntimeCapabilitiesSchema
@@ -134,6 +135,32 @@ describe('regional runtime v1 contracts', () => {
     }).success).toBe(false);
   });
 
+  test('rejects a contract-valid target count that exceeds the transport payload limit', () => {
+    const oversized = {
+      ...validRequest,
+      targets: Array.from({ length: 20 }, (_, index) => ({
+        targetId: `target-${index}`,
+        url: `https://example.com/${index}`,
+        request: {
+          method: 'POST',
+          headers: Array.from({ length: 20 }, (__, headerIndex) => ({
+            name: `x-payload-${headerIndex}`,
+            value: 'x'.repeat(4_000)
+          })),
+          body: {
+            mode: 'text',
+            contentType: 'text/plain',
+            value: 'x'.repeat(10_000)
+          }
+        }
+      }))
+    };
+
+    expect(new TextEncoder().encode(JSON.stringify(oversized)).byteLength)
+      .toBeGreaterThan(regionalExecutionPayloadMaxBytes);
+    expect(regionalExecutionRequestSchema.safeParse(oversized).success).toBe(false);
+  });
+
   test('reports distinct runtime and runner image provenance', () => {
     expect(regionalRuntimeCapabilitiesSchema.parse({
       protocolVersion: 1,
@@ -141,6 +168,7 @@ describe('regional runtime v1 contracts', () => {
       regionLabel: 'Tokyo',
       runnerTypes: ['network_probe'],
       maxBatchSize: 100,
+      maxPayloadBytes: regionalExecutionPayloadMaxBytes,
       maxDeadlineMs: 900_000,
       maxAttempts: 20,
       runtime: {

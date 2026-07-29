@@ -34,9 +34,19 @@ probe communicate through `127.0.0.1` on distinct ports.
 - A writable persistent volume is mounted at `/data` for SQLite durability.
 - The API and executor use an independent internal secret.
 - Cloud handoff and probe calls use separate current/next secrets.
+- The managed profile exposes next-key inputs only on the server that verifies
+  them: API for internal/Cloud handoff rotation and probe for probe rotation.
+- Rotate API internal authentication by staging
+  `SELFHOST_INTERNAL_SECRET_NEXT`, switching the executor's current
+  `SELFHOST_INTERNAL_SECRET`, and then promoting the API key. Rotate probe
+  authentication the same way by staging `PROBE_SHARED_SECRET_NEXT`, switching
+  the executor's current `PROBE_SHARED_SECRET`, and then promoting the probe
+  key. Cloud handoff uses the equivalent current/next API inputs.
 - The regional role does not require a self-host administrator token.
 - The executor does not require a Browser Audit secret unless a Browser Audit
   origin is configured.
+- The executor timeout is fixed to the protocol's advertised 15-minute maximum
+  so accepted work is never terminated by a shorter container setting.
 
 The v1 SQLite queue and status polling contract require exactly one active pod
 for a regional deployment. Multiple pods would have independent databases and

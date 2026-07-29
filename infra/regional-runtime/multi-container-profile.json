@@ -36,6 +36,11 @@
         "WEBPERF_RUNTIME_VERSION",
         "WEBPERF_RUNTIME_IMAGE_DIGEST",
         "WEBPERF_PROBE_IMAGE_DIGEST"
+      ],
+      "optionalDeploymentInputs": [
+        "SELFHOST_INTERNAL_SECRET_NEXT",
+        "REGIONAL_RUNTIME_SHARED_SECRET_NEXT",
+        "SELFHOST_REGION_LABEL"
       ]
     },
     {
@@ -45,7 +50,8 @@
       "ports": [],
       "environment": {
         "SELFHOST_EXECUTOR_API_BASE_URL": "http://127.0.0.1:8788",
-        "SELFHOST_PROBE_BASE_URL": "http://127.0.0.1:8080"
+        "SELFHOST_PROBE_BASE_URL": "http://127.0.0.1:8080",
+        "SELFHOST_EXECUTOR_MAX_EXECUTION_MS": "900000"
       },
       "requiredDeploymentInputs": [
         "SELFHOST_INTERNAL_SECRET",
@@ -68,6 +74,9 @@
       "requiredDeploymentInputs": [
         "SELFHOST_REGION_ID",
         "PROBE_SHARED_SECRET"
+      ],
+      "optionalDeploymentInputs": [
+        "PROBE_SHARED_SECRET_NEXT"
       ]
     }
   ]

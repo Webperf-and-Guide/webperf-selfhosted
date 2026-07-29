@@ -36,6 +36,7 @@ export const regionalRuntimeMaxBatchSize = 100;
 export const regionalRuntimeMaxDeadlineMs = 900_000;
 export const regionalRuntimeMaxAttempts = 20;
 export const regionalExecutionPayloadMaxBytes = 1_500_000;
+const regionalExecutionPayloadEncoder = new TextEncoder();
 // Enforced by the regional execution POST handler before request HMAC
 // verification. Exported so Cloud callers can use the same skew allowance.
 export const regionalRuntimeReplayWindowSeconds = 300;
@@ -74,6 +75,8 @@ export const regionalRuntimeCapabilitiesSchema = z.object({
   runnerTypes: z.array(regionalRuntimeRunnerTypeSchema).min(1),
   /** Maximum number of routes per execution request. */
   maxBatchSize: z.number().int().positive().max(regionalRuntimeMaxBatchSize),
+  /** Maximum compact JSON request payload size accepted by this runtime. */
+  maxPayloadBytes: z.number().int().positive().max(regionalExecutionPayloadMaxBytes),
   /** Maximum execution deadline in milliseconds. */
   maxDeadlineMs: z.number().int().positive().max(regionalRuntimeMaxDeadlineMs),
   /** Maximum retry attempts per target. */
@@ -142,6 +145,17 @@ export const regionalExecutionRequestSchema = z.strictObject({
       });
     }
     seen.add(target.targetId);
+  }
+
+  const payloadBytes = regionalExecutionPayloadEncoder
+    .encode(JSON.stringify(request))
+    .byteLength;
+  if (payloadBytes > regionalExecutionPayloadMaxBytes) {
+    context.addIssue({
+      code: 'custom',
+      message: `Regional execution payload must not exceed ${regionalExecutionPayloadMaxBytes} bytes`,
+      path: []
+    });
   }
 });
 export type RegionalExecutionRequest = z.infer<typeof regionalExecutionRequestSchema>;

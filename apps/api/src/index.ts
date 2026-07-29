@@ -353,6 +353,7 @@ const buildRegionalRuntimeCapabilitiesPayload = () =>
     regionLabel: runtime.runtimeLocation.label,
     runnerTypes: ['network_probe'],
     maxBatchSize: regionalRuntimeMaxBatchSize,
+    maxPayloadBytes: regionalExecutionPayloadMaxBytes,
     maxDeadlineMs: regionalRuntimeMaxDeadlineMs,
     maxAttempts: runtime.maxTargetAttempts,
     ...buildRegionalRuntimeMetadata()

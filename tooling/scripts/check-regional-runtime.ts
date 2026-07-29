@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { regionalRuntimeMaxDeadlineMs } from '@webperf/contracts';
 
 type ComposePort = {
   host_ip?: string;
@@ -45,6 +46,7 @@ type MultiContainerProfile = {
     ports?: number[];
     environment?: Record<string, string>;
     requiredDeploymentInputs?: string[];
+    optionalDeploymentInputs?: string[];
   }>;
 };
 
@@ -121,6 +123,7 @@ assertLoopbackPort(regionalApi, 8788, 'regional API');
 assert((executor.ports?.length ?? 0) === 0, 'executor must not publish ports');
 assert((probe.ports?.length ?? 0) === 0, 'probe must not publish ports');
 assert((executor.expose?.length ?? 0) === 0, 'executor must not expose ports');
+assertExecutorDeadline(executor.environment, 'regional executor');
 assertStringArrayEqual(
   (regionalApi.expose ?? []).map(String),
   ['8788'],
@@ -195,6 +198,15 @@ assert(
   profileApi?.requiredDeploymentInputs?.includes('SELFHOST_REGION_ID'),
   'managed profile API must require the deployment region input'
 );
+for (const input of [
+  'SELFHOST_INTERNAL_SECRET_NEXT',
+  'REGIONAL_RUNTIME_SHARED_SECRET_NEXT'
+]) {
+  assert(
+    profileApi?.optionalDeploymentInputs?.includes(input),
+    `managed profile API must expose optional rotation input ${input}`
+  );
+}
 assert(
   profileProbe?.environment?.REGION_ID === '${SELFHOST_REGION_ID}',
   'managed profile probe REGION_ID must derive from SELFHOST_REGION_ID'
@@ -215,6 +227,14 @@ for (const input of [
     `managed profile executor must require ${input}`
   );
 }
+assert(
+  profileProbe?.optionalDeploymentInputs?.includes('PROBE_SHARED_SECRET_NEXT'),
+  'managed profile probe must expose optional rotation input PROBE_SHARED_SECRET_NEXT'
+);
+assertExecutorDeadline(
+  profileExecutor?.environment,
+  'managed profile regional executor'
+);
 
 console.log(JSON.stringify({
   ok: true,
@@ -285,6 +305,17 @@ function assertServiceSecurity(service: ComposeService, label: string) {
   assert(
     service.security_opt?.includes('no-new-privileges:true'),
     `${label} must prevent privilege escalation`
+  );
+}
+
+function assertExecutorDeadline(
+  environment: Record<string, string> | undefined,
+  label: string
+) {
+  const configured = Number(environment?.SELFHOST_EXECUTOR_MAX_EXECUTION_MS);
+  assert(
+    Number.isInteger(configured) && configured >= regionalRuntimeMaxDeadlineMs,
+    `${label} timeout must be at least the advertised ${regionalRuntimeMaxDeadlineMs}ms deadline`
   );
 }
 

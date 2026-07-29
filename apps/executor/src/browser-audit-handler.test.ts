@@ -263,6 +263,22 @@ describe('Browser Audit execution handler', () => {
     });
   });
 
+  test('fails explicitly when the Browser Audit secret is not configured', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const handler = createBrowserAuditExecutionHandler({
+      client: createClient(savedResults),
+      leaseOwner: 'executor-browser',
+      browserAuditBaseUrl: 'https://runner.example.com'
+    });
+
+    await handler(executionJob, new AbortController().signal);
+
+    expect(savedAudit(savedResults, -1)).toMatchObject({
+      status: 'failed',
+      error: 'Browser Audit runner is not configured'
+    });
+  });
+
   test('requires HTTPS for non-loopback runners unless explicitly trusted', () => {
     expect(resolveBrowserAuditEndpoint('https://runner.example.com').href).toBe(
       'https://runner.example.com/audit'

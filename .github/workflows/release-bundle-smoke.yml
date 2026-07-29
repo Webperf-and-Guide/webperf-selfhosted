@@ -42,6 +42,8 @@ jobs:
             compose_profile: ''
           - profile: browser-audit
             compose_profile: browser-audit
+          - profile: regional-runtime
+            compose_profile: ''
     steps:
       - name: Check out smoke harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,6 +103,10 @@ jobs:
           test -f "${bundle_dir}/compose.yml"
           test -f "${bundle_dir}/.env.example"
           test -f "${bundle_dir}/runtime-metadata.json"
+          test -f "${bundle_dir}/regional-runtime.compose.yml"
+          test -f "${bundle_dir}/regional-runtime.env.example"
+          test -f "${bundle_dir}/regional-runtime-profile.json"
+          test -f "${bundle_dir}/regional-runtime.README.md"
           (cd "$bundle_dir" && sha256sum --check SHA256SUMS)
           jq -e --arg version "$VERSION" --arg source_sha "$source_sha" '
             .version == $version
@@ -115,6 +121,7 @@ jobs:
           BUNDLE_DIR: ${{ steps.bundle.outputs.directory }}
         run: sudo apparmor_parser -r -W "${BUNDLE_DIR}/browser-audit.apparmor"
       - name: Start the published bundle without registry credentials
+        if: ${{ matrix.profile != 'regional-runtime' }}
         env:
           COMPOSE_PROFILE: ${{ matrix.compose_profile }}
           WEBPERF_SMOKE_COMPOSE_FILE: ${{ steps.bundle.outputs.directory }}/compose.yml
@@ -128,6 +135,19 @@ jobs:
           mkdir -p "$WEBPERF_SMOKE_DOCKER_CONFIG"
           test ! -e "$WEBPERF_SMOKE_DOCKER_CONFIG/config.json"
           bash tooling/scripts/smoke-compose.sh
+      - name: Start the published regional runtime without registry credentials
+        if: ${{ matrix.profile == 'regional-runtime' }}
+        env:
+          WEBPERF_REGIONAL_SMOKE_COMPOSE_FILE: ${{ steps.bundle.outputs.directory }}/regional-runtime.compose.yml
+          WEBPERF_REGIONAL_SMOKE_ENV_TEMPLATE: ${{ steps.bundle.outputs.directory }}/regional-runtime.env.example
+          WEBPERF_REGIONAL_SMOKE_USE_DEV_OVERRIDE: 'false'
+          WEBPERF_REGIONAL_SMOKE_DOCKER_CONFIG: ${{ runner.temp }}/webperf-release-docker-config-regional-runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WEBPERF_REGIONAL_SMOKE_DOCKER_CONFIG"
+          test ! -e "$WEBPERF_REGIONAL_SMOKE_DOCKER_CONFIG/config.json"
+          bash tooling/scripts/smoke-regional-runtime.sh
       - name: Report Browser Audit sandbox denials
         if: ${{ failure() && matrix.profile == 'browser-audit' }}
         run: |

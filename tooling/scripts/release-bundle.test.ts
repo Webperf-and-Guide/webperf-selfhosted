@@ -67,6 +67,10 @@ Keep report comparison output deterministic across equivalent inputs.
       join(root, 'infra/docker-compose/.env.example'),
       'utf8'
     )).toContain('WEBPERF_VERSION=0.2.1');
+    expect(readFileSync(
+      join(root, 'infra/regional-runtime/.env.example'),
+      'utf8'
+    )).toContain('WEBPERF_VERSION=0.2.1');
     const preparedChangelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
     expect(preparedChangelog).toContain(
       '## [0.2.1] — 2026-07-26\n\n### Changes\n\n'
@@ -94,6 +98,10 @@ Keep report comparison output deterministic across equivalent inputs.
     expect(readFileSync(join(root, 'CHANGELOG.md'), 'utf8')).toBe(preparedChangelog);
     expect(composeEnvironmentVersion(readFileSync(
       join(root, 'infra/docker-compose/.env.example'),
+      'utf8'
+    ))).toBe('0.2.1');
+    expect(composeEnvironmentVersion(readFileSync(
+      join(root, 'infra/regional-runtime/.env.example'),
       'utf8'
     ))).toBe('0.2.1');
     expect(prepareRepositoryRelease({ root, date: '2026-07-27' })).toEqual(
@@ -205,6 +213,45 @@ Expose regional runtime mode through self-host configuration.
     expect(pullRequest.body).toContain(
       'the protected release workflow will prepare `v0.3.0`'
     );
+
+    const prereleasePreparation = {
+      ...preparation,
+      packageVersions: preparation.packageVersions.map((entry) =>
+        entry.name === '@webperf/contracts'
+          ? { ...entry, version: '0.3.0-beta.2' }
+          : entry
+      )
+    };
+    writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.3.0-beta.10');
+    expect(
+      renderReleasePullRequest({ root, preparation: prereleasePreparation }).packageChanges
+    ).toContainEqual({
+      name: '@webperf/contracts',
+      previousVersion: '0.3.0-beta.2',
+      nextVersion: '0.3.0-beta.10'
+    });
+
+    expect(() => renderReleasePullRequest({
+      root,
+      preparation: {
+        ...preparation,
+        changesets: preparation.changesets.map((changeset, index) =>
+          index === 0
+            ? { ...changeset, description: '# Injected release heading' }
+            : changeset
+        )
+      }
+    })).toThrow('Release pull request preparation has an invalid changeset');
+
+    writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.2.0+build.1');
+    expect(() => renderReleasePullRequest({ root, preparation }))
+      .toThrow(
+        'Public package @webperf/contracts did not increase in SemVer precedence from 0.2.0 to 0.2.0+build.1'
+      );
+
+    writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.1.9');
+    expect(() => renderReleasePullRequest({ root, preparation }))
+      .toThrow('Public package @webperf/contracts was downgraded from 0.2.0 to 0.1.9');
   });
 
   test('rejects malformed or empty repository release preparation', () => {
@@ -256,6 +303,10 @@ npm/@webperf/contracts: patch
       outputDirectory: output
     });
     const compose = readFileSync(join(output, 'compose.yml'), 'utf8');
+    const regionalRuntimeCompose = readFileSync(
+      join(output, 'regional-runtime.compose.yml'),
+      'utf8'
+    );
     const runtimeMetadata = JSON.parse(
       readFileSync(join(output, 'runtime-metadata.json'), 'utf8')
     );
@@ -263,10 +314,12 @@ npm/@webperf/contracts: patch
     expect(result.imageCount).toBe(3);
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
+    expect(regionalRuntimeCompose).not.toContain('WEBPERF_VERSION');
     expect(compose).toContain(`WEBPERF_RUNTIME_VERSION: "${version}"`);
     // 5 services using webperf + probe + browser-audit + 2 debug = 8 image lines
     // (console/api/scheduler/executor share one webperf digest)
     expect(validateReleaseComposeImages(compose)).toHaveLength(8);
+    expect(validateReleaseComposeImages(regionalRuntimeCompose)).toHaveLength(3);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);
       for (const suffix of ['', '-linux-arm64']) {
@@ -292,6 +345,37 @@ npm/@webperf/contracts: patch
     expect(readFileSync(join(output, '.env.example'), 'utf8')).not.toContain(
       'WEBPERF_VERSION='
     );
+    expect(
+      readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
+    ).toContain(
+      `WEBPERF_RUNTIME_IMAGE_DIGEST=${
+        runtimeMetadata.images.find(({ name }: { name: string }) => name === 'webperf').digest
+      }`
+    );
+    expect(
+      readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
+    ).toContain(
+      `WEBPERF_PROBE_IMAGE_DIGEST=${
+        runtimeMetadata.images.find(({ name }: { name: string }) => name === 'probe').digest
+      }`
+    );
+    expect(
+      readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
+    ).not.toContain('WEBPERF_VERSION=');
+    expect(JSON.parse(
+      readFileSync(join(output, 'regional-runtime-profile.json'), 'utf8')
+    )).toMatchObject({
+      schemaVersion: 1,
+      protocolVersion: 1,
+      topology: {
+        replicas: { minimum: 1, maximum: 1 },
+        publicContainer: 'regional-api',
+        publicPort: 8788
+      }
+    });
+    expect(
+      readFileSync(join(output, 'regional-runtime.README.md'), 'utf8')
+    ).toContain('exactly one active pod');
     expect(readFileSync(join(output, 'SHA256SUMS'), 'utf8')).toContain(
       'runtime-metadata.json'
     );
@@ -312,6 +396,10 @@ npm/@webperf/contracts: patch
     expect(checksumPaths).toContain('browser-audit-seccomp.json');
     expect(checksumPaths).toContain('browser-audit.apparmor');
     expect(checksumPaths).toContain('compose.apparmor.yml');
+    expect(checksumPaths).toContain('regional-runtime.compose.yml');
+    expect(checksumPaths).toContain('regional-runtime.env.example');
+    expect(checksumPaths).toContain('regional-runtime-profile.json');
+    expect(checksumPaths).toContain('regional-runtime.README.md');
     expect(checksumPaths).toEqual([...checksumPaths].sort((left, right) =>
       Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
     ));
@@ -424,12 +512,18 @@ function writeRepositoryReleaseFixture({
   const root = makeTemporaryDirectory();
   const changesetsDirectory = join(root, '.sampo/changesets');
   const composeDirectory = join(root, 'infra/docker-compose');
+  const regionalDirectory = join(root, 'infra/regional-runtime');
   mkdirSync(changesetsDirectory, { recursive: true });
   mkdirSync(composeDirectory, { recursive: true });
+  mkdirSync(regionalDirectory, { recursive: true });
   writeFileSync(join(root, 'VERSION'), `${version}\n`);
   writeFileSync(
     join(composeDirectory, '.env.example'),
     `WEBPERF_VERSION=${version}\nUNCHANGED=value\n`
+  );
+  writeFileSync(
+    join(regionalDirectory, '.env.example'),
+    `WEBPERF_VERSION=${version}\nREGIONAL=value\n`
   );
   writeFileSync(
     join(root, 'CHANGELOG.md'),

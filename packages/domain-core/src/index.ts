@@ -3,6 +3,8 @@ import type {
   CustomRequestConfig,
   ListQuery,
   PageInfo,
+  RegionalExecutionRequest,
+  RegionalExecutionResult,
   RequestHeader,
   RuntimeLocation,
   RuntimeRegionId,
@@ -157,12 +159,14 @@ export const defaultCustomRequestConfig = (): CustomRequestConfig => ({
   body: null
 });
 
+const normalizeRequestHeader = (header: RequestHeader): RequestHeader => ({
+  name: header.name.trim().toLowerCase(),
+  value: header.value.trim()
+});
+
 const canonicalizeHeaders = (headers: RequestHeader[]) =>
   [...headers]
-    .map((header) => ({
-      name: header.name.trim().toLowerCase(),
-      value: header.value.trim()
-    }))
+    .map(normalizeRequestHeader)
     .filter((header) => header.name.length > 0)
     .sort((left, right) => {
       if (left.name === right.name) {
@@ -172,20 +176,46 @@ const canonicalizeHeaders = (headers: RequestHeader[]) =>
       return left.name.localeCompare(right.name);
     });
 
+const normalizeRequestBody = (
+  body: CustomRequestConfig['body'] | undefined
+): CustomRequestConfig['body'] => (
+  body === null || body === undefined
+    ? null
+    : {
+      mode: body.mode,
+      contentType: body.contentType,
+      value: body.value
+    }
+);
+
 const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => {
   const normalized = request ?? defaultCustomRequestConfig();
 
   return {
     method: normalized.method,
     headers: canonicalizeHeaders(normalized.headers ?? []),
-    body:
-      normalized.body == null
-        ? null
-        : {
-          mode: normalized.body.mode,
-          contentType: normalized.body.contentType,
-          value: normalized.body.value
-        }
+    body: normalizeRequestBody(normalized.body)
+  };
+};
+
+/**
+ * Normalize a Cloud-to-runtime request without changing header array order.
+ *
+ * Repeated HTTP headers can be order-sensitive, so Regional Runtime signatures,
+ * idempotency digests, and persisted jobs must all use the same ordered
+ * representation. Header names and surrounding OWS are normalized to the form
+ * that is sent by the probe, but literal values (including `[REDACTED]`) are
+ * never interpreted as console masking placeholders.
+ */
+export const normalizeRegionalRequestConfig = (
+  request: CustomRequestConfig | undefined
+): CustomRequestConfig => {
+  const normalized = request ?? defaultCustomRequestConfig();
+
+  return {
+    method: normalized.method,
+    headers: (normalized.headers ?? []).map(normalizeRequestHeader),
+    body: normalizeRequestBody(normalized.body)
   };
 };
 
@@ -205,20 +235,94 @@ export const createProbeSignature = async (
   sharedSecret: string,
   request: ProbeSignatureRequest
 ) => {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(sharedSecret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(toProbeSignaturePayload(request))
-  );
-  return [...new Uint8Array(signature)].map((value) => value.toString(16).padStart(2, '0')).join('');
+  return createHmacSha256(sharedSecret, toProbeSignaturePayload(request));
 };
+
+export type RegionalExecutionSignatureRequest = Omit<RegionalExecutionRequest, 'signature'>;
+export type RegionalResultSignatureRequest = Omit<RegionalExecutionResult, 'signature'>;
+
+const canonicalizeRegionalTargets = (
+  targets: RegionalExecutionSignatureRequest['targets']
+) => targets.map((target) => ({
+  targetId: target.targetId,
+  url: target.url,
+  request: normalizeRegionalRequestConfig(target.request)
+}));
+
+export const toRegionalExecutionSignaturePayload = (
+  request: RegionalExecutionSignatureRequest
+) =>
+  stableStringify({
+    idempotencyKey: request.idempotencyKey,
+    runnerType: request.runnerType,
+    targets: canonicalizeRegionalTargets(request.targets),
+    deadlineMs: request.deadlineMs,
+    maxAttempts: request.maxAttempts,
+    timestamp: request.timestamp,
+    keyVersion: request.keyVersion
+  });
+
+export const toRegionalResultSignaturePayload = (
+  result: RegionalResultSignatureRequest
+) =>
+  stableStringify({
+    idempotencyKey: result.idempotencyKey,
+    status: result.status,
+    targets: result.targets,
+    provenance: result.provenance,
+    acceptedAt: result.acceptedAt,
+    completedAt: result.completedAt,
+    keyVersion: result.keyVersion
+  });
+
+/**
+ * Stable semantic digest used for idempotency conflict detection.
+ *
+ * Timestamp, key version, and signature are transport metadata, so a caller
+ * may safely retry the same execution with a fresh timestamp and rotated key.
+ */
+export const createRegionalExecutionRequestDigest = async (
+  request: RegionalExecutionSignatureRequest
+) =>
+  createSha256(
+    stableStringify({
+      idempotencyKey: request.idempotencyKey,
+      runnerType: request.runnerType,
+      targets: canonicalizeRegionalTargets(request.targets),
+      deadlineMs: request.deadlineMs,
+      maxAttempts: request.maxAttempts
+    })
+  );
+
+export const createRegionalExecutionSignature = async (
+  sharedSecret: string,
+  request: RegionalExecutionSignatureRequest
+) => createHmacSha256(sharedSecret, toRegionalExecutionSignaturePayload(request));
+
+export const verifyRegionalExecutionSignature = async (
+  sharedSecret: string,
+  request: RegionalExecutionSignatureRequest,
+  signature: string
+) => verifyHmacSha256(
+  sharedSecret,
+  toRegionalExecutionSignaturePayload(request),
+  signature
+);
+
+export const createRegionalResultSignature = async (
+  sharedSecret: string,
+  result: RegionalResultSignatureRequest
+) => createHmacSha256(sharedSecret, toRegionalResultSignaturePayload(result));
+
+export const verifyRegionalResultSignature = async (
+  sharedSecret: string,
+  result: RegionalResultSignatureRequest,
+  signature: string
+) => verifyHmacSha256(
+  sharedSecret,
+  toRegionalResultSignaturePayload(result),
+  signature
+);
 
 const normalizeBrowserAuditHeaders = (headers: BrowserAuditWorkerRequest['customHeaders']) =>
   [...headers]
@@ -256,6 +360,10 @@ export const createBrowserAuditSignature = async (
   sharedSecret: string,
   request: BrowserAuditSignatureRequest
 ) => {
+  return createHmacSha256(sharedSecret, toBrowserAuditSignaturePayload(request));
+};
+
+const createHmacSha256 = async (sharedSecret: string, payload: string) => {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(sharedSecret),
@@ -266,10 +374,57 @@ export const createBrowserAuditSignature = async (
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    new TextEncoder().encode(toBrowserAuditSignaturePayload(request))
+    new TextEncoder().encode(payload)
   );
 
-  return [...new Uint8Array(signature)].map((value) => value.toString(16).padStart(2, '0')).join('');
+  return bytesToHex(new Uint8Array(signature));
+};
+
+const verifyHmacSha256 = async (
+  sharedSecret: string,
+  payload: string,
+  signature: string
+) => {
+  if (!/^[a-f0-9]{64}$/.test(signature)) {
+    return false;
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(sharedSecret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+
+    return await crypto.subtle.verify(
+      'HMAC',
+      key,
+      hexToBytes(signature),
+      new TextEncoder().encode(payload)
+    );
+  } catch {
+    return false;
+  }
+};
+
+const createSha256 = async (payload: string) =>
+  bytesToHex(new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
+  ));
+
+const bytesToHex = (value: Uint8Array) =>
+  [...value].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const hexToBytes = (value: string) => {
+  if (value.length % 2 !== 0 || !/^[a-f0-9]*$/.test(value)) {
+    throw new Error('Hex input must contain complete lowercase byte pairs');
+  }
+  return Uint8Array.from(
+    value.match(/.{2}/g) ?? [],
+    (byte) => Number.parseInt(byte, 16)
+  );
 };
 
 const stableStringify = (value: unknown): string =>

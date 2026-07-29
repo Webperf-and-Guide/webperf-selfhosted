@@ -4,7 +4,8 @@ import type {
   ExecutionJob,
   LatencyJobDetail,
   LatencyJobTarget,
-  ProbeMeasurementResponse
+  ProbeMeasurementResponse,
+  RegionalExecutionProvenance
 } from '@webperf/contracts';
 import { isIP } from 'node:net';
 import {
@@ -43,6 +44,7 @@ export type NetworkHandlerOptions = {
   allowInsecureProbeHttp?: boolean;
   requestImpl?: PinnedHttpRequest;
   logger?: { error(event: Record<string, unknown>): void };
+  regionalExecutionProvenance?: RegionalExecutionProvenance;
 };
 
 export const parseProbeBaseUrl = (
@@ -64,7 +66,8 @@ export const createNetworkExecutionHandler = ({
   probeBaseUrl,
   allowInsecureProbeHttp = false,
   requestImpl = requestPinnedHttp,
-  logger = defaultNetworkLogger
+  logger = defaultNetworkLogger,
+  regionalExecutionProvenance
 }: NetworkHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });
 
@@ -75,7 +78,21 @@ export const createNetworkExecutionHandler = ({
       false
     );
   }
+  if (
+    context.payload.expectedProvenance
+    && !sameRegionalExecutionProvenance(
+      context.payload.expectedProvenance,
+      regionalExecutionProvenance
+    )
+  ) {
+    throw new ExecutionFailure(
+      'regional_runtime_revision_changed',
+      'Regional execution cannot resume on a different runtime revision',
+      false
+    );
+  }
 
+  const deadline = createExecutionDeadlineSignal(context.payload.deadlineAt, signal);
   const jobs = context.jobs.map((job) => structuredClone(job));
   let run = context.run ? structuredClone(context.run) : null;
   const persist = async () => {
@@ -89,55 +106,125 @@ export const createNetworkExecutionHandler = ({
     });
   };
 
-  for (const job of jobs) {
-    await processNetworkJob({
-      executionJob,
-      job,
-      persist,
-      probeSharedSecret,
-      probeBaseUrl,
-      allowInsecureProbeHttp,
-      requestImpl,
-      logger,
-      signal
-    });
-  }
-
-  if (run && context.check) {
-    const comparison = context.comparisonMode
-      ? buildCheckProfileComparison({
-          currentRun: run,
-          currentJobs: jobs,
-          comparedRun: context.comparedRun,
-          comparedJobs: context.comparedJobs,
-          mode: context.comparisonMode
-        })
-      : null;
-    run = {
-      ...run,
-      evaluation: evaluateMonitorTargets({
-        monitorPolicy: context.check.monitorPolicy,
-        targets: jobs.flatMap((job) => job.targets),
-        regressedCount: comparison?.summary.regressed ?? 0
-      })
-    };
-    await persist();
-
-    const followups = buildWebhookFollowups({
-      executionJob,
-      run,
-      check: context.check,
-      jobs,
-      comparisonSummary: comparison?.summary ?? null
-    });
-
-    if (followups.length > 0) {
-      await client.enqueueFollowups(executionJob.id, {
-        leaseOwner,
-        jobs: followups
+  try {
+    for (const job of jobs) {
+      await processNetworkJob({
+        executionJob,
+        job,
+        persist,
+        probeSharedSecret,
+        probeBaseUrl,
+        allowInsecureProbeHttp,
+        requestImpl,
+        logger,
+        signal: deadline.signal
       });
     }
+
+    if (run && context.check) {
+      const comparison = context.comparisonMode
+        ? buildCheckProfileComparison({
+            currentRun: run,
+            currentJobs: jobs,
+            comparedRun: context.comparedRun,
+            comparedJobs: context.comparedJobs,
+            mode: context.comparisonMode
+          })
+        : null;
+      run = {
+        ...run,
+        evaluation: evaluateMonitorTargets({
+          monitorPolicy: context.check.monitorPolicy,
+          targets: jobs.flatMap((job) => job.targets),
+          regressedCount: comparison?.summary.regressed ?? 0
+        })
+      };
+      await persist();
+
+      const followups = buildWebhookFollowups({
+        executionJob,
+        run,
+        check: context.check,
+        jobs,
+        comparisonSummary: comparison?.summary ?? null
+      });
+
+      if (followups.length > 0) {
+        await client.enqueueFollowups(executionJob.id, {
+          leaseOwner,
+          jobs: followups
+        });
+      }
+    }
+  } finally {
+    deadline.dispose();
   }
+};
+
+const sameRegionalExecutionProvenance = (
+  expected: RegionalExecutionProvenance,
+  actual: RegionalExecutionProvenance | undefined
+) =>
+  actual !== undefined
+  && expected.regionId === actual.regionId
+  && expected.runnerType === actual.runnerType
+  && expected.runtime.version === actual.runtime.version
+  && expected.runtime.imageDigest === actual.runtime.imageDigest
+  && expected.runner.id === actual.runner.id
+  && expected.runner.implementation === actual.runner.implementation
+  && expected.runner.imageDigest === actual.runner.imageDigest;
+
+const createExecutionDeadlineSignal = (
+  deadlineAt: string | null,
+  parentSignal: AbortSignal
+) => {
+  if (!deadlineAt) {
+    return {
+      signal: parentSignal,
+      dispose: () => {}
+    };
+  }
+
+  const parsedDeadlineMs = Date.parse(deadlineAt);
+  if (Number.isNaN(parsedDeadlineMs)) {
+    throw new ExecutionFailure(
+      'regional_execution_invalid_deadline',
+      'Regional execution deadline is invalid',
+      false
+    );
+  }
+
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal.reason);
+  if (parentSignal.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const abortForDeadline = () => controller.abort(new ExecutionFailure(
+    'regional_execution_deadline_exceeded',
+    'Regional execution exceeded its accepted deadline',
+    false
+  ));
+  const remainingMs = parsedDeadlineMs - Date.now();
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  if (remainingMs <= 0) {
+    abortForDeadline();
+  } else {
+    timeout = setTimeout(abortForDeadline, remainingMs);
+    timeout.unref?.();
+  }
+
+  return {
+    signal: controller.signal,
+    dispose() {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      parentSignal.removeEventListener('abort', abortFromParent);
+    }
+  };
 };
 
 const processNetworkJob = async ({
@@ -235,6 +322,17 @@ const processNetworkJob = async ({
 
       if (!parsed.success) {
         markTargetFailed(target, 'probe_invalid_payload', 'Network probe returned an invalid result');
+        await recomputeAndPersistJob(job, persist);
+        continue;
+      }
+
+      if (parsed.data.measurement.region !== target.region) {
+        markTargetFailed(
+          target,
+          'probe_region_mismatch',
+          `Network probe returned region "${parsed.data.measurement.region}" `
+          + `but expected "${target.region}"`
+        );
         await recomputeAndPersistJob(job, persist);
         continue;
       }

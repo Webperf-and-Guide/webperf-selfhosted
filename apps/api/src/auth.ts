@@ -1,13 +1,21 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export type ApiAuthSecrets = {
-  adminToken: string;
+  adminToken?: string;
   adminTokenNext?: string;
   internalSecret: string;
   internalSecretNext?: string;
+  regionalRuntimeSecret?: string;
+  regionalRuntimeSecretNext?: string;
 };
 
-const publicGetPaths = new Set(['/health', '/v1/capabilities', '/openapi/public.json']);
+const publicGetPaths = new Set([
+  '/health',
+  '/v1/capabilities',
+  '/v1/regional-capabilities',
+  '/openapi/public.json',
+  '/openapi/regional-runtime.json'
+]);
 
 export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): Response | null => {
   const url = new URL(request.url);
@@ -16,9 +24,7 @@ export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): 
     return null;
   }
 
-  const expectedTokens = isInternalPath(url.pathname)
-    ? [secrets.internalSecret, secrets.internalSecretNext]
-    : [secrets.adminToken, secrets.adminTokenNext];
+  const expectedTokens = resolveExpectedTokens(url.pathname, secrets);
 
   if (matchesBearerToken(request.headers.get('authorization'), expectedTokens)) {
     return null;
@@ -38,10 +44,27 @@ export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): 
   );
 };
 
+const resolveExpectedTokens = (
+  pathname: string,
+  secrets: ApiAuthSecrets
+): Array<string | undefined> => {
+  if (isInternalPath(pathname)) {
+    return [secrets.internalSecret, secrets.internalSecretNext];
+  }
+  if (isRegionalExecutionPath(pathname)) {
+    return [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext];
+  }
+  return [secrets.adminToken, secrets.adminTokenNext];
+};
+
 // Scheduler dispatch predates the /internal namespace and remains a compatibility
 // route. Any new service-to-service endpoint must use /internal instead.
 const isInternalPath = (pathname: string) =>
   pathname === '/v1/scheduler/dispatch' || pathname.startsWith('/internal/');
+
+const isRegionalExecutionPath = (pathname: string) =>
+  pathname === '/v1/regional-executions'
+  || pathname.startsWith('/v1/regional-executions/');
 
 const matchesBearerToken = (
   authorization: string | null,

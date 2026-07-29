@@ -11,6 +11,7 @@ import {
 import { probeImplementationSchema, probeMeasurementSchema } from './probe-model';
 import { runtimeRegionIdSchema, runtimeLocationSchema } from './regions';
 import type { RuntimeLocation } from './regions';
+import { boundedJobIdSchema } from './identifiers';
 
 export {
   runtimeRegionIdSchema,
@@ -48,6 +49,11 @@ export const jobStatusValues = [...targetStatusValues, 'partial'] as const;
 export const jobStatusSchema = z.enum(jobStatusValues);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 
+// Domain job IDs and durable execution IDs are separate public concepts, but
+// both use the same bounded storage-safe wire format.
+export const latencyJobIdSchema = boundedJobIdSchema;
+export type LatencyJobId = z.infer<typeof latencyJobIdSchema>;
+
 export const requestMethodValues = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
 export const requestMethodSchema = z.enum(requestMethodValues);
 export type RequestMethod = z.infer<typeof requestMethodSchema>;
@@ -56,15 +62,23 @@ export const requestBodyModeValues = ['text'] as const;
 export const requestBodyModeSchema = z.enum(requestBodyModeValues);
 export type RequestBodyMode = z.infer<typeof requestBodyModeSchema>;
 
+export const requestHeaderValueSchema = z.string()
+  .max(4_000)
+  .regex(/^[\t\x20-\x7e]*$/);
+
 export const requestHeaderSchema = z.object({
-  name: z.string().min(1).max(120),
-  value: z.string().max(4_000)
+  name: z.string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/),
+  value: requestHeaderValueSchema
 });
 export type RequestHeader = z.infer<typeof requestHeaderSchema>;
 
 export const requestBodySchema = z.object({
   mode: requestBodyModeSchema.default('text'),
-  contentType: z.string().min(1).max(120).nullable().default(null),
+  contentType: requestHeaderValueSchema.min(1).max(120).nullable().default(null),
   value: z.string().max(10_000)
 });
 export type RequestBody = z.infer<typeof requestBodySchema>;
@@ -383,7 +397,7 @@ export const checkProfileRunRouteSchema = z.object({
   routeId: z.string().min(1),
   routeLabel: z.string().min(1).max(120),
   url: z.string().url(),
-  jobId: z.string().min(1),
+  jobId: latencyJobIdSchema,
   browserAudit: browserAuditExecutionSummarySchema.nullable().default(null)
 });
 export type CheckProfileRunRoute = z.infer<typeof checkProfileRunRouteSchema>;
@@ -466,7 +480,7 @@ export type CheckProfileRunListResponse = z.infer<typeof checkProfileRunListResp
 // were removed.
 
 export const latencyJobTargetSchema = z.object({
-  jobId: z.string().min(1),
+  jobId: latencyJobIdSchema,
   region: runtimeRegionIdSchema,
   status: targetStatusSchema,
   attemptNo: z.number().int().nonnegative(),
@@ -488,7 +502,7 @@ export const latencyJobTargetSchema = z.object({
 export type LatencyJobTarget = z.infer<typeof latencyJobTargetSchema>;
 
 export const latencyJobSchema = z.object({
-  id: z.string().min(1),
+  id: latencyJobIdSchema,
   url: z.string().url(),
   status: jobStatusSchema,
   note: z.string().max(200).nullable(),
@@ -535,8 +549,8 @@ const nullableStatusCodeSchema = z.number().int().min(100).max(599).nullable();
 
 export const checkProfileRegionComparisonSchema = z.object({
   region: runtimeRegionIdSchema,
-  currentJobId: z.string().min(1).nullable(),
-  previousJobId: z.string().min(1).nullable(),
+  currentJobId: latencyJobIdSchema.nullable(),
+  previousJobId: latencyJobIdSchema.nullable(),
   currentStatus: jobStatusSchema.nullable(),
   previousStatus: jobStatusSchema.nullable(),
   currentLatencyMs: nullableNumberSchema,
@@ -784,7 +798,7 @@ export const schedulerDispatchResponseSchema = z.object({
   triggeredProfiles: z.array(
     z.object({
       profileId: z.string().min(1),
-      jobIds: z.array(z.string().min(1)).min(1),
+      jobIds: z.array(latencyJobIdSchema).min(1),
       nextRunAt: z.string().datetime().nullable()
     })
   )

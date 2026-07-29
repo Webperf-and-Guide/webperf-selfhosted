@@ -179,6 +179,42 @@ export function prepareRepositoryRelease({
   const composeEnvironmentFile = join(root, 'infra/docker-compose/.env.example');
   const composeEnvironment = readFileSync(composeEnvironmentFile, 'utf8');
   const composeVersion = composeEnvironmentVersion(composeEnvironment);
+  const regionalEnvironmentFile = join(root, 'infra/regional-runtime/.env.example');
+  const regionalEnvironment = readFileSync(regionalEnvironmentFile, 'utf8');
+  const regionalVersion = composeEnvironmentVersion(regionalEnvironment);
+  const versionedEnvironments = [
+    {
+      label: 'Compose environment',
+      file: composeEnvironmentFile,
+      contents: composeEnvironment,
+      version: composeVersion
+    },
+    {
+      label: 'Regional runtime environment',
+      file: regionalEnvironmentFile,
+      contents: regionalEnvironment,
+      version: regionalVersion
+    }
+  ];
+  const updateVersionedEnvironments = (
+    targetVersion: string,
+    allowedVersions: readonly string[],
+    state: string
+  ) => {
+    for (const environment of versionedEnvironments) {
+      if (!allowedVersions.includes(environment.version)) {
+        throw new Error(
+          `${environment.label} version ${environment.version} does not match ${state}`
+        );
+      }
+      if (environment.version !== targetVersion) {
+        writeTextFileAtomically(
+          environment.file,
+          renderComposeEnvironmentVersion(environment.contents, targetVersion)
+        );
+      }
+    }
+  };
   const changelog = readFileSync(changelogFile, 'utf8');
   const firstReleaseHeading = changelog.search(/^## \[/m);
   if (firstReleaseHeading === -1) {
@@ -200,31 +236,21 @@ export function prepareRepositoryRelease({
       throw new Error('The latest CHANGELOG.md release marker has an invalid version transition');
     }
     if (currentVersion === preparedFromVersion) {
-      if (composeVersion !== preparedFromVersion && composeVersion !== preparedVersion) {
-        throw new Error(
-          `Compose environment version ${composeVersion} does not match the recoverable repository release`
-        );
-      }
-      if (composeVersion !== preparedVersion) {
-        writeTextFileAtomically(
-          composeEnvironmentFile,
-          renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
-        );
-      }
+      updateVersionedEnvironments(
+        preparedVersion,
+        [preparedFromVersion, preparedVersion],
+        'the recoverable repository release'
+      );
       writeTextFileAtomically(join(root, 'VERSION'), `${preparedVersion}\n`);
     } else if (currentVersion !== preparedVersion) {
       throw new Error(
         `The latest CHANGELOG.md release marker does not match VERSION ${currentVersion}`
       );
-    } else if (composeVersion !== preparedVersion) {
-      if (composeVersion !== preparedFromVersion) {
-        throw new Error(
-          `Compose environment version ${composeVersion} does not match the prepared repository release`
-        );
-      }
-      writeTextFileAtomically(
-        composeEnvironmentFile,
-        renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
+    } else {
+      updateVersionedEnvironments(
+        preparedVersion,
+        [preparedFromVersion, preparedVersion],
+        'the prepared repository release'
       );
     }
     return repositoryReleaseResult({
@@ -239,10 +265,12 @@ export function prepareRepositoryRelease({
       `The latest CHANGELOG.md entry ${latestChangelogVersion ?? '(unreadable)'} must match VERSION ${currentVersion}`
     );
   }
-  if (composeVersion !== currentVersion) {
-    throw new Error(
-      `Compose environment version ${composeVersion} must match VERSION ${currentVersion}`
-    );
+  for (const environment of versionedEnvironments) {
+    if (environment.version !== currentVersion) {
+      throw new Error(
+        `${environment.label} version ${environment.version} must match VERSION ${currentVersion}`
+      );
+    }
   }
   const nextVersion = bumpRepositoryReleaseVersion(currentVersion, packageBump);
   const nextHeading = new RegExp(`^## \\[${escapeRegExp(nextVersion)}\\](?:\\s|$)`, 'm');
@@ -269,12 +297,16 @@ export function prepareRepositoryRelease({
   const nextChangelog = `${introduction}\n\n${entry}\n\n${priorReleases}\n${releaseLink}\n`;
 
   // Each replacement is atomic. Writing the changelog first is intentional:
-  // its release marker lets a retry recognize and finish any cross-file
-  // partial state without incrementing the version twice.
+  // its release marker lets a retry recognize and finish any partial VERSION
+  // or environment-file update without incrementing the version twice.
   writeTextFileAtomically(changelogFile, nextChangelog);
   writeTextFileAtomically(
     composeEnvironmentFile,
     renderComposeEnvironmentVersion(composeEnvironment, nextVersion)
+  );
+  writeTextFileAtomically(
+    regionalEnvironmentFile,
+    renderComposeEnvironmentVersion(regionalEnvironment, nextVersion)
   );
   writeTextFileAtomically(join(root, 'VERSION'), `${nextVersion}\n`);
 
@@ -341,9 +373,21 @@ export function renderReleasePullRequest({
   const packageChanges = [...previousPackages]
     .flatMap(([name, previousVersion]) => {
       const nextVersion = currentPackages.get(name);
-      return nextVersion !== undefined && nextVersion !== previousVersion
-        ? [{ name, previousVersion, nextVersion }]
-        : [];
+      if (nextVersion === undefined || nextVersion === previousVersion) {
+        return [];
+      }
+      const comparison = compareSemanticVersions(previousVersion, nextVersion);
+      if (comparison === 0) {
+        throw new Error(
+          `Public package ${name} did not increase in SemVer precedence from ${previousVersion} to ${nextVersion}`
+        );
+      }
+      if (comparison > 0) {
+        throw new Error(
+          `Public package ${name} was downgraded from ${previousVersion} to ${nextVersion}`
+        );
+      }
+      return [{ name, previousVersion, nextVersion }];
     });
   if (packageChanges.length === 0) {
     throw new Error('Sampo did not change any public package versions');
@@ -498,6 +542,47 @@ export function renderReleaseBundle({
   compose = compose.replace(/\$\{WEBPERF_VERSION:[^}]+\}/g, version);
   validateReleaseComposeImages(compose);
   writeFileSync(join(outputDirectory, 'compose.yml'), compose);
+
+  let regionalRuntimeCompose = readFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/compose.yml'),
+    'utf8'
+  );
+  // The regional profile intentionally contains only the shared WebPerf
+  // runtime and Rust probe images; Browser Audit remains a separate optional
+  // self-host profile.
+  for (const entry of metadata.filter(({ name }) => name !== 'browser-audit-lighthouse')) {
+    const dynamicReference = new RegExp(
+      `${escapeRegExp(entry.image)}:\\$\\{WEBPERF_VERSION:[^}]+\\}`,
+      'g'
+    );
+    const matches = regionalRuntimeCompose.match(dynamicReference);
+    if (!matches?.length) {
+      throw new Error(
+        `Regional runtime Compose does not contain a version placeholder for ${entry.image}`
+      );
+    }
+    regionalRuntimeCompose = regionalRuntimeCompose.replace(
+      dynamicReference,
+      () => entry.reference
+    );
+  }
+  regionalRuntimeCompose = regionalRuntimeCompose.replace(
+    /\$\{WEBPERF_VERSION:[^}]+\}/g,
+    version
+  );
+  validateReleaseComposeImages(regionalRuntimeCompose);
+  writeFileSync(
+    join(outputDirectory, 'regional-runtime.compose.yml'),
+    regionalRuntimeCompose
+  );
+  copyFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/multi-container-profile.json'),
+    join(outputDirectory, 'regional-runtime-profile.json')
+  );
+  copyFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/README.md'),
+    join(outputDirectory, 'regional-runtime.README.md')
+  );
   copyFileSync(
     join(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json'),
     join(outputDirectory, 'browser-audit-seccomp.json')
@@ -511,14 +596,45 @@ export function renderReleaseBundle({
     join(outputDirectory, 'compose.apparmor.yml')
   );
 
-  const envExample = readFileSync(
-    join(repositoryRoot, 'infra/docker-compose/.env.example'),
-    'utf8'
-  )
+  const readReleaseEnvExample = (path: string) => readFileSync(path, 'utf8')
     .split('\n')
     .filter((line) => !line.startsWith('WEBPERF_VERSION='))
     .join('\n');
+  const envExample = readReleaseEnvExample(
+    join(repositoryRoot, 'infra/docker-compose/.env.example')
+  );
   writeFileSync(join(outputDirectory, '.env.example'), envExample);
+  const regionalRuntimeEnvExample = readReleaseEnvExample(
+    join(repositoryRoot, 'infra/regional-runtime/.env.example')
+  );
+  const runtimeImageDigest = metadata.find(({ name }) => name === 'webperf')?.digest;
+  const probeImageDigest = metadata.find(({ name }) => name === 'probe')?.digest;
+  if (!runtimeImageDigest || !probeImageDigest) {
+    throw new Error('Regional runtime release metadata is missing runtime or probe provenance');
+  }
+  const renderedRegionalRuntimeEnvExample = regionalRuntimeEnvExample
+    .replace(
+      /^WEBPERF_RUNTIME_IMAGE_DIGEST=.*$/m,
+      `WEBPERF_RUNTIME_IMAGE_DIGEST=${runtimeImageDigest}`
+    )
+    .replace(
+      /^WEBPERF_PROBE_IMAGE_DIGEST=.*$/m,
+      `WEBPERF_PROBE_IMAGE_DIGEST=${probeImageDigest}`
+    );
+  if (
+    !renderedRegionalRuntimeEnvExample.includes(
+      `WEBPERF_RUNTIME_IMAGE_DIGEST=${runtimeImageDigest}`
+    )
+    || !renderedRegionalRuntimeEnvExample.includes(
+      `WEBPERF_PROBE_IMAGE_DIGEST=${probeImageDigest}`
+    )
+  ) {
+    throw new Error('Regional runtime environment does not expose provenance digest fields');
+  }
+  writeFileSync(
+    join(outputDirectory, 'regional-runtime.env.example'),
+    renderedRegionalRuntimeEnvExample
+  );
 
   const sbomDirectory = join(outputDirectory, 'sbom');
   mkdirSync(sbomDirectory);
@@ -737,6 +853,84 @@ function parseReleaseVersion(version: string): ParsedReleaseVersion {
   };
 }
 
+function compareSemanticVersions(left: string, right: string) {
+  const parse = (version: string) => {
+    const buildSeparator = version.indexOf('+');
+    const withoutBuild = buildSeparator === -1 ? version : version.slice(0, buildSeparator);
+    const build = buildSeparator === -1 ? [] : version.slice(buildSeparator + 1).split('.');
+    const prereleaseSeparator = withoutBuild.indexOf('-');
+    const core = prereleaseSeparator === -1
+      ? withoutBuild
+      : withoutBuild.slice(0, prereleaseSeparator);
+    const prerelease = prereleaseSeparator === -1
+      ? []
+      : withoutBuild.slice(prereleaseSeparator + 1).split('.');
+    const coreParts = core.split('.');
+    if (
+      coreParts.length !== 3
+      || coreParts.some((part) => !/^(?:0|[1-9]\d*)$/.test(part))
+      || prerelease.some(
+        (part) =>
+          !/^[0-9A-Za-z-]+$/.test(part)
+          || (/^\d+$/.test(part) && !/^(?:0|[1-9]\d*)$/.test(part))
+      )
+      || build.some((part) => !/^[0-9A-Za-z-]+$/.test(part))
+    ) {
+      throw new Error(`Public package version is not valid SemVer: ${version}`);
+    }
+    const numericCore = coreParts.map(Number);
+    if (!numericCore.every(Number.isSafeInteger)) {
+      throw new Error(`Public package version components must be safe integers: ${version}`);
+    }
+    return {
+      core: numericCore,
+      prerelease
+    };
+  };
+
+  const leftVersion = parse(left);
+  const rightVersion = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = leftVersion.core[index] - rightVersion.core[index];
+    if (difference !== 0) {
+      return Math.sign(difference);
+    }
+  }
+  if (leftVersion.prerelease.length === 0 || rightVersion.prerelease.length === 0) {
+    if (leftVersion.prerelease.length === rightVersion.prerelease.length) {
+      return 0;
+    }
+    return leftVersion.prerelease.length === 0 ? 1 : -1;
+  }
+  const length = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftIdentifier = leftVersion.prerelease[index];
+    const rightIdentifier = rightVersion.prerelease[index];
+    if (leftIdentifier === undefined || rightIdentifier === undefined) {
+      if (leftIdentifier === rightIdentifier) {
+        return 0;
+      }
+      return leftIdentifier === undefined ? -1 : 1;
+    }
+    if (leftIdentifier === rightIdentifier) {
+      continue;
+    }
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      if (leftIdentifier.length === rightIdentifier.length) {
+        return leftIdentifier < rightIdentifier ? -1 : 1;
+      }
+      return leftIdentifier.length < rightIdentifier.length ? -1 : 1;
+    }
+    if (leftNumeric !== rightNumeric) {
+      return leftNumeric ? -1 : 1;
+    }
+    return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
+  return 0;
+}
+
 function readPendingChangesets(root: string): PendingChangeset[] {
   const changesetsDirectory = join(root, '.sampo/changesets');
   if (!existsSync(changesetsDirectory) || !lstatSync(changesetsDirectory).isDirectory()) {
@@ -890,6 +1084,8 @@ function validateReleasePullRequestPreparation(
       || typeof changeset.description !== 'string'
       || changeset.description.trim() !== changeset.description
       || changeset.description.length === 0
+      || /^#{1,6}\s/.test(changeset.description)
+      || /<!-- webperf-release:/.test(changeset.description)
       || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(changeset.description)
     ) {
       throw new Error('Release pull request preparation has an invalid changeset');
@@ -1062,7 +1258,7 @@ function walkFiles(directory: string): string[] {
 }
 
 function releaseReadme(version: string) {
-  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\`, \`browser-audit.apparmor\`, and \`compose.apparmor.yml\` beside \`compose.yml\` when enabling Browser Audit. On an AppArmor 4 host, install \`browser-audit.apparmor\` as \`/etc/apparmor.d/webperf-browser-audit\`, load it with \`sudo apparmor_parser -r -W /etc/apparmor.d/webperf-browser-audit\`, then add \`-f compose.apparmor.yml\` to the Browser Audit Compose command.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
+  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\`, \`browser-audit.apparmor\`, and \`compose.apparmor.yml\` beside \`compose.yml\` when enabling Browser Audit. On an AppArmor 4 host, install \`browser-audit.apparmor\` as \`/etc/apparmor.d/webperf-browser-audit\`, load it with \`sudo apparmor_parser -r -W /etc/apparmor.d/webperf-browser-audit\`, then add \`-f compose.apparmor.yml\` to the Browser Audit Compose command.\n\nThe provider-neutral managed handoff is packaged separately as \`regional-runtime.compose.yml\`, \`regional-runtime.env.example\`, \`regional-runtime-profile.json\`, and \`regional-runtime.README.md\`. It runs only the regional API, executor, and Rust probe and requires one active replica while v1 uses SQLite-backed status polling.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
 }
 
 function escapeRegExp(value: string) {

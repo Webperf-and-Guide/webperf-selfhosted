@@ -379,13 +379,31 @@ try {
   const composeVersion = composeEnvironmentVersion(
     readFileSync(join(root, 'infra/docker-compose/.env.example'), 'utf8')
   );
-  if (
-    composeVersion !== repositoryVersion
-    && !(recoverablePreparation && composeVersion === latestChangelogVersion)
-  ) {
+  const regionalEnvPath = join(root, 'infra/regional-runtime/.env.example');
+  const regionalEnvExists = existsSync(regionalEnvPath);
+  if (!regionalEnvExists) {
     violations.push(
-      `infra/docker-compose/.env.example: WEBPERF_VERSION ${composeVersion} does not match repository release state`
+      'infra/regional-runtime/.env.example: required release environment file is missing'
     );
+  }
+  const regionalVersion = regionalEnvExists
+    ? composeEnvironmentVersion(readFileSync(regionalEnvPath, 'utf8'))
+    : undefined;
+  for (const [path, version] of [
+    ['infra/docker-compose/.env.example', composeVersion],
+    ['infra/regional-runtime/.env.example', regionalVersion]
+  ] as const) {
+    if (version === undefined) {
+      continue;
+    }
+    if (
+      version !== repositoryVersion
+      && !(recoverablePreparation && version === latestChangelogVersion)
+    ) {
+      violations.push(
+        `${path}: WEBPERF_VERSION ${version} does not match repository release state`
+      );
+    }
   }
 } catch (error) {
   violations.push(

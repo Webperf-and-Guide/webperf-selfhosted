@@ -7,7 +7,7 @@ It should remain useful on its own for release verification without requiring th
 ## Included
 
 - manual checks
-- saved sites, route groups, region sets, and check profiles
+- saved sites, route groups, and check profiles
 - scheduled dispatch via the bundled scheduler or external triggers
 - baseline comparison and latest-vs-previous comparison
 - deterministic report generation and export
@@ -15,6 +15,7 @@ It should remain useful on its own for release verification without requiring th
 - Docker Compose deployment
 - public-safe contracts, schemas, and reporting logic
 - portable execution flow with vendor-neutral extension points
+- provider-neutral Regional Runtime Protocol and deployment profile
 
 ## Allowed But Optional
 

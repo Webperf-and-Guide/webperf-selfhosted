@@ -63,7 +63,7 @@ docker compose --env-file .env -f compose.yml up -d
 docker compose --env-file .env -f compose.yml ps
 ```
 
-Wait until `console`, `api`, `scheduler`, `executor`, and `probe` are healthy,
+Wait until `console`, `api`, `executor`, and `probe` are healthy,
 then verify the loopback console:
 
 ```sh

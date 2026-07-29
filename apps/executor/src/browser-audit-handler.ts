@@ -28,7 +28,7 @@ const maximumBrowserAuditResponseContentTypeLength = 160;
 export type BrowserAuditHandlerOptions = {
   client: BrowserAuditExecutorApiClient;
   leaseOwner: string;
-  browserAuditSharedSecret: string;
+  browserAuditSharedSecret?: string;
   browserAuditBaseUrl?: string;
   allowInsecureBrowserAuditHttp?: boolean;
   fetchImpl?: typeof globalThis.fetch;
@@ -75,7 +75,7 @@ export const createBrowserAuditExecutionHandler = ({
       return;
     }
 
-    if (!endpoint) {
+    if (!endpoint || !browserAuditSharedSecret) {
       audit = failAudit(audit, 'Browser Audit runner is not configured');
       await persist();
       return;

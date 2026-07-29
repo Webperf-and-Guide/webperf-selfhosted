@@ -22,7 +22,10 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::{Level, info};
 
-const MAX_BODY_SIZE_BYTES: usize = 32 * 1024;
+// Regional Runtime admission is bounded at 1,500,000 bytes. One signed probe
+// envelope contains a single admitted target plus small execution metadata,
+// so this stays above that boundary while retaining a hard allocation limit.
+const MAX_BODY_SIZE_BYTES: usize = 2 * 1024 * 1024;
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 const HEALTH_STATUS_PREFIX: &[u8] = b"HTTP/1.1 200";
 const HEALTH_STATUS_PREFIX_ALT: &[u8] = b"HTTP/1.0 200";

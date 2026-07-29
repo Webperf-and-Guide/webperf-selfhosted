@@ -20,6 +20,7 @@
     "@webperf/contracts": "workspace:*",
     "@webperf/domain-core": "workspace:*",
     "@webperf/config": "workspace:*",
-    "@webperf/report-core": "workspace:*"
+    "@webperf/report-core": "workspace:*",
+    "zod": "^4.1.12"
   }
 }

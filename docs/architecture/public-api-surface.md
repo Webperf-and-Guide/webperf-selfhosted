@@ -55,6 +55,8 @@ Authentication boundary:
 
 - `GET /health` is the unauthenticated, minimal process health probe.
 - `GET /v1/capabilities` and `GET /openapi/public.json` are unauthenticated.
+- Regional mode also leaves `GET /v1/regional-capabilities` and
+  `GET /openapi/regional-runtime.json` unauthenticated for discovery.
 - `GET /v1/health`, artifact downloads, and every data or execution endpoint
   require the appropriate administrator or internal-service bearer token.
 
@@ -129,5 +131,6 @@ The API serves:
 
 - `GET /openapi/public.json`
 - `GET /openapi/control.json`
+- `GET /openapi/regional-runtime.json` in regional mode
 
 Those documents are generated from the checked-in contracts and should reflect the frozen v1 surface above.

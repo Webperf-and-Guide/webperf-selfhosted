@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "topology": {
+    "replicas": {
+      "minimum": 1,
+      "maximum": 1
+    },
+    "sharedNetworkNamespace": true,
+    "publicContainer": "regional-api",
+    "publicPort": 8788,
+    "persistentVolume": {
+      "container": "regional-api",
+      "mountPath": "/data",
+      "required": true
+    }
+  },
+  "containers": [
+    {
+      "name": "regional-api",
+      "image": "webperf",
+      "role": "regional-runtime",
+      "ports": [8788],
+      "environment": {
+        "SELFHOST_API_HOST": "0.0.0.0",
+        "SELFHOST_API_PORT": "8788",
+        "SELFHOST_DATABASE_PATH": "/data/webperf.sqlite",
+        "SELFHOST_ARTIFACTS_PATH": "/data/artifacts",
+        "SELFHOST_PROBE_BASE_URL": "http://127.0.0.1:8080",
+        "SELFHOST_SCHEDULER_MODE": "disabled"
+      },
+      "requiredDeploymentInputs": [
+        "SELFHOST_INTERNAL_SECRET",
+        "SELFHOST_REGION_ID",
+        "REGIONAL_RUNTIME_SHARED_SECRET",
+        "WEBPERF_RUNTIME_VERSION",
+        "WEBPERF_RUNTIME_IMAGE_DIGEST",
+        "WEBPERF_PROBE_IMAGE_DIGEST"
+      ],
+      "optionalDeploymentInputs": [
+        "SELFHOST_INTERNAL_SECRET_NEXT",
+        "REGIONAL_RUNTIME_SHARED_SECRET_NEXT",
+        "SELFHOST_REGION_LABEL"
+      ]
+    },
+    {
+      "name": "regional-executor",
+      "image": "webperf",
+      "role": "executor",
+      "ports": [],
+      "environment": {
+        "SELFHOST_EXECUTOR_API_BASE_URL": "http://127.0.0.1:8788",
+        "SELFHOST_PROBE_BASE_URL": "http://127.0.0.1:8080",
+        "SELFHOST_EXECUTOR_MAX_EXECUTION_MS": "900000"
+      },
+      "requiredDeploymentInputs": [
+        "SELFHOST_INTERNAL_SECRET",
+        "PROBE_SHARED_SECRET",
+        "SELFHOST_REGION_ID",
+        "WEBPERF_RUNTIME_VERSION",
+        "WEBPERF_RUNTIME_IMAGE_DIGEST",
+        "WEBPERF_PROBE_IMAGE_DIGEST"
+      ]
+    },
+    {
+      "name": "probe",
+      "image": "probe",
+      "role": "probe",
+      "ports": [8080],
+      "environment": {
+        "PROBE_LISTEN_ADDR": "0.0.0.0:8080",
+        "REGION_ID": "${SELFHOST_REGION_ID}"
+      },
+      "requiredDeploymentInputs": [
+        "SELFHOST_REGION_ID",
+        "PROBE_SHARED_SECRET"
+      ],
+      "optionalDeploymentInputs": [
+        "PROBE_SHARED_SECRET_NEXT"
+      ]
+    }
+  ]
+}

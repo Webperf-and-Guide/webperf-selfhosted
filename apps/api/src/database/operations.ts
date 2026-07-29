@@ -25,6 +25,8 @@ export type SqliteRetentionResult = {
   checkRuns: number;
   executionJobs: number;
   derivedResources: number;
+  regionalExecutions: number;
+  regionalTargetLinks: number;
   artifactIndexes: number;
 };
 
@@ -53,17 +55,140 @@ const countChanges = (result: unknown) =>
   (result as { changes?: number }).changes ?? 0;
 
 const retentionDeleteBatchSize = 500;
+// At most 100,000 rows are removed per invocation. This bounds SQLite write
+// contention; callers can retry the remaining stale backlog on a later cycle.
+const retentionDeleteMaximumBatches = 200;
 export const defaultSqliteStorageCryptoVerificationLimit = 100_000;
+
+export class SqliteRetentionBatchLimitError extends Error {
+  override name = 'SqliteRetentionBatchLimitError';
+
+  constructor(readonly phase: 'general' | 'regional-execution') {
+    super(`SQLite ${phase} retention exceeded its bounded batch limit`);
+  }
+}
 
 const deleteRowsInBatches = (deleteBatch: () => unknown) => {
   let deleted = 0;
 
-  while (true) {
+  for (let batch = 0; batch < retentionDeleteMaximumBatches; batch += 1) {
     const changes = countChanges(deleteBatch());
     deleted += changes;
     if (changes < retentionDeleteBatchSize) {
       return deleted;
     }
+  }
+
+  throw new SqliteRetentionBatchLimitError('general');
+};
+
+const cleanupRegionalExecutionGroups = (
+  database: Database,
+  cutoffIso: string
+) => {
+  const nextEligibleGroups = database.query<
+    { id: string },
+    [string, string, number]
+  >(`
+    SELECT entity.id
+    FROM saved_entities AS entity
+    WHERE entity.kind = 'regional_execution'
+      AND entity.updated_at < ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM regional_execution_targets AS target_link
+        JOIN execution_jobs AS execution
+          ON execution.id = target_link.execution_job_id
+        WHERE target_link.regional_execution_id = entity.id
+          -- The leased execution row is the lifecycle source of truth.
+          -- Cancellation can intentionally leave its display-only domain job
+          -- queued, and both rows are deleted atomically with this group.
+          AND (
+            execution.status NOT IN ('succeeded', 'failed', 'cancelled')
+            OR execution.completed_at IS NULL
+            OR execution.completed_at >= ?
+          )
+      )
+    ORDER BY entity.updated_at ASC, entity.id ASC
+    LIMIT ?
+  `);
+  const deleteJobs = database.query(`
+    DELETE FROM jobs
+    WHERE id IN (
+      SELECT job_id
+      FROM regional_execution_targets
+      WHERE regional_execution_id = ?
+    )
+  `);
+  const deleteExecutionJobs = database.query(`
+    DELETE FROM execution_jobs
+    WHERE id IN (
+      SELECT execution_job_id
+      FROM regional_execution_targets
+      WHERE regional_execution_id = ?
+    )
+  `);
+  const deleteTargetLinks = database.query(`
+    DELETE FROM regional_execution_targets
+    WHERE regional_execution_id = ?
+  `);
+  const deleteRegionalExecution = database.query(`
+    DELETE FROM saved_entities
+    WHERE kind = 'regional_execution'
+      AND id = ?
+  `);
+  const deleteGroupBatch = database.transaction(() => {
+    const candidates = nextEligibleGroups.all(
+      cutoffIso,
+      cutoffIso,
+      retentionDeleteBatchSize
+    );
+    let batchJobs = 0;
+    let batchExecutionJobs = 0;
+    let batchRegionalExecutions = 0;
+    let batchRegionalTargetLinks = 0;
+
+    for (const candidate of candidates) {
+      batchJobs += countChanges(deleteJobs.run(candidate.id));
+      batchExecutionJobs += countChanges(
+        deleteExecutionJobs.run(candidate.id)
+      );
+      batchRegionalTargetLinks += countChanges(deleteTargetLinks.run(candidate.id));
+      batchRegionalExecutions += countChanges(deleteRegionalExecution.run(candidate.id));
+    }
+    return {
+      groupCount: candidates.length,
+      jobs: batchJobs,
+      executionJobs: batchExecutionJobs,
+      regionalExecutions: batchRegionalExecutions,
+      regionalTargetLinks: batchRegionalTargetLinks
+    };
+  });
+
+  let jobs = 0;
+  let executionJobs = 0;
+  let regionalExecutions = 0;
+  let regionalTargetLinks = 0;
+
+  try {
+    for (let batch = 0; batch < retentionDeleteMaximumBatches; batch += 1) {
+      const deleted = deleteGroupBatch.immediate();
+      jobs += deleted.jobs;
+      executionJobs += deleted.executionJobs;
+      regionalExecutions += deleted.regionalExecutions;
+      regionalTargetLinks += deleted.regionalTargetLinks;
+      if (deleted.groupCount < retentionDeleteBatchSize) {
+        return { jobs, executionJobs, regionalExecutions, regionalTargetLinks };
+      }
+    }
+
+    throw new SqliteRetentionBatchLimitError('regional-execution');
+  } finally {
+    nextEligibleGroups.finalize();
+    deleteJobs.finalize();
+    deleteExecutionJobs.finalize();
+    deleteTargetLinks.finalize();
+    deleteRegionalExecution.finalize();
   }
 };
 
@@ -250,10 +375,64 @@ export const cleanupSqliteRetention = (
   let checkRuns = 0;
   let executionJobs = 0;
   let derivedResources = 0;
+  let regionalExecutions = 0;
+  let regionalTargetLinks = 0;
   let artifactIndexes = 0;
 
-  if (tableExists(database, 'jobs')) {
+  const hasRegionalGroupTables = (
+    tableExists(database, 'saved_entities')
+    && tableExists(database, 'regional_execution_targets')
+    && tableExists(database, 'jobs')
+    && tableExists(database, 'execution_jobs')
+  );
+  if (hasRegionalGroupTables) {
+    const regionalGroups = cleanupRegionalExecutionGroups(database, cutoffIso);
+    jobs += regionalGroups.jobs;
+    executionJobs += regionalGroups.executionJobs;
+    regionalExecutions += regionalGroups.regionalExecutions;
+    regionalTargetLinks += regionalGroups.regionalTargetLinks;
+  }
+
+  if (!hasRegionalGroupTables && tableExists(database, 'saved_entities')) {
     const statement = database.query<never, [string, number]>(`
+      DELETE FROM saved_entities
+      WHERE rowid IN (
+        SELECT rowid
+        FROM saved_entities
+        WHERE kind = 'regional_execution'
+          AND updated_at < ?
+        LIMIT ?
+      )
+    `);
+    try {
+      regionalExecutions += deleteRowsInBatches(
+        () => statement.run(cutoffIso, retentionDeleteBatchSize)
+      );
+    } finally {
+      statement.finalize();
+    }
+  }
+
+  if (tableExists(database, 'jobs')) {
+    const statement = (
+      tableExists(database, 'regional_execution_targets')
+    )
+      ? database.query<never, [string, number]>(`
+      DELETE FROM jobs
+      WHERE rowid IN (
+        SELECT job.rowid
+        FROM jobs AS job
+        WHERE job.requested_at < ?
+          AND job.status IN ('succeeded', 'failed', 'partial')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM regional_execution_targets AS target_link
+            WHERE target_link.job_id = job.id
+          )
+        LIMIT ?
+      )
+    `)
+      : database.query<never, [string, number]>(`
       DELETE FROM jobs
       WHERE rowid IN (
         SELECT rowid FROM jobs
@@ -263,7 +442,7 @@ export const cleanupSqliteRetention = (
       )
     `);
     try {
-      jobs = deleteRowsInBatches(() => statement.run(cutoffIso, retentionDeleteBatchSize));
+      jobs += deleteRowsInBatches(() => statement.run(cutoffIso, retentionDeleteBatchSize));
     } finally {
       statement.finalize();
     }
@@ -284,7 +463,23 @@ export const cleanupSqliteRetention = (
   }
 
   if (tableExists(database, 'execution_jobs')) {
-    const statement = database.query<never, [string, number]>(`
+    const statement = tableExists(database, 'regional_execution_targets')
+      ? database.query<never, [string, number]>(`
+      DELETE FROM execution_jobs
+      WHERE rowid IN (
+        SELECT execution.rowid
+        FROM execution_jobs AS execution
+        WHERE execution.status IN ('succeeded', 'failed', 'cancelled')
+          AND execution.completed_at < ?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM regional_execution_targets AS target_link
+            WHERE target_link.execution_job_id = execution.id
+          )
+        LIMIT ?
+      )
+    `)
+      : database.query<never, [string, number]>(`
       DELETE FROM execution_jobs
       WHERE rowid IN (
         SELECT rowid FROM execution_jobs
@@ -294,7 +489,7 @@ export const cleanupSqliteRetention = (
       )
     `);
     try {
-      executionJobs = deleteRowsInBatches(
+      executionJobs += deleteRowsInBatches(
         () => statement.run(cutoffIso, retentionDeleteBatchSize)
       );
     } finally {
@@ -309,7 +504,12 @@ export const cleanupSqliteRetention = (
       WHERE rowid IN (
         SELECT entity.rowid
         FROM saved_entities AS entity
-        WHERE entity.kind IN ('comparison', 'export', 'analysis', 'browser_audit')
+        WHERE entity.kind IN (
+          'comparison',
+          'export',
+          'analysis',
+          'browser_audit'
+        )
           AND entity.updated_at < ?
           AND (
             entity.kind != 'browser_audit'
@@ -331,13 +531,18 @@ export const cleanupSqliteRetention = (
       WHERE rowid IN (
         SELECT rowid
         FROM saved_entities
-        WHERE kind IN ('comparison', 'export', 'analysis', 'browser_audit')
+        WHERE kind IN (
+          'comparison',
+          'export',
+          'analysis',
+          'browser_audit'
+        )
           AND updated_at < ?
         LIMIT ?
       )
     `);
     try {
-      derivedResources = deleteRowsInBatches(
+      derivedResources += deleteRowsInBatches(
         () => statement.run(cutoffIso, retentionDeleteBatchSize)
       );
     } finally {
@@ -372,7 +577,62 @@ export const cleanupSqliteRetention = (
     }
   }
 
-  return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };
+  if (
+    tableExists(database, 'regional_execution_targets')
+    && tableExists(database, 'saved_entities')
+  ) {
+    const orphanPredicate = hasRegionalGroupTables
+      ? `
+        NOT EXISTS (
+          SELECT 1
+          FROM saved_entities AS entity
+          WHERE entity.kind = 'regional_execution'
+            AND entity.id = target_link.regional_execution_id
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM jobs AS job WHERE job.id = target_link.job_id
+        )
+        OR NOT EXISTS (
+          SELECT 1
+          FROM execution_jobs AS execution
+          WHERE execution.id = target_link.execution_job_id
+        )
+      `
+      : `
+        NOT EXISTS (
+          SELECT 1
+          FROM saved_entities AS entity
+          WHERE entity.kind = 'regional_execution'
+            AND entity.id = target_link.regional_execution_id
+        )
+      `;
+    const statement = database.query<never, [number]>(`
+      DELETE FROM regional_execution_targets
+      WHERE rowid IN (
+        SELECT target_link.rowid
+        FROM regional_execution_targets AS target_link
+        WHERE ${orphanPredicate}
+        LIMIT ?
+      )
+    `);
+    try {
+      regionalTargetLinks += deleteRowsInBatches(
+        () => statement.run(retentionDeleteBatchSize)
+      );
+    } finally {
+      statement.finalize();
+    }
+  }
+
+  return {
+    jobs,
+    checkRuns,
+    executionJobs,
+    derivedResources,
+    regionalExecutions,
+    regionalTargetLinks,
+    artifactIndexes
+  };
 };
 
 export const maintainSqliteDatabase = ({

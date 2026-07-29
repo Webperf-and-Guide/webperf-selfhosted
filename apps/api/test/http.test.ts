@@ -1132,7 +1132,7 @@ const startProbeServer = (scenario: MockProbeScenario, requests: unknown[]) => {
 
       return Response.json({
         measurement: {
-          region: 'tokyo',
+          region: payload.region,
           url: payload.url,
           latencyMs: current.latencyMs,
           measuredAt: new Date().toISOString(),

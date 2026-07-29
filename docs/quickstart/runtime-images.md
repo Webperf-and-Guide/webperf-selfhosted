@@ -7,7 +7,8 @@ index for `linux/amd64` and `linux/arm64`:
 - `ghcr.io/webperf-and-guide/webperf` — single multi-role Bun image covering
   console, API, scheduler, and executor. The active role is selected at
   container start by the `WEBPERF_ROLE` environment variable (`console`, `api`,
-  `scheduler`, or `executor`) via the `tooling/scripts/webperf-role.ts`
+  `scheduler`, `executor`, or restricted `regional-runtime`) via the
+  `tooling/scripts/webperf-role.ts`
   dispatcher.
 - `ghcr.io/webperf-and-guide/webperf-probe`
 - `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`
@@ -31,6 +32,8 @@ is pinned by OCI digest. It also contains:
 - `runtime-metadata.json`, with the version, source commit, image tags, and
   digests;
 - root `VERSION`;
+- the provider-neutral Regional Runtime Compose, environment template,
+  machine-readable multi-container profile, and deployment notes;
 - two SPDX JSON SBOMs per image, one for each Linux platform;
 - `browser-audit-seccomp.json`, kept beside `compose.yml` for the optional
   Chromium runtime;

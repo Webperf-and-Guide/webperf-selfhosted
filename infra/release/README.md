@@ -20,11 +20,15 @@ Each release contains:
 - the root `VERSION` released by the tag;
 - the `browser-audit-seccomp.json` referenced by that Compose file;
 - `runtime-metadata.json` following `runtime-metadata.schema.json`;
+- a digest-pinned `regional-runtime.compose.yml`, its environment template,
+  machine-readable multi-container profile, and deployment notes;
 - two SPDX JSON SBOMs per image (one per Linux platform) and SHA-256 checksums.
 
 The managed cloud repository should consume `runtime-metadata.json` from a
 specific GitHub Release. It must not infer runtime identity from `main`,
 `latest`, or a mutable tag.
+It should map the matching `regional-runtime-profile.json` into its provider
+adapter without copying provider credentials or fleet policy into this repo.
 
 Before creating a release tag, merge the generated Sampo release PR. The
 workflow rejects tags outside `main` history, repositories with pending

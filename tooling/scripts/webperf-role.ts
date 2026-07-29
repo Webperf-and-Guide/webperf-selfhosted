@@ -19,8 +19,9 @@ const ROLE_ENTRYPOINTS: Record<string, string[]> = {
   api: ['bun', './apps/api/src/index.ts'],
   executor: ['bun', './apps/executor/src/index.ts'],
   scheduler: ['bun', './apps/scheduler/src/index.ts'],
-  // Phase 4 of issue #14: regional-runtime uses the same API entrypoint
-  // but with SELFHOST_RUNTIME_MODE=regional-runtime configured via env.
+  // Phase 4 of issue #14: regional-runtime uses the same API entrypoint.
+  // The dispatcher forces the restricted mode below so selecting this role
+  // cannot accidentally expose the full self-host API.
   'regional-runtime': ['bun', './apps/api/src/index.ts'],
   // db is a passthrough to selfhost-database.ts; extra argv becomes the
   // subcommand (migrate, backup, restore, doctor, maintenance, optimize).
@@ -70,7 +71,13 @@ console.log(JSON.stringify({
 // Use Bun.spawn with stdio inheritance so the child process replaces this
 // dispatcher as the effective PID 1 for signal handling.
 const child = Bun.spawn(finalArgv, {
-  stdio: ['inherit', 'inherit', 'inherit']
+  stdio: ['inherit', 'inherit', 'inherit'],
+  env: {
+    ...process.env,
+    ...(role === 'regional-runtime'
+      ? { SELFHOST_RUNTIME_MODE: 'regional-runtime' }
+      : {})
+  }
 });
 
 // Forward signals to the child so container stop works correctly.

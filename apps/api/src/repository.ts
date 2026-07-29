@@ -40,6 +40,7 @@ import {
   executionRetryDelayMaxMs,
   exportResourceSchema,
   latencyJobDetailSchema,
+  networkProbeExecutionPayloadSchema,
   propertySchema,
   routeSetSchema
 } from '@webperf/contracts';
@@ -59,6 +60,10 @@ import {
 } from './database/operations';
 import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 import { browserAuditArtifactLimitTriggerName } from './database/migrations/20260722_003_browser_audit_artifacts';
+import {
+  regionalExecutionRecordSchema,
+  type RegionalExecutionRecord
+} from './regional-runtime-record';
 
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.
@@ -143,6 +148,22 @@ export type JobRepository = {
   getBrowserAuditArtifact(auditId: string, artifactId: string): BrowserAuditArtifactRecord | null;
   listBrowserAuditArtifacts(auditId: string): BrowserAuditArtifactRecord[];
   listBrowserAuditArtifactStorageKeys(): string[];
+  getRegionalExecution(id: string): RegionalExecutionRecord | null;
+  createRegionalExecution(input: {
+    record: RegionalExecutionRecord;
+    resources: Array<{
+      executionJob: EnqueueExecutionJob;
+      result: ExecutionResourceResult;
+    }>;
+  }, now?: Date): {
+    record: RegionalExecutionRecord;
+    created: boolean;
+  };
+  saveRegionalExecution(record: RegionalExecutionRecord): void;
+  terminateRegionalExecution(input: {
+    id: string;
+    reason: 'cancelled' | 'deadline_exceeded';
+  }, now?: Date): RegionalExecutionRecord | null;
   createExecutionResource(input: {
     executionJob: EnqueueExecutionJob;
     result: ExecutionResourceResult;
@@ -160,7 +181,7 @@ export type JobRepository = {
   }, now?: Date): ExecutionJob[] | null;
   getExecutionJob(id: string): ExecutionJob | null;
   listExecutionJobs(): ExecutionJob[];
-  claimExecutionJob(input: ExecutionJobLeaseInput, now?: Date): ExecutionJob | null;
+  claimExecutionJob(input: ExecutionJobClaimInput, now?: Date): ExecutionJob | null;
   markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
   renewExecutionJobLease(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
   completeExecutionJob(input: ExecutionJobOwnerInput, now?: Date): ExecutionJob | null;
@@ -175,6 +196,10 @@ export type JobRepository = {
 export type ExecutionJobLeaseInput = {
   leaseOwner: string;
   leaseDurationMs: number;
+};
+
+export type ExecutionJobClaimInput = ExecutionJobLeaseInput & {
+  kind?: ExecutionJob['kind'];
 };
 
 export type ExecutionJobOwnerInput = {
@@ -202,7 +227,8 @@ type EntityKind =
   | 'comparison'
   | 'export'
   | 'analysis'
-  | 'browser_audit';
+  | 'browser_audit'
+  | 'regional_execution';
 
 type SavedEntityRow = {
   payload_json: string;
@@ -418,6 +444,15 @@ export const createSqliteJobRepository = ({
     WHERE kind = ?
       AND id = ?
   `);
+  const saveRegionalExecutionTargetStatement = db.query(`
+    INSERT INTO regional_execution_targets (
+      regional_execution_id,
+      execution_job_id,
+      job_id
+    ) VALUES (?, ?, ?)
+    ON CONFLICT (regional_execution_id, job_id) DO UPDATE SET
+      execution_job_id = excluded.execution_job_id
+  `);
   const saveCheckProfileRunStatement = db.query(`
     INSERT INTO check_profile_runs (id, profile_id, created_at, payload_json)
     VALUES (?, ?, ?, ?)
@@ -505,6 +540,8 @@ export const createSqliteJobRepository = ({
     string,
     string,
     string,
+    string | null,
+    string | null,
     string,
     string,
     number
@@ -520,6 +557,7 @@ export const createSqliteJobRepository = ({
       SELECT id
       FROM execution_jobs
       WHERE attempt_count >= max_attempts
+        AND (? IS NULL OR kind = ?)
         AND (
           (status = 'queued' AND available_at <= ?)
           OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
@@ -529,7 +567,15 @@ export const createSqliteJobRepository = ({
       )
     RETURNING *
   `);
-  const claimExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+  const claimExecutionJobStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    string | null,
+    string | null,
+    string,
+    string
+  ]>(`
     UPDATE execution_jobs
     SET status = 'leased',
         lease_owner = ?,
@@ -540,7 +586,8 @@ export const createSqliteJobRepository = ({
     WHERE id = (
       SELECT id
       FROM execution_jobs
-      WHERE attempt_count < max_attempts
+      WHERE (? IS NULL OR kind = ?)
+        AND attempt_count < max_attempts
         AND (
           (status = 'queued' AND available_at <= ?)
           OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
@@ -763,6 +810,18 @@ export const createSqliteJobRepository = ({
     return (result.changes ?? 0) > 0;
   };
 
+  const persistRegionalExecutionTargetLinks = (
+    record: RegionalExecutionRecord
+  ) => {
+    for (const target of record.targetLinks) {
+      saveRegionalExecutionTargetStatement.run(
+        record.id,
+        target.executionJobId,
+        target.jobId
+      );
+    }
+  };
+
   const persistJob = (job: LatencyJobDetail) => {
     saveStatement.run(
       job.id,
@@ -846,6 +905,59 @@ export const createSqliteJobRepository = ({
         resourceId: executionJob.resourceId
       }));
     }
+  };
+
+  const terminateRegionalExecutionRecord = (
+    record: RegionalExecutionRecord,
+    reason: 'cancelled' | 'deadline_exceeded',
+    nowIso: string
+  ) => {
+    if (record.cancelledAt || record.deadlineExceededAt) {
+      return record;
+    }
+
+    const executionJobIds = [...new Set(
+      record.targetLinks.map((target) => target.executionJobId)
+    )];
+    const executionJobs = executionJobIds.map((executionJobId) => {
+      const executionRow = getExecutionJobStatement.get(executionJobId);
+      return executionRow ? parseExecutionJob(executionRow) : null;
+    });
+    const hasInflight = executionJobs.some(
+      (executionJob) =>
+        executionJob
+        && !isTerminalExecutionJob(executionJob)
+    );
+    if (!hasInflight) {
+      // Cancellation and deadline expiry must never rewrite an execution
+      // that became terminal before the immediate transaction acquired
+      // the writer reservation.
+      return record;
+    }
+
+    for (const executionJob of executionJobs) {
+      if (!executionJob || isTerminalExecutionJob(executionJob)) {
+        continue;
+      }
+      const cancelledRow = cancelExecutionJobStatement.get(
+        nowIso,
+        nowIso,
+        executionJob.id
+      );
+      const cancelled = cancelledRow ? parseExecutionJob(cancelledRow) : null;
+      if (cancelled) {
+        syncTerminalExecutionResource(cancelled, nowIso);
+      }
+    }
+
+    const terminated = regionalExecutionRecordSchema.parse({
+      ...record,
+      cancelledAt: reason === 'cancelled' ? nowIso : null,
+      deadlineExceededAt: reason === 'deadline_exceeded' ? nowIso : null,
+      updatedAt: nowIso
+    });
+    saveEntity('regional_execution', terminated);
+    return terminated;
   };
 
   const enqueueExecution = (input: EnqueueExecutionJob, now: Date) => {
@@ -1129,6 +1241,76 @@ export const createSqliteJobRepository = ({
         .all()
         .map((row) => row.storage_key);
     },
+    getRegionalExecution(id) {
+      return getEntity('regional_execution', id, regionalExecutionRecordSchema);
+    },
+    createRegionalExecution(input, now = new Date()) {
+      const record = regionalExecutionRecordSchema.parse(input.record);
+      const create = db.transaction(() => {
+        const existingRow = getEntityStatement.get('regional_execution', record.id);
+
+        if (existingRow) {
+          const existing = parseEntity(
+            'regional_execution',
+            existingRow,
+            regionalExecutionRecordSchema
+          );
+          if (!existing) {
+            throw new Error(`Regional execution ${record.id} could not be decoded`);
+          }
+          persistRegionalExecutionTargetLinks(existing);
+          return {
+            record: existing,
+            created: false
+          };
+        }
+
+        for (const resource of input.resources) {
+          if (resource.executionJob.kind !== resource.result.kind) {
+            throw new Error(
+              `Regional execution resource kind ${resource.result.kind} does not match `
+              + `queue job kind ${resource.executionJob.kind}`
+            );
+          }
+          persistExecutionResource(resource.result);
+          enqueueExecution(resource.executionJob, now);
+        }
+
+        saveEntity('regional_execution', record);
+        persistRegionalExecutionTargetLinks(record);
+        return {
+          record,
+          created: true
+        };
+      });
+
+      return create();
+    },
+    saveRegionalExecution(record) {
+      saveEntity('regional_execution', regionalExecutionRecordSchema.parse(record));
+    },
+    terminateRegionalExecution(input, now = new Date()) {
+      const terminate = db.transaction(() => {
+        const row = getEntityStatement.get('regional_execution', input.id);
+        if (!row) {
+          return null;
+        }
+        const record = parseEntity(
+          'regional_execution',
+          row,
+          regionalExecutionRecordSchema
+        );
+        if (!record) {
+          throw new Error(`Regional execution ${input.id} could not be decoded`);
+        }
+        const nowIso = now.toISOString();
+        return terminateRegionalExecutionRecord(record, input.reason, nowIso);
+      });
+
+      // Acquire the writer reservation before terminal-state reads so executor
+      // completion cannot interleave between detection and cancellation.
+      return terminate.immediate();
+    },
     createExecutionResource(input, now = new Date()) {
       if (input.executionJob.kind !== input.result.kind) {
         throw new Error('Execution resource kind does not match its queue job');
@@ -1181,6 +1363,7 @@ export const createSqliteJobRepository = ({
     claimExecutionJob(input, now = new Date()) {
       const leaseExpiresAt = getLeaseExpiresAt(input, now);
       const nowIso = now.toISOString();
+      const executionKind = input.kind ?? null;
       const exhaustedError = storageCrypto.stringify({
         code: 'lease_attempts_exhausted',
         message: 'Execution stopped after the maximum number of lease attempts',
@@ -1192,6 +1375,8 @@ export const createSqliteJobRepository = ({
           exhaustedError,
           nowIso,
           nowIso,
+          executionKind,
+          executionKind,
           nowIso,
           nowIso,
           executionExhaustionFinalizationBatchSize
@@ -1208,6 +1393,8 @@ export const createSqliteJobRepository = ({
           input.leaseOwner,
           leaseExpiresAt,
           nowIso,
+          executionKind,
+          executionKind,
           nowIso,
           nowIso
         );
@@ -1241,22 +1428,73 @@ export const createSqliteJobRepository = ({
     },
     completeExecutionJob(input, now = new Date()) {
       assertLeaseOwner(input.leaseOwner);
-      const nowIso = now.toISOString();
-      const row = completeExecutionJobStatement.get(
-        nowIso,
-        nowIso,
-        input.id,
-        input.leaseOwner,
-        nowIso
-      );
+      const complete = db.transaction(() => {
+        const persisted = getExecutionJobStatement.get(input.id);
+        const executionJob = persisted ? parseExecutionJob(persisted) : null;
 
-      if (row) {
-        return parseExecutionJob(row);
-      }
+        if (!executionJob) {
+          return null;
+        }
 
-      const existing = getExecutionJobStatement.get(input.id);
-      const executionJob = existing ? parseExecutionJob(existing) : null;
-      return executionJob?.status === 'succeeded' ? executionJob : null;
+        if (executionJob.status === 'succeeded') {
+          return executionJob;
+        }
+
+        const nowIso = now.toISOString();
+        const ownsCompletableLease = (
+          (executionJob.status === 'leased' || executionJob.status === 'running')
+          && executionJob.leaseOwner === input.leaseOwner
+          && executionJob.leaseExpiresAt !== null
+          && executionJob.leaseExpiresAt > nowIso
+        );
+        if (!ownsCompletableLease) {
+          return null;
+        }
+
+        const regionalPayload = executionJob.kind === 'network_probe'
+          ? networkProbeExecutionPayloadSchema.safeParse(executionJob.payload)
+          : null;
+        if (
+          regionalPayload?.success
+          && regionalPayload.data.regionalExecutionId
+          && regionalPayload.data.deadlineAt
+          && Date.parse(regionalPayload.data.deadlineAt) <= now.getTime()
+        ) {
+          const regionalRow = getEntityStatement.get(
+            'regional_execution',
+            regionalPayload.data.regionalExecutionId
+          );
+          const regionalRecord = regionalRow
+            ? parseEntity(
+                'regional_execution',
+                regionalRow,
+                regionalExecutionRecordSchema
+              )
+            : null;
+          if (!regionalRecord) {
+            throw new Error('Regional execution deadline references a missing record');
+          }
+          terminateRegionalExecutionRecord(
+            regionalRecord,
+            'deadline_exceeded',
+            nowIso
+          );
+          return null;
+        }
+
+        const row = completeExecutionJobStatement.get(
+          nowIso,
+          nowIso,
+          input.id,
+          input.leaseOwner,
+          nowIso
+        );
+        return row ? parseExecutionJob(row) : null;
+      });
+
+      // The accepted regional deadline and terminal queue transition share one
+      // writer reservation, so a late completion cannot win a polling race.
+      return complete.immediate();
     },
     failExecutionJob(input, now = new Date()) {
       assertLeaseOwner(input.leaseOwner);
@@ -1286,7 +1524,7 @@ export const createSqliteJobRepository = ({
           return null;
         }
 
-        if (['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
+        if (isTerminalExecutionJob(executionJob)) {
           if (executionJob.status === 'failed') {
             syncTerminalExecutionResource(
               executionJob,
@@ -1379,6 +1617,9 @@ const assertNever = (value: never): never => {
   void value;
   throw new Error('Unsupported execution resource result kind');
 };
+
+const isTerminalExecutionJob = (executionJob: ExecutionJob) =>
+  ['succeeded', 'failed', 'cancelled'].includes(executionJob.status);
 
 const assertLeaseOwner = (leaseOwner: string) => {
   if (leaseOwner.length < 1 || leaseOwner.length > executionLeaseOwnerMaxLength) {

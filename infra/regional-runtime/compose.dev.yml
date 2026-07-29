@@ -1,0 +1,18 @@
+x-webperf-build: &webperf-build
+  context: ../..
+  dockerfile: infra/docker/Dockerfile.webperf
+
+services:
+  regional-api:
+    image: webperf:dev
+    build: *webperf-build
+
+  regional-executor:
+    image: webperf:dev
+    build: *webperf-build
+
+  probe:
+    image: webperf-probe:dev
+    build:
+      context: ../../apps/probe-rs
+      dockerfile: Dockerfile

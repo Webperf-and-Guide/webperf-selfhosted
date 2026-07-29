@@ -16,6 +16,7 @@ import {
   createSqliteJobRepository,
   executionExhaustionFinalizationBatchSize
 } from '../src/repository';
+import type { RegionalExecutionRecord } from '../src/regional-runtime-record';
 
 const tempDirs: string[] = [];
 const encryptionSecret = 'execution-repository-test-secret';
@@ -252,6 +253,171 @@ describe('durable execution repository', () => {
 
     first.close();
     second.close();
+  });
+
+  test('rejects a regional completion after its accepted deadline', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    const acceptedAt = new Date('2026-07-22T00:00:00.000Z');
+    const deadlineAt = '2026-07-22T00:00:01.000Z';
+    const job = createLatencyJob('job_regional_deadline');
+    const record: RegionalExecutionRecord = {
+      id: 'regional_deadline:tokyo',
+      requestDigest: 'a'.repeat(64),
+      request: {
+        idempotencyKey: 'regional_deadline:tokyo',
+        runnerType: 'network_probe',
+        targets: [{
+          targetId: 'homepage',
+          url: job.url
+        }],
+        deadlineMs: 1_000,
+        maxAttempts: 1,
+        timestamp: acceptedAt.toISOString(),
+        signature: 'b'.repeat(64),
+        keyVersion: 'current'
+      },
+      provenance: {
+        regionId: 'tokyo',
+        runnerType: 'network_probe',
+        runtime: {
+          version: '0.3.0-test',
+          imageDigest: null
+        },
+        runner: {
+          id: 'probe-rs',
+          implementation: 'rust',
+          imageDigest: null
+        }
+      },
+      targetLinks: [{
+        targetId: 'homepage',
+        jobId: job.id,
+        executionJobId: 'exec_regional_deadline'
+      }],
+      acceptedAt: acceptedAt.toISOString(),
+      deadlineAt,
+      cancelledAt: null,
+      deadlineExceededAt: null,
+      createdAt: acceptedAt.toISOString(),
+      updatedAt: acceptedAt.toISOString()
+    };
+
+    repository.createRegionalExecution({
+      record,
+      resources: [{
+        executionJob: {
+          id: 'exec_regional_deadline',
+          kind: 'network_probe',
+          resourceId: job.id,
+          maxAttempts: 1,
+          payload: {
+            version: 'v1',
+            jobIds: [job.id],
+            checkId: null,
+            runId: null,
+            regionalExecutionId: record.id,
+            deadlineAt,
+            expectedProvenance: record.provenance
+          }
+        },
+        result: {
+          kind: 'network_probe',
+          jobs: [job],
+          run: null
+        }
+      }]
+    }, acceptedAt);
+    repository.claimExecutionJob(
+      { leaseOwner: 'regional-executor', leaseDurationMs: 10_000 },
+      acceptedAt
+    );
+    repository.markExecutionJobRunning(
+      {
+        id: 'exec_regional_deadline',
+        leaseOwner: 'regional-executor',
+        leaseDurationMs: 10_000
+      },
+      new Date('2026-07-22T00:00:00.100Z')
+    );
+
+    expect(repository.completeExecutionJob(
+      {
+        id: 'exec_regional_deadline',
+        leaseOwner: 'regional-executor'
+      },
+      new Date('2026-07-22T00:00:01.001Z')
+    )).toBeNull();
+    expect(repository.getExecutionJob('exec_regional_deadline')?.status)
+      .toBe('cancelled');
+    expect(repository.getRegionalExecution(record.id)).toMatchObject({
+      cancelledAt: null,
+      deadlineExceededAt: '2026-07-22T00:00:01.001Z'
+    });
+
+    repository.close();
+  });
+
+  test('scopes regional claims and exhausted finalization to network probes', () => {
+    const databasePath = createTempDatabasePath();
+    const repository = createRepository(databasePath);
+    const queuedAt = new Date('2026-07-22T00:00:00.000Z');
+    const networkQueuedAt = new Date('2026-07-22T00:00:00.500Z');
+    const expiredAt = new Date('2026-07-22T00:00:02.000Z');
+
+    repository.enqueueExecutionJob({
+      id: 'exec_legacy_browser',
+      kind: 'browser_audit',
+      resourceId: 'audit_legacy_browser',
+      maxAttempts: 1,
+      payload: {
+        version: 'v1',
+        auditId: 'audit_legacy_browser'
+      }
+    }, queuedAt);
+    expect(repository.claimExecutionJob({
+      leaseOwner: 'full-executor',
+      leaseDurationMs: 1_000
+    }, queuedAt)?.id).toBe('exec_legacy_browser');
+
+    const networkJob = createLatencyJob('job_regional_only');
+    repository.createExecutionResource({
+      executionJob: {
+        id: 'exec_regional_only',
+        kind: 'network_probe',
+        resourceId: networkJob.id,
+        maxAttempts: 2,
+        payload: {
+          version: 'v1',
+          jobIds: [networkJob.id],
+          checkId: null,
+          runId: null,
+          regionalExecutionId: null,
+          deadlineAt: null,
+          expectedProvenance: null
+        }
+      },
+      result: {
+        kind: 'network_probe',
+        jobs: [networkJob],
+        run: null
+      }
+    }, networkQueuedAt);
+
+    expect(repository.claimExecutionJob({
+      leaseOwner: 'regional-executor',
+      leaseDurationMs: 10_000,
+      kind: 'network_probe'
+    }, expiredAt)?.id).toBe('exec_regional_only');
+    expect(repository.getExecutionJob('exec_legacy_browser')?.status).toBe('leased');
+
+    expect(repository.claimExecutionJob({
+      leaseOwner: 'full-executor',
+      leaseDurationMs: 10_000
+    }, expiredAt)).toBeNull();
+    expect(repository.getExecutionJob('exec_legacy_browser')?.status).toBe('failed');
+
+    repository.close();
   });
 
   test('recovers expired work and terminally fails at the lease-attempt limit', () => {

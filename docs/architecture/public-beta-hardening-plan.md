@@ -106,17 +106,20 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ## Compatibility impact
 
-- Canonical public names are Site, Route Group, Region Set, Check, Run,
+- Canonical public names are Site, Route Group, Check, Run,
   Comparison, Export, Analysis, and Browser Audit.
-- Canonical routes remain `/v1/sites`, `/v1/route-groups`, `/v1/region-sets`,
-  `/v1/checks`, nested check runs, run detail, comparisons, exports, analyses,
-  browser audits, and capabilities.
-- `/v1/properties`, `/v1/route-sets`, `/v1/region-packs`, and
-  `/v1/check-profiles` remain tested compatibility aliases during beta, but will
+- Canonical routes remain `/v1/sites`, `/v1/route-groups`, `/v1/checks`,
+  nested check runs, run detail, comparisons, exports, analyses, browser
+  audits, and capabilities. Regional mode has a separate allowlisted handoff
+  surface documented in `regional-runtime-handoff.md`.
+- `/v1/properties`, `/v1/route-sets`, and `/v1/check-profiles` remain tested
+  compatibility aliases during beta, but will
   return deprecation and successor-link headers and will not receive new
   features first.
 - Existing stored JSON payloads and the legacy control contract remain readable
   while cloud consumers move to canonical public contracts.
+- `/v1/region-packs` and `/v1/region-sets` are intentionally retired with
+  `410 Gone`; no production migration was required before their removal.
 - Browser Audit normalized contracts will receive a new public package version;
   a sitespeed.io-shaped fixture will prove engine neutrality without shipping a
   sitespeed.io runner.

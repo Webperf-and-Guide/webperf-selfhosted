@@ -70,7 +70,7 @@ const unsignedResult = {
 describe('regional runtime signatures', () => {
   test('uses a stable canonical request payload and verifies HMAC signatures', async () => {
     expect(toRegionalExecutionSignaturePayload(unsignedRequest)).toBe(
-      '{"deadlineMs":60000,"idempotencyKey":"release_123:tokyo","maxAttempts":3,"runnerType":"network_probe","targets":[{"request":{"body":null,"headers":[{"name":"accept","value":"text/html"}],"method":"GET"},"targetId":"homepage","url":"https://example.com/"}],"timestamp":"2026-07-29T00:00:00.000Z"}'
+      '{"deadlineMs":60000,"idempotencyKey":"release_123:tokyo","keyVersion":"current","maxAttempts":3,"runnerType":"network_probe","targets":[{"request":{"body":null,"headers":[{"name":"accept","value":"text/html"}],"method":"GET"},"targetId":"homepage","url":"https://example.com/"}],"timestamp":"2026-07-29T00:00:00.000Z"}'
     );
 
     const signature = await createRegionalExecutionSignature(
@@ -93,6 +93,14 @@ describe('regional runtime signatures', () => {
       'regional-runtime-test-secret',
       unsignedRequest,
       'not-a-signature'
+    )).toBe(false);
+    expect(await verifyRegionalExecutionSignature(
+      'regional-runtime-test-secret',
+      {
+        ...unsignedRequest,
+        keyVersion: 'next'
+      },
+      signature
     )).toBe(false);
   });
 
@@ -130,6 +138,14 @@ describe('regional runtime signatures', () => {
           ...unsignedResult.provenance,
           regionId: 'singapore'
         }
+      },
+      signature
+    )).toBe(false);
+    expect(await verifyRegionalResultSignature(
+      'regional-runtime-test-secret',
+      {
+        ...unsignedResult,
+        keyVersion: 'next'
       },
       signature
     )).toBe(false);

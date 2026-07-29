@@ -2,7 +2,9 @@ import { z } from 'zod';
 import {
   executionJobIdSchema,
   regionalExecutionIdempotencyKeySchema,
+  regionalExecutionProvenanceSchema,
   regionalExecutionRequestSchema,
+  regionalExecutionSignatureSchema,
   regionalRuntimeMaxBatchSize
 } from '@webperf/contracts';
 
@@ -15,8 +17,9 @@ export type RegionalExecutionTargetLink = z.infer<typeof regionalExecutionTarget
 
 export const regionalExecutionRecordSchema = z.object({
   id: regionalExecutionIdempotencyKeySchema,
-  requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  requestDigest: regionalExecutionSignatureSchema,
   request: regionalExecutionRequestSchema,
+  provenance: regionalExecutionProvenanceSchema,
   targetLinks: z.array(regionalExecutionTargetLinkSchema)
     .min(1)
     .max(regionalRuntimeMaxBatchSize),
@@ -32,6 +35,14 @@ export const regionalExecutionRecordSchema = z.object({
       code: 'custom',
       message: 'Regional execution record id must match its idempotency key',
       path: ['id']
+    });
+  }
+
+  if (record.cancelledAt && record.deadlineExceededAt) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Regional execution cannot be both cancelled and deadline-exceeded',
+      path: ['cancelledAt']
     });
   }
 

@@ -104,13 +104,19 @@ if [[ "$api_mapping" != 127.0.0.1:* ]] && [[ "$api_mapping" != \[::1\]:* ]]; the
 fi
 base_url="http://127.0.0.1:${api_port}"
 
+api_healthy=false
 for _ in {1..90}; do
   if curl -fsS "${base_url}/health" >/dev/null 2>&1; then
+    api_healthy=true
     break
   fi
   sleep 2
 done
-curl -fsS "${base_url}/health" >/dev/null
+if [[ "$api_healthy" != 'true' ]]; then
+  echo 'Regional API did not become healthy within 180 seconds' >&2
+  compose logs --tail 80 regional-api >&2 || true
+  exit 1
+fi
 
 for service in regional-executor probe; do
   container_id="$(compose ps -q "$service")"
@@ -125,6 +131,27 @@ for service in regional-executor probe; do
   )"
   if [[ -n "$published" ]]; then
     echo "$service must not publish a host port" >&2
+    exit 1
+  fi
+  service_healthy=false
+  for _ in {1..30}; do
+    health="$(
+      docker inspect \
+        --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        "$container_id"
+    )"
+    if [[ "$health" == 'healthy' ]]; then
+      service_healthy=true
+      break
+    fi
+    if [[ "$health" == 'unhealthy' || "$health" == 'exited' || "$health" == 'dead' ]]; then
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$service_healthy" != 'true' ]]; then
+    echo "$service did not become healthy (last status: ${health:-unknown})" >&2
+    compose logs --tail 80 "$service" >&2 || true
     exit 1
   fi
 done

@@ -92,6 +92,7 @@ import {
   networkProbeMaxJobsPerExecution,
   networkProbeExecutionPayloadSchema,
   regionalExecutionPayloadMaxBytes,
+  regionalExecutionProvenanceSchema,
   regionalExecutionRequestSchema,
   regionalExecutionResultSchema,
   regionalRuntimeCapabilitiesSchema,
@@ -312,6 +313,21 @@ const buildRegionalRuntimeCapabilitiesPayload = () =>
     maxBatchSize: regionalRuntimeMaxBatchSize,
     maxDeadlineMs: regionalRuntimeMaxDeadlineMs,
     maxAttempts: runtime.maxTargetAttempts,
+    runtime: {
+      version: runtime.runtimeVersion ?? null,
+      imageDigest: runtime.runtimeImageDigest ?? null
+    },
+    runner: {
+      id: 'probe-rs',
+      implementation: 'rust',
+      imageDigest: runtime.probeImageDigest ?? null
+    }
+  });
+
+const buildRegionalExecutionProvenance = () =>
+  regionalExecutionProvenanceSchema.parse({
+    regionId: runtime.runtimeLocation.regionId,
+    runnerType: 'network_probe',
     runtime: {
       version: runtime.runtimeVersion ?? null,
       imageDigest: runtime.runtimeImageDigest ?? null
@@ -1488,7 +1504,22 @@ export const server = Bun.serve({
       return unauthorized;
     }
 
-    const routedResponse = await routeRequest(request);
+    let routedResponse: Response;
+    try {
+      routedResponse = await routeRequest(request);
+    } catch (error) {
+      if (!isRegionalRuntimeSurface(pathname)) {
+        throw error;
+      }
+      const incidentId = logRegionalRuntimeResponseFailure(error);
+      routedResponse = json(
+        {
+          error: 'Regional runtime request failed',
+          incidentId
+        },
+        { status: 500 }
+      );
+    }
     const response = (
       isExecutionTransportPath(pathname)
       || isRegionalRuntimeSurface(pathname)
@@ -1668,6 +1699,9 @@ async function handleCreateRegionalExecution(request: Request) {
   }
 
   const timestampMs = Date.parse(parsed.data.timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return regionalRuntimeUnauthorized();
+  }
   const replayWindowMs = regionalRuntimeReplayWindowSeconds * 1_000;
   if (Math.abs(Date.now() - timestampMs) > replayWindowMs) {
     return regionalRuntimeUnauthorized();
@@ -1683,6 +1717,16 @@ async function handleCreateRegionalExecution(request: Request) {
   const { signature, ...unsignedRequest } = parsed.data;
   if (!await verifyRegionalExecutionSignature(signingSecret, unsignedRequest, signature)) {
     return regionalRuntimeUnauthorized();
+  }
+
+  const requestDigest = await createRegionalExecutionRequestDigest(unsignedRequest);
+  const existing = repository.getRegionalExecution(parsed.data.idempotencyKey);
+  if (existing) {
+    if (existing.requestDigest !== requestDigest) {
+      return regionalExecutionConflict();
+    }
+    const current = expireRegionalExecutionIfNeeded(existing);
+    return json(await buildSignedRegionalExecutionResult(current));
   }
 
   if (parsed.data.maxAttempts > runtime.maxTargetAttempts) {
@@ -1706,16 +1750,6 @@ async function handleCreateRegionalExecution(request: Request) {
         { status: 400 }
       );
     }
-  }
-
-  const requestDigest = await createRegionalExecutionRequestDigest(unsignedRequest);
-  const existing = repository.getRegionalExecution(parsed.data.idempotencyKey);
-  if (existing) {
-    if (existing.requestDigest !== requestDigest) {
-      return regionalExecutionConflict();
-    }
-    const current = expireRegionalExecutionIfNeeded(existing);
-    return json(await buildSignedRegionalExecutionResult(current));
   }
 
   const acceptedAt = new Date().toISOString();
@@ -1764,6 +1798,7 @@ async function handleCreateRegionalExecution(request: Request) {
     id: parsed.data.idempotencyKey,
     requestDigest,
     request: parsed.data,
+    provenance: buildRegionalExecutionProvenance(),
     targetLinks,
     acceptedAt,
     deadlineAt,
@@ -1775,7 +1810,10 @@ async function handleCreateRegionalExecution(request: Request) {
 
   let persisted: ReturnType<typeof repository.createRegionalExecution>;
   try {
-    repository.pruneJobsOlderThan(runtime.retentionDays);
+    // Regional records and their linked jobs/execution rows must cross the
+    // retention boundary together so a retained idempotency key can never
+    // reconstruct from partially deleted results.
+    repository.pruneRetainedData(runtime.retentionDays);
     persisted = repository.createRegionalExecution({ record, resources });
   } catch (error) {
     const incidentId = logRegionalExecutionCreationFailure(error, record.id);
@@ -1818,26 +1856,20 @@ async function handleCancelRegionalExecution(idempotencyKey: string) {
   }
 
   const record = expireRegionalExecutionIfNeeded(stored);
-  const existingResult = await buildSignedRegionalExecutionResult(record);
-  if (['succeeded', 'failed', 'cancelled'].includes(existingResult.status)) {
-    return json(existingResult);
-  }
-
-  if (!record.cancelledAt && !record.deadlineExceededAt) {
-    const now = new Date().toISOString();
-    for (const executionJobId of new Set(
-      record.targetLinks.map((target) => target.executionJobId)
-    )) {
-      repository.cancelExecutionJob(executionJobId, new Date(now));
-    }
-    record.cancelledAt = now;
-    record.updatedAt = now;
-    repository.saveRegionalExecution(record);
-  }
-
-  return json(await buildSignedRegionalExecutionResult(record));
+  const cancelled = repository.terminateRegionalExecution({
+    id: record.id,
+    reason: 'cancelled'
+  }) ?? record;
+  return json(await buildSignedRegionalExecutionResult(cancelled));
 }
 
+/**
+ * Lazily enforces an accepted execution deadline.
+ *
+ * Regional runtimes do not run a scheduler, so status reads intentionally
+ * persist deadline expiry and cancel any still-leased jobs. The executor also
+ * enforces the same deadline while work is active.
+ */
 function expireRegionalExecutionIfNeeded(record: RegionalExecutionRecord) {
   if (
     record.cancelledAt
@@ -1847,29 +1879,10 @@ function expireRegionalExecutionIfNeeded(record: RegionalExecutionRecord) {
     return record;
   }
 
-  const executionJobs = [...new Set(
-    record.targetLinks.map((target) => target.executionJobId)
-  )].map((executionJobId) => repository.getExecutionJob(executionJobId));
-  const hasInflight = executionJobs.some(
-    (executionJob) => executionJob && !['succeeded', 'failed', 'cancelled'].includes(executionJob.status)
-  );
-  if (!hasInflight) {
-    return record;
-  }
-
-  const now = new Date().toISOString();
-  for (const executionJob of executionJobs) {
-    if (executionJob && !['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
-      repository.cancelExecutionJob(executionJob.id, new Date(now));
-    }
-  }
-  const expired = {
-    ...record,
-    deadlineExceededAt: now,
-    updatedAt: now
-  };
-  repository.saveRegionalExecution(expired);
-  return expired;
+  return repository.terminateRegionalExecution({
+    id: record.id,
+    reason: 'deadline_exceeded'
+  }) ?? record;
 }
 
 async function buildSignedRegionalExecutionResult(
@@ -1881,17 +1894,20 @@ async function buildSignedRegionalExecutionResult(
   const terminal = targets.every((target) =>
     ['succeeded', 'failed', 'cancelled'].includes(target.status)
   );
-  const status = record.deadlineExceededAt
-    ? 'failed'
-    : record.cancelledAt
-      ? 'cancelled'
-      : targets.every((target) => target.status === 'succeeded')
-        ? 'succeeded'
-        : terminal
-          ? 'failed'
-          : targets.some((target) => target.status !== 'queued')
-            ? 'running'
-            : 'queued';
+  let status: RegionalExecutionResult['status'];
+  if (record.deadlineExceededAt) {
+    status = 'failed';
+  } else if (record.cancelledAt) {
+    status = 'cancelled';
+  } else if (targets.every((target) => target.status === 'succeeded')) {
+    status = 'succeeded';
+  } else if (terminal) {
+    status = 'failed';
+  } else if (targets.some((target) => target.status !== 'queued')) {
+    status = 'running';
+  } else {
+    status = 'queued';
+  }
   const completionCandidates = targets
     .map((target) => target.finishedAt)
     .filter((value): value is string => value != null)
@@ -1908,24 +1924,15 @@ async function buildSignedRegionalExecutionResult(
     idempotencyKey: record.id,
     status,
     targets,
-    provenance: {
-      regionId: runtime.runtimeLocation.regionId,
-      runnerType: 'network_probe',
-      runtime: {
-        version: runtime.runtimeVersion ?? null,
-        imageDigest: runtime.runtimeImageDigest ?? null
-      },
-      runner: {
-        id: 'probe-rs',
-        implementation: 'rust',
-        imageDigest: runtime.probeImageDigest ?? null
-      }
-    },
+    provenance: record.provenance,
     acceptedAt: record.acceptedAt,
     completedAt,
-    keyVersion: record.request.keyVersion
+    keyVersion:
+      record.request.keyVersion === 'next' && runtime.regionalRuntimeSecretNext
+        ? 'next'
+        : 'current'
   });
-  const signingSecret = record.request.keyVersion === 'next'
+  const signingSecret = unsignedResult.keyVersion === 'next'
     ? runtime.regionalRuntimeSecretNext
     : runtime.regionalRuntimeSecret;
   if (!signingSecret) {
@@ -1945,21 +1952,23 @@ function buildRegionalExecutionTargetResult(
   const job = repository.getJob(link.jobId);
   const target = job?.targets[0] ?? null;
   const executionJob = repository.getExecutionJob(link.executionJobId);
-  const status = target?.status === 'succeeded'
-    ? 'succeeded'
-    : target?.status === 'failed'
-      ? 'failed'
-      : record.deadlineExceededAt
-        ? 'failed'
-        : record.cancelledAt || executionJob?.status === 'cancelled'
-          ? 'cancelled'
-          : executionJob?.status === 'failed'
-            ? 'failed'
-            : executionJob?.status === 'succeeded'
-              ? 'failed'
-              : target?.status === 'measuring' || executionJob?.status === 'running'
-                ? 'running'
-                : 'queued';
+  let status: RegionalExecutionTargetResult['status'];
+  if (target?.status === 'succeeded') {
+    status = 'succeeded';
+  } else if (target?.status === 'failed' || record.deadlineExceededAt) {
+    status = 'failed';
+  } else if (record.cancelledAt || executionJob?.status === 'cancelled') {
+    status = 'cancelled';
+  } else if (
+    executionJob?.status === 'failed'
+    || executionJob?.status === 'succeeded'
+  ) {
+    status = 'failed';
+  } else if (target?.status === 'measuring' || executionJob?.status === 'running') {
+    status = 'running';
+  } else {
+    status = 'queued';
+  }
   const executionError = executionJob?.error;
   const errorCode = record.deadlineExceededAt && status === 'failed'
     ? 'regional_execution_deadline_exceeded'
@@ -1979,7 +1988,7 @@ function buildRegionalExecutionTargetResult(
   return {
     targetId: link.targetId,
     status,
-    region: runtime.runtimeLocation.regionId,
+    region: record.provenance.regionId,
     latencyMs: target?.latencyMs == null ? null : Math.round(target.latencyMs),
     statusCode: target?.statusCode ?? null,
     success: target?.success ?? null,
@@ -2015,6 +2024,17 @@ function logRegionalExecutionCreationFailure(error: unknown, resourceId: string)
     service: 'webperf-api',
     event: 'regional_execution_creation_failed',
     resourceId,
+    incidentId,
+    ...describeSafeError(error)
+  }));
+  return incidentId;
+}
+
+function logRegionalRuntimeResponseFailure(error: unknown) {
+  const incidentId = crypto.randomUUID();
+  console.error(JSON.stringify({
+    service: 'webperf-api',
+    event: 'regional_runtime_response_failed',
     incidentId,
     ...describeSafeError(error)
   }));

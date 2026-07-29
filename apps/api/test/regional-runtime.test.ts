@@ -73,7 +73,7 @@ describe('regional runtime handoff', () => {
       }
     });
     servers.push(probe);
-    const harness = await startRegionalRuntime(probe.port!);
+    let harness = await startRegionalRuntime(probe.port!);
 
     const capabilitiesResponse = await fetch(`${harness.baseUrl}/v1/regional-capabilities`);
     expect(capabilitiesResponse.status).toBe(200);
@@ -100,7 +100,17 @@ describe('regional runtime handoff', () => {
           get: { summary: 'Get regional runtime capabilities' }
         },
         '/v1/regional-executions': {
-          post: { summary: 'Submit an idempotent regional execution batch' }
+          post: {
+            summary: 'Submit an idempotent regional execution batch',
+            responses: {
+              '200': {
+                description: 'Returned the existing execution for an idempotent replay'
+              },
+              '202': {
+                description: 'Accepted a new regional execution'
+              }
+            }
+          }
         }
       }
     });
@@ -225,6 +235,42 @@ describe('regional runtime handoff', () => {
       `${harness.baseUrl}/v1/regional-executions/${encodeURIComponent(unsigned.idempotencyKey)}`,
       { headers: { authorization: `Bearer ${adminToken}` } }
     )).status).toBe(401);
+
+    await stopApiProcess(harness.process);
+    harness = await startRegionalRuntime(probe.port!, {
+      directory: harness.directory,
+      regionId: 'frankfurt',
+      regionLabel: 'Frankfurt',
+      maxTargetAttempts: 1,
+      runtimeImageDigest: `sha256:${'c'.repeat(64)}`,
+      probeImageDigest: `sha256:${'d'.repeat(64)}`
+    });
+
+    const replayAfterLimitChange = await sendRegionalExecution(harness.baseUrl, {
+      ...unsigned,
+      timestamp: new Date().toISOString()
+    });
+    expect(replayAfterLimitChange.status).toBe(200);
+    const replayed = regionalExecutionResultSchema.parse(
+      await replayAfterLimitChange.json()
+    );
+    expect(replayed.provenance).toMatchObject({
+      regionId: 'tokyo',
+      runtime: {
+        imageDigest: `sha256:${'a'.repeat(64)}`
+      },
+      runner: {
+        imageDigest: `sha256:${'b'.repeat(64)}`
+      }
+    });
+    expect(replayed.targets[0]?.region).toBe('tokyo');
+    await expectVerifiedResult(replayed);
+
+    const rejectedNewAdmission = await sendRegionalExecution(
+      harness.baseUrl,
+      createUnsignedRequest('over_new_limit:frankfurt')
+    );
+    expect(rejectedNewAdmission.status).toBe(400);
   }, 20_000);
 });
 
@@ -286,9 +332,22 @@ const expectVerifiedResult = async (
   )).toBe(true);
 };
 
-const startRegionalRuntime = async (probePort: number) => {
-  const directory = mkdtempSync(join(tmpdir(), 'webperf-regional-runtime-'));
-  tempDirectories.push(directory);
+const startRegionalRuntime = async (
+  probePort: number,
+  options: {
+    directory?: string;
+    regionId?: string;
+    regionLabel?: string;
+    maxTargetAttempts?: number;
+    runtimeImageDigest?: string;
+    probeImageDigest?: string;
+  } = {}
+) => {
+  const directory = options.directory
+    ?? mkdtempSync(join(tmpdir(), 'webperf-regional-runtime-'));
+  if (!options.directory) {
+    tempDirectories.push(directory);
+  }
   const port = await findOpenPort();
   const subprocess = Bun.spawn([process.execPath, 'apps/api/src/index.ts'], {
     cwd: repositoryRoot,
@@ -300,17 +359,19 @@ const startRegionalRuntime = async (probePort: number) => {
       SELFHOST_ARTIFACTS_PATH: join(directory, 'artifacts'),
       SELFHOST_ADMIN_TOKEN: adminToken,
       SELFHOST_INTERNAL_SECRET: internalSecret,
-      SELFHOST_REGION_ID: 'tokyo',
-      SELFHOST_REGION_LABEL: 'Tokyo',
+      SELFHOST_REGION_ID: options.regionId ?? 'tokyo',
+      SELFHOST_REGION_LABEL: options.regionLabel ?? 'Tokyo',
       SELFHOST_PROBE_BASE_URL: `http://127.0.0.1:${probePort}`,
-      SELFHOST_MAX_TARGET_ATTEMPTS: '3',
+      SELFHOST_MAX_TARGET_ATTEMPTS: String(options.maxTargetAttempts ?? 3),
       SELFHOST_SCHEDULER_MODE: 'disabled',
       SELFHOST_RUNTIME_MODE: 'regional-runtime',
       REGIONAL_RUNTIME_SHARED_SECRET: regionalSecret,
       REGIONAL_RUNTIME_SHARED_SECRET_NEXT: regionalNextSecret,
       WEBPERF_RUNTIME_VERSION: '0.3.0-test',
-      WEBPERF_RUNTIME_IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`,
-      WEBPERF_PROBE_IMAGE_DIGEST: `sha256:${'b'.repeat(64)}`
+      WEBPERF_RUNTIME_IMAGE_DIGEST:
+        options.runtimeImageDigest ?? `sha256:${'a'.repeat(64)}`,
+      WEBPERF_PROBE_IMAGE_DIGEST:
+        options.probeImageDigest ?? `sha256:${'b'.repeat(64)}`
     },
     stdout: 'ignore',
     stderr: 'inherit'
@@ -318,7 +379,16 @@ const startRegionalRuntime = async (probePort: number) => {
   apiProcesses.push(subprocess);
   const baseUrl = `http://127.0.0.1:${port}`;
   await waitForHealth(baseUrl, subprocess);
-  return { baseUrl };
+  return { baseUrl, directory, process: subprocess };
+};
+
+const stopApiProcess = async (
+  subprocess: ReturnType<typeof Bun.spawn>
+) => {
+  if (subprocess.exitCode == null) {
+    subprocess.kill('SIGTERM');
+  }
+  await subprocess.exited;
 };
 
 const drainRegionalExecutions = async (baseUrl: string, probePort: number) => {

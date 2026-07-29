@@ -48,6 +48,15 @@ describe('regional runtime v1 contracts', () => {
       ...validRequest,
       targets: [validRequest.targets[0], validRequest.targets[0]]
     })).toThrow('target ids must be unique');
+    const { maxAttempts: _maxAttempts, ...withoutMaxAttempts } = validRequest;
+    expect(() => regionalExecutionRequestSchema.parse(withoutMaxAttempts)).toThrow();
+    expect(() => regionalExecutionRequestSchema.parse({
+      ...validRequest,
+      targets: [{
+        ...validRequest.targets[0],
+        request: {}
+      }]
+    })).toThrow();
   });
 
   test('reports distinct runtime and runner image provenance', () => {

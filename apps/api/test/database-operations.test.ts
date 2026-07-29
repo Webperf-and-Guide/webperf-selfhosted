@@ -357,6 +357,8 @@ describe('SQLite operations', () => {
       VALUES
         ('comparison', 'comparison_old', '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload'),
         ('browser_audit', 'audit_active', '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload'),
+        ('regional_execution', 'regional_old', '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload'),
+        ('regional_execution', 'regional_active', '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload'),
         ('property', 'property_old', '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload')
     `).run();
     database.query(`
@@ -366,6 +368,17 @@ describe('SQLite operations', () => {
         created_at, updated_at, completed_at
       ) VALUES (
         'exec_active', 'browser_audit', 'audit_active', 'queued', NULL, NULL,
+        0, 3, '2026-05-01T00:00:00.000Z', 'payload', NULL,
+        '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', NULL
+      )
+    `).run();
+    database.query(`
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      ) VALUES (
+        'exec_regional_active', 'network_probe', 'regional_active', 'queued', NULL, NULL,
         0, 3, '2026-05-01T00:00:00.000Z', 'payload', NULL,
         '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', NULL
       )
@@ -402,13 +415,17 @@ describe('SQLite operations', () => {
       jobs: 1,
       checkRuns: 1,
       executionJobs: 1,
-      derivedResources: 1,
+      derivedResources: 2,
       artifactIndexes: 1
     });
     expect(database.query<{ id: string }, []>('SELECT id FROM jobs ORDER BY id').all())
       .toEqual([{ id: 'job_active' }, { id: 'job_recent' }]);
     expect(database.query<{ id: string }, []>('SELECT id FROM saved_entities ORDER BY id').all())
-      .toEqual([{ id: 'audit_active' }, { id: 'property_old' }]);
+      .toEqual([
+        { id: 'audit_active' },
+        { id: 'property_old' },
+        { id: 'regional_active' }
+      ]);
     expect(database.query<{ id: string }, []>('SELECT id FROM browser_audit_artifacts').all())
       .toEqual([{ id: 'artifact_active' }]);
     database.close();

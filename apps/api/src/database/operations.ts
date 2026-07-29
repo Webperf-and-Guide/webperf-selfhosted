@@ -309,7 +309,13 @@ export const cleanupSqliteRetention = (
       WHERE rowid IN (
         SELECT entity.rowid
         FROM saved_entities AS entity
-        WHERE entity.kind IN ('comparison', 'export', 'analysis', 'browser_audit')
+        WHERE entity.kind IN (
+          'comparison',
+          'export',
+          'analysis',
+          'browser_audit',
+          'regional_execution'
+        )
           AND entity.updated_at < ?
           AND (
             entity.kind != 'browser_audit'
@@ -323,6 +329,17 @@ export const cleanupSqliteRetention = (
                 AND execution.status IN ('queued', 'leased', 'running')
             )
           )
+          AND (
+            entity.kind != 'regional_execution'
+            OR NOT EXISTS (
+              SELECT 1
+              FROM execution_jobs AS execution
+              WHERE execution.resource_id = entity.id
+                -- Regional idempotency/status records are retained while any
+                -- linked work can still resume.
+                AND execution.status IN ('queued', 'leased', 'running')
+            )
+          )
         LIMIT ?
       )
     `)
@@ -331,7 +348,13 @@ export const cleanupSqliteRetention = (
       WHERE rowid IN (
         SELECT rowid
         FROM saved_entities
-        WHERE kind IN ('comparison', 'export', 'analysis', 'browser_audit')
+        WHERE kind IN (
+          'comparison',
+          'export',
+          'analysis',
+          'browser_audit',
+          'regional_execution'
+        )
           AND updated_at < ?
         LIMIT ?
       )

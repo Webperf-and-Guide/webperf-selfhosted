@@ -503,6 +503,9 @@ export function renderReleaseBundle({
     join(repositoryRoot, 'infra/regional-runtime/compose.yml'),
     'utf8'
   );
+  // The regional profile intentionally contains only the shared WebPerf
+  // runtime and Rust probe images; Browser Audit remains a separate optional
+  // self-host profile.
   for (const entry of metadata.filter(({ name }) => name !== 'browser-audit-lighthouse')) {
     const dynamicReference = new RegExp(
       `${escapeRegExp(entry.image)}:\\$\\{WEBPERF_VERSION:[^}]+\\}`,
@@ -549,21 +552,17 @@ export function renderReleaseBundle({
     join(outputDirectory, 'compose.apparmor.yml')
   );
 
-  const envExample = readFileSync(
-    join(repositoryRoot, 'infra/docker-compose/.env.example'),
-    'utf8'
-  )
+  const readReleaseEnvExample = (path: string) => readFileSync(path, 'utf8')
     .split('\n')
     .filter((line) => !line.startsWith('WEBPERF_VERSION='))
     .join('\n');
+  const envExample = readReleaseEnvExample(
+    join(repositoryRoot, 'infra/docker-compose/.env.example')
+  );
   writeFileSync(join(outputDirectory, '.env.example'), envExample);
-  const regionalRuntimeEnvExample = readFileSync(
-    join(repositoryRoot, 'infra/regional-runtime/.env.example'),
-    'utf8'
-  )
-    .split('\n')
-    .filter((line) => !line.startsWith('WEBPERF_VERSION='))
-    .join('\n');
+  const regionalRuntimeEnvExample = readReleaseEnvExample(
+    join(repositoryRoot, 'infra/regional-runtime/.env.example')
+  );
   writeFileSync(
     join(outputDirectory, 'regional-runtime.env.example'),
     regionalRuntimeEnvExample

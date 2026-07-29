@@ -50,11 +50,32 @@ The smoke creates an isolated temporary Compose project, generates the three
 required secrets, submits a signed execution, waits for the executor and Rust
 probe, verifies the signed result, and removes the project.
 
-For a persistent manual launch, copy `.env.example` to an operator-owned env
-file, replace its three secret placeholders, and run `compose.yml` with
-`compose.dev.yml`. The reference Compose file publishes the API on loopback
-only. A managed provider may attach its TLS HTTP ingress to container port
-`8788`, but it must not expose the executor or probe.
+For a persistent launch from a source checkout, copy `.env.example` to an
+operator-owned env file and use `compose.yml`. Add `compose.dev.yml` only when
+building the three containers from local source:
+
+```sh
+docker compose --env-file .env -f compose.yml up -d
+docker compose --env-file .env -f compose.yml -f compose.dev.yml up -d --build
+```
+
+In a published release bundle the files are intentionally prefixed to avoid
+colliding with the full self-host bundle:
+
+```sh
+cp regional-runtime.env.example regional-runtime.env
+# replace the three secret placeholders in regional-runtime.env
+docker compose \
+  --env-file regional-runtime.env \
+  -f regional-runtime.compose.yml \
+  up -d
+```
+
+The release bundle already references immutable published images and therefore
+does not include the source-only `compose.dev.yml` override. The reference
+Compose file publishes the API on loopback only. A managed provider may attach
+its TLS HTTP ingress to container port `8788`, but it must not expose the
+executor or probe.
 
 Provider credentials, application IDs, region selection, deploy/undeploy
 control, capacity policy, and global fan-out belong to the managed Cloud

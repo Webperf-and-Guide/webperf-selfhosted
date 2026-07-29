@@ -222,7 +222,8 @@ export const toRegionalExecutionSignaturePayload = (
     targets: request.targets,
     deadlineMs: request.deadlineMs,
     maxAttempts: request.maxAttempts,
-    timestamp: request.timestamp
+    timestamp: request.timestamp,
+    keyVersion: request.keyVersion
   });
 
 export const toRegionalResultSignaturePayload = (
@@ -234,7 +235,8 @@ export const toRegionalResultSignaturePayload = (
     targets: result.targets,
     provenance: result.provenance,
     acceptedAt: result.acceptedAt,
-    completedAt: result.completedAt
+    completedAt: result.completedAt,
+    keyVersion: result.keyVersion
   });
 
 /**

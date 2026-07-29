@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import { runtimeRegionIdSchema, runtimeRegionLabelSchema } from './regions';
 import { probeImplementationSchema } from './probe-model';
-import { customRequestConfigSchema } from './public-api';
+import {
+  requestBodyModeSchema,
+  requestHeaderSchema,
+  requestMethodSchema
+} from './public-api';
 
 /**
  * Regional runtime handoff protocol (Phase 4 of issue #14).
@@ -82,11 +86,30 @@ export type RegionalRuntimeCapabilities = z.infer<typeof regionalRuntimeCapabili
 // Execution request (Cloud → Runtime)
 // ---------------------------------------------------------------------------
 
+export const regionalExecutionRequestBodySchema = z.strictObject({
+  mode: requestBodyModeSchema,
+  contentType: z.string().min(1).max(120).nullable(),
+  value: z.string().max(10_000)
+});
+export const regionalExecutionRequestConfigSchema = z.strictObject({
+  method: requestMethodSchema,
+  headers: z.array(requestHeaderSchema).max(20),
+  body: regionalExecutionRequestBodySchema.nullable()
+}).superRefine((value, context) => {
+  if ((value.method === 'GET' || value.method === 'HEAD') && value.body != null) {
+    context.addIssue({
+      code: 'custom',
+      message: `${value.method} requests cannot include a request body`,
+      path: ['body']
+    });
+  }
+});
+
 export const regionalExecutionTargetSchema = z.object({
   targetId: z.string().min(1).max(120),
   url: z.string().url(),
   /** Optional request overrides shared with the public Fast Check contract. */
-  request: customRequestConfigSchema.optional()
+  request: regionalExecutionRequestConfigSchema.optional()
 });
 export type RegionalExecutionTarget = z.infer<typeof regionalExecutionTargetSchema>;
 
@@ -100,7 +123,7 @@ export const regionalExecutionRequestSchema = z.strictObject({
   /** Execution deadline in milliseconds from acceptance. */
   deadlineMs: z.number().int().positive().max(regionalRuntimeMaxDeadlineMs),
   /** Maximum retry attempts per target. */
-  maxAttempts: z.number().int().positive().max(regionalRuntimeMaxAttempts).default(3),
+  maxAttempts: z.number().int().positive().max(regionalRuntimeMaxAttempts),
   /** Request timestamp for replay protection (RFC 3339). */
   timestamp: z.string().datetime(),
   /** HMAC-SHA256 signature over the canonical request payload. */
@@ -186,7 +209,8 @@ export const regionalExecutionSignatureFields = [
   'targets',
   'deadlineMs',
   'maxAttempts',
-  'timestamp'
+  'timestamp',
+  'keyVersion'
 ] as const;
 
 /**
@@ -200,5 +224,6 @@ export const regionalResultSignatureFields = [
   'targets',
   'provenance',
   'acceptedAt',
-  'completedAt'
+  'completedAt',
+  'keyVersion'
 ] as const;

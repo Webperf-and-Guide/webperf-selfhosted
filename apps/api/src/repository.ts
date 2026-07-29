@@ -159,6 +159,10 @@ export type JobRepository = {
     created: boolean;
   };
   saveRegionalExecution(record: RegionalExecutionRecord): void;
+  terminateRegionalExecution(input: {
+    id: string;
+    reason: 'cancelled' | 'deadline_exceeded';
+  }, now?: Date): RegionalExecutionRecord | null;
   createExecutionResource(input: {
     executionJob: EnqueueExecutionJob;
     result: ExecutionResourceResult;
@@ -1188,6 +1192,73 @@ export const createSqliteJobRepository = ({
     },
     saveRegionalExecution(record) {
       saveEntity('regional_execution', regionalExecutionRecordSchema.parse(record));
+    },
+    terminateRegionalExecution(input, now = new Date()) {
+      const terminate = db.transaction(() => {
+        const row = getEntityStatement.get('regional_execution', input.id);
+        if (!row) {
+          return null;
+        }
+        const record = parseEntity(
+          'regional_execution',
+          row,
+          regionalExecutionRecordSchema
+        );
+        if (!record) {
+          throw new Error('Persisted regional execution could not be decoded');
+        }
+        if (record.cancelledAt || record.deadlineExceededAt) {
+          return record;
+        }
+
+        const nowIso = now.toISOString();
+        const executionJobIds = [...new Set(
+          record.targetLinks.map((target) => target.executionJobId)
+        )];
+        const executionJobs = executionJobIds.map((executionJobId) => {
+          const executionRow = getExecutionJobStatement.get(executionJobId);
+          return executionRow ? parseExecutionJob(executionRow) : null;
+        });
+        const hasInflight = executionJobs.some(
+          (executionJob) =>
+            executionJob
+            && !['succeeded', 'failed', 'cancelled'].includes(executionJob.status)
+        );
+        if (!hasInflight) {
+          return record;
+        }
+
+        for (const executionJob of executionJobs) {
+          if (
+            !executionJob
+            || ['succeeded', 'failed', 'cancelled'].includes(executionJob.status)
+          ) {
+            continue;
+          }
+          const cancelledRow = cancelExecutionJobStatement.get(
+            nowIso,
+            nowIso,
+            executionJob.id
+          );
+          const cancelled = cancelledRow ? parseExecutionJob(cancelledRow) : null;
+          if (cancelled) {
+            syncTerminalExecutionResource(cancelled, nowIso);
+          }
+        }
+
+        const terminated = regionalExecutionRecordSchema.parse({
+          ...record,
+          cancelledAt: input.reason === 'cancelled' ? nowIso : null,
+          deadlineExceededAt: input.reason === 'deadline_exceeded' ? nowIso : null,
+          updatedAt: nowIso
+        });
+        saveEntity('regional_execution', terminated);
+        return terminated;
+      });
+
+      // Acquire the writer reservation before terminal-state reads so executor
+      // completion cannot interleave between detection and cancellation.
+      return terminate.immediate();
     },
     createExecutionResource(input, now = new Date()) {
       if (input.executionJob.kind !== input.result.kind) {

@@ -65,10 +65,10 @@ export const selfhostApiEnvSchema = z.object({
   REGIONAL_RUNTIME_SHARED_SECRET_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
   WEBPERF_RUNTIME_VERSION: emptyStringToUndefined(z.string().trim().min(1).max(120)),
   WEBPERF_RUNTIME_IMAGE_DIGEST: emptyStringToUndefined(
-    z.string().regex(/^sha256:[a-f0-9]{64}$/)
+    z.string().trim().regex(/^sha256:[a-f0-9]{64}$/)
   ),
   WEBPERF_PROBE_IMAGE_DIGEST: emptyStringToUndefined(
-    z.string().regex(/^sha256:[a-f0-9]{64}$/)
+    z.string().trim().regex(/^sha256:[a-f0-9]{64}$/)
   )
 }).superRefine((config, context) => {
   if (config.SELFHOST_RUNTIME_MODE === 'full' && !config.SELFHOST_ADMIN_TOKEN) {

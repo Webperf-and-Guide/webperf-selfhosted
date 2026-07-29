@@ -8,7 +8,7 @@ env_template="${WEBPERF_REGIONAL_SMOKE_ENV_TEMPLATE:-$root_dir/infra/regional-ru
 use_dev_override="${WEBPERF_REGIONAL_SMOKE_USE_DEV_OVERRIDE:-true}"
 docker_config="${WEBPERF_REGIONAL_SMOKE_DOCKER_CONFIG:-}"
 compose_project="webperf-regional-smoke-$$"
-temp_env="$(mktemp)"
+temp_env=''
 smoke_pid=''
 watchdog_pid=''
 
@@ -48,6 +48,8 @@ compose() {
     "${compose_files[@]}" \
     "$@"
 }
+
+temp_env="$(mktemp)"
 
 cleanup() {
   if [[ -n "$smoke_pid" ]]; then
@@ -173,7 +175,12 @@ env \
   bun "$root_dir/tooling/scripts/smoke-regional-runtime.ts" &
 smoke_pid="$!"
 (
-  sleep 180
+  sleep_pid=''
+  trap 'if [[ -n "$sleep_pid" ]]; then kill -TERM "$sleep_pid" >/dev/null 2>&1 || true; fi; exit 0' TERM INT
+  sleep 180 &
+  sleep_pid="$!"
+  wait "$sleep_pid"
+  sleep_pid=''
   if kill -0 "$smoke_pid" >/dev/null 2>&1; then
     echo 'Regional runtime smoke process exceeded 180 seconds' >&2
     kill -TERM "$smoke_pid" >/dev/null 2>&1 || true

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   regionalExecutionRequestSchema,
+  regionalExecutionResultSchema,
   regionalRuntimeCapabilitiesSchema
 } from '../src/index';
 
@@ -104,5 +105,23 @@ describe('regional runtime v1 contracts', () => {
         imageDigest: `sha256:${'b'.repeat(64)}`
       }
     }).runner.id).toBe('probe-rs');
+  });
+
+  test('rejects a signed regional result without target evidence', () => {
+    expect(regionalExecutionResultSchema.safeParse({
+      idempotencyKey: 'release_123:tokyo',
+      status: 'succeeded',
+      targets: [],
+      provenance: {
+        regionId: 'tokyo',
+        runnerType: 'network_probe',
+        runtime: { version: '0.3.0', imageDigest: null },
+        runner: { id: 'probe-rs', implementation: 'rust', imageDigest: null }
+      },
+      acceptedAt: '2026-07-29T00:00:00.000Z',
+      completedAt: '2026-07-29T00:01:00.000Z',
+      signature: 'a'.repeat(64),
+      keyVersion: 'current'
+    }).success).toBe(false);
   });
 });

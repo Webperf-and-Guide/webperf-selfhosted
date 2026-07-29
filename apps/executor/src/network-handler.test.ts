@@ -259,7 +259,7 @@ describe('network execution handler', () => {
       status: 'failed',
       errorClass: 'terminal',
       errorCode: 'probe_region_mismatch',
-      errorMessage: 'Network probe returned a result from an unexpected region',
+      errorMessage: 'Network probe returned region "frankfurt" but expected "local"',
       measurement: null
     });
   });

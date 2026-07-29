@@ -109,19 +109,23 @@ describe('strict self-host configuration', () => {
       SELFHOST_RUNTIME_MODE: 'regional-runtime'
     })).toThrow('dedicated shared secret');
 
+    const runtimeDigest = `sha256:${'a'.repeat(64)}`;
+    const probeDigest = `sha256:${'b'.repeat(64)}`;
     expect(parseSelfhostApiVars({
       SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
       SELFHOST_RUNTIME_MODE: 'regional-runtime',
       REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
       REGIONAL_RUNTIME_SHARED_SECRET_NEXT: 'regional-runtime-next-secret',
       WEBPERF_RUNTIME_VERSION: '0.3.0',
-      WEBPERF_RUNTIME_IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`,
-      WEBPERF_PROBE_IMAGE_DIGEST: `sha256:${'b'.repeat(64)}`
+      WEBPERF_RUNTIME_IMAGE_DIGEST: ` ${runtimeDigest} `,
+      WEBPERF_PROBE_IMAGE_DIGEST: ` ${probeDigest} `
     })).toMatchObject({
       SELFHOST_RUNTIME_MODE: 'regional-runtime',
       REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
       REGIONAL_RUNTIME_SHARED_SECRET_NEXT: 'regional-runtime-next-secret',
-      WEBPERF_RUNTIME_VERSION: '0.3.0'
+      WEBPERF_RUNTIME_VERSION: '0.3.0',
+      WEBPERF_RUNTIME_IMAGE_DIGEST: runtimeDigest,
+      WEBPERF_PROBE_IMAGE_DIGEST: probeDigest
     });
 
     expect(() => parseSelfhostApiVars({
@@ -156,7 +160,9 @@ describe('strict self-host configuration', () => {
     expect(
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
-        PROBE_SHARED_SECRET: executionSecrets.PROBE_SHARED_SECRET
+        PROBE_SHARED_SECRET: executionSecrets.PROBE_SHARED_SECRET,
+        WEBPERF_RUNTIME_IMAGE_DIGEST: ` sha256:${'a'.repeat(64)} `,
+        WEBPERF_PROBE_IMAGE_DIGEST: ` sha256:${'b'.repeat(64)} `
       })
     ).toMatchObject({
       SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: false,
@@ -164,7 +170,9 @@ describe('strict self-host configuration', () => {
       SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: false,
       SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP: false,
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
-      SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000
+      SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000,
+      WEBPERF_RUNTIME_IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`,
+      WEBPERF_PROBE_IMAGE_DIGEST: `sha256:${'b'.repeat(64)}`
     });
     expect(() =>
       parseSelfhostExecutorVars({

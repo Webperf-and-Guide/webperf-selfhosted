@@ -184,7 +184,9 @@ export type RegionalExecutionProvenance = z.infer<typeof regionalExecutionProven
 export const regionalExecutionResultSchema = z.object({
   idempotencyKey: regionalExecutionIdempotencyKeySchema,
   status: regionalExecutionStatusSchema,
-  targets: z.array(regionalExecutionTargetResultSchema).max(regionalRuntimeMaxBatchSize),
+  targets: z.array(regionalExecutionTargetResultSchema)
+    .min(1)
+    .max(regionalRuntimeMaxBatchSize),
   provenance: regionalExecutionProvenanceSchema,
   acceptedAt: z.string().datetime(),
   completedAt: z.string().datetime().nullable().default(null),
@@ -200,30 +202,30 @@ export type RegionalExecutionResult = z.infer<typeof regionalExecutionResultSche
 
 /**
  * Fields that form the canonical signing payload for a regional execution
- * request. The Cloud control plane serializes these in the same stable
- * key order and signs with HMAC-SHA256.
+ * request. The array is alphabetical to match `stableStringify`, which
+ * canonicalizes object keys before HMAC-SHA256 signing.
  */
 export const regionalExecutionSignatureFields = [
+  'deadlineMs',
   'idempotencyKey',
+  'keyVersion',
+  'maxAttempts',
   'runnerType',
   'targets',
-  'deadlineMs',
-  'maxAttempts',
-  'timestamp',
-  'keyVersion'
+  'timestamp'
 ] as const;
 
 /**
  * Fields that form the canonical signing payload for a regional execution
- * result. The runtime serializes these and signs with HMAC-SHA256 before
- * returning to the Cloud control plane.
+ * result. The array is alphabetical to match `stableStringify`, which the
+ * runtime uses before returning the HMAC-SHA256 signature to the Cloud.
  */
 export const regionalResultSignatureFields = [
-  'idempotencyKey',
-  'status',
-  'targets',
-  'provenance',
   'acceptedAt',
   'completedAt',
-  'keyVersion'
+  'idempotencyKey',
+  'keyVersion',
+  'provenance',
+  'status',
+  'targets'
 ] as const;

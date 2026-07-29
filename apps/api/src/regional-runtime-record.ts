@@ -82,9 +82,16 @@ export const regionalExecutionRecordSchema = z.object({
       path: ['updatedAt']
     });
   }
-  for (const terminalField of ['cancelledAt', 'deadlineExceededAt'] as const) {
-    const terminalAt = record[terminalField];
-    const terminalAtMs = terminalAt === null ? null : Date.parse(terminalAt);
+  const cancelledAtMs = record.cancelledAt === null
+    ? null
+    : Date.parse(record.cancelledAt);
+  const deadlineExceededAtMs = record.deadlineExceededAt === null
+    ? null
+    : Date.parse(record.deadlineExceededAt);
+  for (const [terminalField, terminalAtMs] of [
+    ['cancelledAt', cancelledAtMs],
+    ['deadlineExceededAt', deadlineExceededAtMs]
+  ] as const) {
     if (
       terminalAtMs !== null
       && (
@@ -101,8 +108,8 @@ export const regionalExecutionRecordSchema = z.object({
     }
   }
   if (
-    record.deadlineExceededAt !== null
-    && Date.parse(record.deadlineExceededAt) < deadlineAtMs
+    deadlineExceededAtMs !== null
+    && deadlineExceededAtMs < deadlineAtMs
   ) {
     context.addIssue({
       code: 'custom',

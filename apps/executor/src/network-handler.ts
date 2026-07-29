@@ -330,7 +330,8 @@ const processNetworkJob = async ({
         markTargetFailed(
           target,
           'probe_region_mismatch',
-          'Network probe returned a result from an unexpected region'
+          `Network probe returned region "${parsed.data.measurement.region}" `
+          + `but expected "${target.region}"`
         );
         await recomputeAndPersistJob(job, persist);
         continue;

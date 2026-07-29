@@ -55,10 +55,10 @@ export const selfhostExecutorEnvSchema = z
     SELFHOST_REGION_ID: runtimeRegionIdSchema.default(defaultSelfhostRegionId),
     WEBPERF_RUNTIME_VERSION: emptyStringToUndefined(z.string().trim().min(1).max(120)),
     WEBPERF_RUNTIME_IMAGE_DIGEST: emptyStringToUndefined(
-      z.string().regex(/^sha256:[a-f0-9]{64}$/)
+      z.string().trim().regex(/^sha256:[a-f0-9]{64}$/)
     ),
     WEBPERF_PROBE_IMAGE_DIGEST: emptyStringToUndefined(
-      z.string().regex(/^sha256:[a-f0-9]{64}$/)
+      z.string().trim().regex(/^sha256:[a-f0-9]{64}$/)
     ),
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: z.preprocess(
       // This controls idle claim cadence only. Active lease renewal is governed

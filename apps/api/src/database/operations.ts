@@ -74,23 +74,12 @@ const cleanupRegionalExecutionGroups = (
 ) => {
   const nextEligibleGroups = database.query<
     { id: string },
-    [string, string, string, number]
+    [string, string, number]
   >(`
     SELECT entity.id
     FROM saved_entities AS entity
     WHERE entity.kind = 'regional_execution'
       AND entity.updated_at < ?
-      AND NOT EXISTS (
-        SELECT 1
-        FROM regional_execution_targets AS target_link
-        JOIN jobs AS job
-          ON job.id = target_link.job_id
-        WHERE target_link.regional_execution_id = entity.id
-          AND (
-            job.requested_at >= ?
-            OR job.status NOT IN ('succeeded', 'failed', 'partial')
-          )
-      )
       AND NOT EXISTS (
         SELECT 1
         FROM regional_execution_targets AS target_link
@@ -133,7 +122,6 @@ const cleanupRegionalExecutionGroups = (
   `);
   const deleteGroupBatch = database.transaction(() => {
     const candidates = nextEligibleGroups.all(
-      cutoffIso,
       cutoffIso,
       cutoffIso,
       retentionDeleteBatchSize

@@ -659,6 +659,58 @@ describe('SQLite operations', () => {
     database.close();
   });
 
+  test('removes cancelled regional groups even when domain jobs stayed queued', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    database.exec(`
+      INSERT INTO saved_entities (
+        kind, id, created_at, updated_at, payload_json
+      ) VALUES (
+        'regional_execution', 'regional_cancelled',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO jobs (
+        id, url, status, requested_at, updated_at, payload_json
+      ) VALUES (
+        'job_cancelled', 'https://example.com/', 'queued',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      ) VALUES (
+        'exec_cancelled', 'network_probe', 'regional_cancelled',
+        'cancelled', NULL, NULL, 0, 3,
+        '2026-01-01T00:00:00.000Z', 'payload', NULL,
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z'
+      );
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (
+        'regional_cancelled', 'exec_cancelled', 'job_cancelled'
+      );
+    `);
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 1,
+      checkRuns: 0,
+      executionJobs: 1,
+      derivedResources: 1,
+      regionalTargetLinks: 1,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM jobs
+    `).get()?.count).toBe(0);
+    database.close();
+  });
+
   test('deletes regional lifecycle groups across bounded batches', () => {
     const { databasePath } = createTempPaths();
     const { database } = migrateDatabase(databasePath);

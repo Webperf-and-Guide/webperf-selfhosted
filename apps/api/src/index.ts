@@ -1933,9 +1933,9 @@ async function buildSignedRegionalExecutionResult(
     .filter((value): value is string => value != null)
     .sort();
   const completedAt = ['succeeded', 'failed', 'cancelled'].includes(status)
-    ? completionCandidates.at(-1)
-      ?? record.cancelledAt
+    ? record.cancelledAt
       ?? record.deadlineExceededAt
+      ?? completionCandidates.at(-1)
       ?? record.updatedAt
     : null;
   const unsignedResult = regionalExecutionResultSchema.omit({
@@ -2017,6 +2017,13 @@ function buildRegionalExecutionTargetResult(
     executionErrorCode: executionError?.code ?? null,
     executionErrorMessage: executionError?.message ?? null
   });
+  const finishedAt = resolveRegionalTargetFinishedAt({
+    status,
+    cancelledAt: record.cancelledAt,
+    deadlineExceededAt: record.deadlineExceededAt,
+    targetFinishedAt: target?.finishedAt ?? null,
+    executionCompletedAt: executionJob?.completedAt ?? null
+  });
 
   return {
     targetId: link.targetId,
@@ -2028,12 +2035,36 @@ function buildRegionalExecutionTargetResult(
     errorCode: errorCode?.slice(0, 120) ?? null,
     errorMessage: errorMessage?.slice(0, 1_000) ?? null,
     startedAt: target?.startedAt ?? null,
-    finishedAt: target?.finishedAt
-      ?? (['succeeded', 'failed', 'cancelled'].includes(status)
-        ? executionJob?.completedAt ?? record.cancelledAt ?? record.deadlineExceededAt
-        : null)
+    finishedAt
   };
 }
+
+const resolveRegionalTargetFinishedAt = ({
+  status,
+  cancelledAt,
+  deadlineExceededAt,
+  targetFinishedAt,
+  executionCompletedAt
+}: {
+  status: RegionalExecutionTargetResult['status'];
+  cancelledAt: string | null;
+  deadlineExceededAt: string | null;
+  targetFinishedAt: string | null;
+  executionCompletedAt: string | null;
+}) => {
+  if (status === 'cancelled') {
+    return cancelledAt ?? executionCompletedAt ?? targetFinishedAt;
+  }
+  if (deadlineExceededAt && status === 'failed') {
+    return deadlineExceededAt;
+  }
+  if (targetFinishedAt) {
+    return targetFinishedAt;
+  }
+  return status === 'succeeded' || status === 'failed'
+    ? executionCompletedAt
+    : null;
+};
 
 const resolveRegionalExecutionError = ({
   deadlineExceeded,

@@ -303,6 +303,41 @@ describe('regional runtime handoff', () => {
     expect(cancelled.targets[0]?.status).toBe('cancelled');
     await expectVerifiedResult(cancelled);
 
+    const cancellationRace = createUnsignedRequest('cancel_after_measurement:tokyo');
+    expect((await sendRegionalExecution(harness.baseUrl, cancellationRace)).status).toBe(202);
+    const raceExecution = await stagedClient.claim(stagedLease);
+    expect(raceExecution).not.toBeNull();
+    const raceRunning = await stagedClient.start(raceExecution!.id, stagedLease);
+    await stagedHandler(raceRunning, new AbortController().signal);
+    const raceBeforeCancellation = regionalExecutionResultSchema.parse(
+      await (await fetch(
+        `${harness.baseUrl}/v1/regional-executions/${
+          encodeURIComponent(cancellationRace.idempotencyKey)
+        }`,
+        { headers: regionalAuthorization() }
+      )).json()
+    );
+    expect(raceBeforeCancellation.status).toBe('running');
+    const measurementFinishedAt = raceBeforeCancellation.targets[0]?.finishedAt;
+    expect(measurementFinishedAt).not.toBeNull();
+    await Bun.sleep(10);
+    const raceCancelled = regionalExecutionResultSchema.parse(
+      await (await fetch(
+        `${harness.baseUrl}/v1/regional-executions/${
+          encodeURIComponent(cancellationRace.idempotencyKey)
+        }`,
+        {
+          method: 'DELETE',
+          headers: regionalAuthorization()
+        }
+      )).json()
+    );
+    expect(raceCancelled.status).toBe('cancelled');
+    expect(raceCancelled.targets[0]?.status).toBe('cancelled');
+    expect(raceCancelled.targets[0]?.finishedAt).toBe(raceCancelled.completedAt);
+    expect(Date.parse(raceCancelled.completedAt!))
+      .toBeGreaterThan(Date.parse(measurementFinishedAt!));
+
     const nextKeyBatch = {
       ...createUnsignedRequest('next_key_batch:tokyo'),
       keyVersion: 'next' as const,

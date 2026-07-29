@@ -133,6 +133,31 @@ async fn accepts_custom_request_configuration() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn accepts_the_largest_regional_header_shape() -> Result<()> {
+    let _guard = TEST_MUTEX
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let harness = Harness::start().await?;
+    let mut request = sample_request("http://127.0.0.1/private");
+    request.request = Some(RequestConfig {
+        method: "GET".to_string(),
+        headers: (0..20)
+            .map(|index| RequestHeader {
+                name: format!("x-regional-{index}"),
+                value: "x".repeat(4_000),
+            })
+            .collect(),
+        body: None,
+    });
+    request.signature = sign_request(SHARED_SECRET, &request);
+
+    let response = harness.measure(&request).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
 struct Harness {
     client: Client,
     base_url: String,

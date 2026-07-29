@@ -133,6 +133,7 @@ import {
   applyListQuery,
   createRegionalExecutionRequestDigest,
   createRegionalResultSignature,
+  normalizeRegionalRequestConfig,
   parseListQueryFromSearchParams,
   resolveRuntimeLocation,
   validateMeasurementUrl,
@@ -1783,6 +1784,7 @@ async function handleCreateRegionalExecution(request: Request) {
       url: target.url,
       note: `Regional execution target ${target.targetId}`,
       requestConfig: target.request,
+      requestSource: 'regional-runtime',
       monitorPolicy: undefined,
       requesterIp: null,
       maxAttempts: parsed.data.maxAttempts
@@ -3718,7 +3720,8 @@ function createJobRecord({
   monitorPolicy,
   requesterIp,
   id,
-  maxAttempts
+  maxAttempts,
+  requestSource = 'operator'
 }: {
   url: string;
   note: string | null;
@@ -3727,6 +3730,7 @@ function createJobRecord({
   requesterIp: string | null;
   id?: string;
   maxAttempts?: number;
+  requestSource?: 'operator' | 'regional-runtime';
 }) {
   validateMeasurementUrl(url);
 
@@ -3771,7 +3775,9 @@ function createJobRecord({
     url,
     status: 'queued',
     note,
-    request: normalizeCustomRequestConfig(requestConfig),
+    request: requestSource === 'regional-runtime'
+      ? normalizeRegionalRequestConfig(requestConfig)
+      : normalizeCustomRequestConfig(requestConfig),
     monitorPolicy: normalizeMonitorPolicy(monitorPolicy),
     requestedAt: now,
     startedAt: null,

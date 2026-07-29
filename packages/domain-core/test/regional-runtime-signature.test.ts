@@ -155,6 +155,38 @@ describe('regional runtime signatures', () => {
     })).not.toBe(await createRegionalExecutionRequestDigest(unsignedRequest));
   });
 
+  test('preserves repeated header order in signatures and idempotency digests', async () => {
+    const ordered = {
+      ...unsignedRequest,
+      targets: [{
+        ...unsignedRequest.targets[0],
+        request: {
+          method: 'GET' as const,
+          headers: [
+            { name: 'x-forwarded-value', value: 'first' },
+            { name: 'x-forwarded-value', value: 'second' }
+          ],
+          body: null
+        }
+      }]
+    };
+    const reversed = {
+      ...ordered,
+      targets: [{
+        ...ordered.targets[0],
+        request: {
+          ...ordered.targets[0].request,
+          headers: [...ordered.targets[0].request.headers].reverse()
+        }
+      }]
+    };
+
+    expect(toRegionalExecutionSignaturePayload(reversed))
+      .not.toBe(toRegionalExecutionSignaturePayload(ordered));
+    expect(await createRegionalExecutionRequestDigest(reversed))
+      .not.toBe(await createRegionalExecutionRequestDigest(ordered));
+  });
+
   test('signs and verifies the complete result provenance', async () => {
     const signature = await createRegionalResultSignature(
       'regional-runtime-test-secret',

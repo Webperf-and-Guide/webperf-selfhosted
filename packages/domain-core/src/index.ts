@@ -191,6 +191,37 @@ const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => 
   };
 };
 
+/**
+ * Normalize a Cloud-to-runtime request without changing header array order.
+ *
+ * Repeated HTTP headers can be order-sensitive, so Regional Runtime signatures,
+ * idempotency digests, and persisted jobs must all use the same ordered
+ * representation. Header names and surrounding OWS are normalized to the form
+ * that is sent by the probe, but literal values (including `[REDACTED]`) are
+ * never interpreted as console masking placeholders.
+ */
+export const normalizeRegionalRequestConfig = (
+  request: CustomRequestConfig | undefined
+): CustomRequestConfig => {
+  const normalized = request ?? defaultCustomRequestConfig();
+
+  return {
+    method: normalized.method,
+    headers: (normalized.headers ?? []).map((header) => ({
+      name: header.name.trim().toLowerCase(),
+      value: header.value.trim()
+    })),
+    body:
+      normalized.body == null
+        ? null
+        : {
+          mode: normalized.body.mode,
+          contentType: normalized.body.contentType,
+          value: normalized.body.value
+        }
+  };
+};
+
 export type ProbeSignatureRequest = Omit<SignedProbeMeasurementRequest, 'signature'>;
 
 export const toProbeSignaturePayload = (request: ProbeSignatureRequest) =>
@@ -218,7 +249,7 @@ const canonicalizeRegionalTargets = (
 ) => targets.map((target) => ({
   targetId: target.targetId,
   url: target.url,
-  request: canonicalizeRequestConfig(target.request)
+  request: normalizeRegionalRequestConfig(target.request)
 }));
 
 export const toRegionalExecutionSignaturePayload = (

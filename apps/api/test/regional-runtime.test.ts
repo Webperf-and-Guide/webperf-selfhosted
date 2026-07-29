@@ -41,13 +41,20 @@ afterEach(async () => {
 
 describe('regional runtime handoff', () => {
   test('accepts, deduplicates, executes, signs, and cancels Cloud work', async () => {
-    const probeRequests: unknown[] = [];
+    type ProbeRequest = {
+      url: string;
+      region: string;
+      request?: {
+        headers: Array<{ name: string; value: string }>;
+      };
+    };
+    const probeRequests: ProbeRequest[] = [];
     const retryAttempts = new Map<string, number>();
     const probe = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
-        const payload = await request.json() as { url: string; region: string };
+        const payload = await request.json() as ProbeRequest;
         probeRequests.push(payload);
         if (payload.url.includes('/retry-')) {
           const attempt = (retryAttempts.get(payload.url) ?? 0) + 1;
@@ -306,6 +313,33 @@ describe('regional runtime handoff', () => {
       errorCode: 'probe_measurement_failed',
       errorMessage: 'Network probe measurement failed'
     });
+
+    const literalRedactedHeader = {
+      ...createUnsignedRequest('literal_redacted_header:tokyo'),
+      targets: [{
+        targetId: 'literal-redacted-header',
+        url: 'https://example.com/literal-redacted-header',
+        request: {
+          method: 'GET' as const,
+          headers: [{
+            name: 'Authorization',
+            value: '[REDACTED]'
+          }],
+          body: null
+        }
+      }]
+    };
+    expect((await sendRegionalExecution(
+      harness.baseUrl,
+      literalRedactedHeader
+    )).status).toBe(202);
+    await drainRegionalExecutions(harness.baseUrl, probe.port!);
+    expect(probeRequests.find(
+      (payload) => payload.url.endsWith('/literal-redacted-header')
+    )?.request?.headers).toEqual([{
+      name: 'authorization',
+      value: '[REDACTED]'
+    }]);
 
     const completedCancellation = regionalExecutionResultSchema.parse(
       await (await fetch(

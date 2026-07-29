@@ -437,30 +437,28 @@ describe('SQLite operations', () => {
       30,
       new Date('2026-07-22T00:00:00.000Z')
     )).toEqual({
-      jobs: 1,
+      jobs: 2,
       checkRuns: 1,
-      executionJobs: 1,
-      derivedResources: 2,
+      executionJobs: 2,
+      derivedResources: 3,
+      regionalTargetLinks: 1,
       artifactIndexes: 1
     });
     expect(database.query<{ id: string }, []>('SELECT id FROM jobs ORDER BY id').all())
       .toEqual([
         { id: 'job_active' },
-        { id: 'job_recent' },
-        { id: 'job_regional_completed' }
+        { id: 'job_recent' }
       ]);
     expect(database.query<{ id: string }, []>(`
       SELECT id FROM execution_jobs ORDER BY id
     `).all()).toEqual([
       { id: 'exec_active' },
-      { id: 'exec_regional_active' },
-      { id: 'exec_regional_completed' }
+      { id: 'exec_regional_active' }
     ]);
     expect(database.query<{ id: string }, []>('SELECT id FROM saved_entities ORDER BY id').all())
       .toEqual([
         { id: 'audit_active' },
-        { id: 'property_old' },
-        { id: 'regional_active' }
+        { id: 'property_old' }
       ]);
     expect(database.query<{ id: string }, []>('SELECT id FROM browser_audit_artifacts').all())
       .toEqual([{ id: 'artifact_active' }]);
@@ -547,6 +545,7 @@ describe('SQLite operations', () => {
       checkRuns: 0,
       executionJobs: 0,
       derivedResources: 0,
+      regionalTargetLinks: 0,
       artifactIndexes: 0
     });
     expect(database.query<{ count: number }, []>(`
@@ -577,6 +576,7 @@ describe('SQLite operations', () => {
       checkRuns: 0,
       executionJobs: 1,
       derivedResources: 1,
+      regionalTargetLinks: 1,
       artifactIndexes: 0
     });
     expect(database.query<{ count: number }, []>(`
@@ -597,6 +597,65 @@ describe('SQLite operations', () => {
       FROM execution_jobs
       WHERE id = 'exec_recent_completion'
     `).get()?.count).toBe(0);
+    database.close();
+  });
+
+  test('scopes regional retention to explicitly linked execution jobs', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    database.exec(`
+      INSERT INTO saved_entities (
+        kind, id, created_at, updated_at, payload_json
+      ) VALUES (
+        'regional_execution', 'shared_resource_id',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO jobs (
+        id, url, status, requested_at, updated_at, payload_json
+      ) VALUES (
+        'regional_linked_job', 'https://example.com/', 'succeeded',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      ) VALUES
+        (
+          'regional_linked_execution', 'network_probe', 'shared_resource_id',
+          'succeeded', NULL, NULL, 1, 3,
+          '2026-01-01T00:00:00.000Z', 'payload', NULL,
+          '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z',
+          '2026-01-01T00:00:00.000Z'
+        ),
+        (
+          'unrelated_active_execution', 'network_probe', 'shared_resource_id',
+          'queued', NULL, NULL, 0, 3,
+          '2026-07-22T00:00:00.000Z', 'payload', NULL,
+          '2026-07-22T00:00:00.000Z', '2026-07-22T00:00:00.000Z', NULL
+        );
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (
+        'shared_resource_id', 'regional_linked_execution', 'regional_linked_job'
+      );
+    `);
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 1,
+      checkRuns: 0,
+      executionJobs: 1,
+      derivedResources: 1,
+      regionalTargetLinks: 1,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ id: string }, []>(`
+      SELECT id FROM execution_jobs ORDER BY id
+    `).all()).toEqual([{ id: 'unrelated_active_execution' }]);
     database.close();
   });
 
@@ -662,6 +721,7 @@ describe('SQLite operations', () => {
       checkRuns: 0,
       executionJobs: 501,
       derivedResources: 501,
+      regionalTargetLinks: 501,
       artifactIndexes: 0
     });
     expect(database.query<{ count: number }, []>(`
@@ -696,6 +756,7 @@ describe('SQLite operations', () => {
       checkRuns: 0,
       executionJobs: 0,
       derivedResources: 1,
+      regionalTargetLinks: 0,
       artifactIndexes: 0
     });
     expect(database.query<{ id: string }, []>('SELECT id FROM saved_entities').all())

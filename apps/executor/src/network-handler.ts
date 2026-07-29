@@ -170,14 +170,20 @@ const createExecutionDeadlineSignal = (
     false
   ));
   const parsedDeadlineMs = Date.parse(deadlineAt);
-  const remainingMs = Number.isNaN(parsedDeadlineMs)
-    ? 0
-    : parsedDeadlineMs - Date.now();
+  if (Number.isNaN(parsedDeadlineMs)) {
+    throw new ExecutionFailure(
+      'regional_execution_invalid_deadline',
+      'Regional execution deadline is invalid',
+      false
+    );
+  }
+  const remainingMs = parsedDeadlineMs - Date.now();
   let timeout: ReturnType<typeof setTimeout> | null = null;
   if (remainingMs <= 0) {
     abortForDeadline();
   } else {
     timeout = setTimeout(abortForDeadline, remainingMs);
+    timeout.unref?.();
   }
 
   return {

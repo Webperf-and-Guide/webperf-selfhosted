@@ -25,6 +25,7 @@ export type SqliteRetentionResult = {
   checkRuns: number;
   executionJobs: number;
   derivedResources: number;
+  regionalTargetLinks: number;
   artifactIndexes: number;
 };
 
@@ -92,9 +93,10 @@ const cleanupRegionalExecutionGroups = (
       )
       AND NOT EXISTS (
         SELECT 1
-        FROM execution_jobs AS execution
-        WHERE execution.resource_id = entity.id
-          AND execution.kind = 'network_probe'
+        FROM regional_execution_targets AS target_link
+        JOIN execution_jobs AS execution
+          ON execution.id = target_link.execution_job_id
+        WHERE target_link.regional_execution_id = entity.id
           AND (
             execution.status NOT IN ('succeeded', 'failed', 'cancelled')
             OR execution.completed_at IS NULL
@@ -114,12 +116,11 @@ const cleanupRegionalExecutionGroups = (
   `);
   const deleteExecutionJobs = database.query(`
     DELETE FROM execution_jobs
-    WHERE (resource_id = ? AND kind = 'network_probe')
-      OR id IN (
-        SELECT execution_job_id
-        FROM regional_execution_targets
-        WHERE regional_execution_id = ?
-      )
+    WHERE id IN (
+      SELECT execution_job_id
+      FROM regional_execution_targets
+      WHERE regional_execution_id = ?
+    )
   `);
   const deleteTargetLinks = database.query(`
     DELETE FROM regional_execution_targets
@@ -137,29 +138,32 @@ const cleanupRegionalExecutionGroups = (
       cutoffIso,
       retentionDeleteBatchSize
     );
-    let jobs = 0;
-    let executionJobs = 0;
-    let derivedResources = 0;
+    let batchJobs = 0;
+    let batchExecutionJobs = 0;
+    let batchDerivedResources = 0;
+    let batchRegionalTargetLinks = 0;
 
     for (const candidate of candidates) {
-      jobs += countChanges(deleteJobs.run(candidate.id));
-      executionJobs += countChanges(
-        deleteExecutionJobs.run(candidate.id, candidate.id)
+      batchJobs += countChanges(deleteJobs.run(candidate.id));
+      batchExecutionJobs += countChanges(
+        deleteExecutionJobs.run(candidate.id)
       );
-      deleteTargetLinks.run(candidate.id);
-      derivedResources += countChanges(deleteRegionalExecution.run(candidate.id));
+      batchRegionalTargetLinks += countChanges(deleteTargetLinks.run(candidate.id));
+      batchDerivedResources += countChanges(deleteRegionalExecution.run(candidate.id));
     }
     return {
       groupCount: candidates.length,
-      jobs,
-      executionJobs,
-      derivedResources
+      jobs: batchJobs,
+      executionJobs: batchExecutionJobs,
+      derivedResources: batchDerivedResources,
+      regionalTargetLinks: batchRegionalTargetLinks
     };
   });
 
   let jobs = 0;
   let executionJobs = 0;
   let derivedResources = 0;
+  let regionalTargetLinks = 0;
 
   try {
     while (true) {
@@ -167,8 +171,9 @@ const cleanupRegionalExecutionGroups = (
       jobs += deleted.jobs;
       executionJobs += deleted.executionJobs;
       derivedResources += deleted.derivedResources;
+      regionalTargetLinks += deleted.regionalTargetLinks;
       if (deleted.groupCount < retentionDeleteBatchSize) {
-        return { jobs, executionJobs, derivedResources };
+        return { jobs, executionJobs, derivedResources, regionalTargetLinks };
       }
     }
   } finally {
@@ -363,6 +368,7 @@ export const cleanupSqliteRetention = (
   let checkRuns = 0;
   let executionJobs = 0;
   let derivedResources = 0;
+  let regionalTargetLinks = 0;
   let artifactIndexes = 0;
 
   const hasRegionalGroupTables = (
@@ -376,6 +382,7 @@ export const cleanupSqliteRetention = (
     jobs += regionalGroups.jobs;
     executionJobs += regionalGroups.executionJobs;
     derivedResources += regionalGroups.derivedResources;
+    regionalTargetLinks += regionalGroups.regionalTargetLinks;
   }
 
   if (!hasRegionalGroupTables && tableExists(database, 'saved_entities')) {
@@ -581,13 +588,22 @@ export const cleanupSqliteRetention = (
       )
     `);
     try {
-      deleteRowsInBatches(() => statement.run(retentionDeleteBatchSize));
+      regionalTargetLinks += deleteRowsInBatches(
+        () => statement.run(retentionDeleteBatchSize)
+      );
     } finally {
       statement.finalize();
     }
   }
 
-  return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };
+  return {
+    jobs,
+    checkRuns,
+    executionJobs,
+    derivedResources,
+    regionalTargetLinks,
+    artifactIndexes
+  };
 };
 
 export const maintainSqliteDatabase = ({

@@ -10,6 +10,9 @@ import {
 const regionalExecutionParamsSchema = z.object({
   idempotencyKey: regionalExecutionIdempotencyKeySchema
 });
+const regionalExecutionParamsInputSchema = z.object({
+  params: regionalExecutionParamsSchema
+});
 
 export const REGIONAL_RUNTIME_OPENAPI_TAG_DEFINITIONS = [{
   name: 'regionalRuntime',
@@ -39,7 +42,7 @@ export const regionalRuntimeContract = populateContractRouterPaths(oc.router({
         tags: ['regionalRuntime']
       }),
     get: oc
-      .input(z.object({ params: regionalExecutionParamsSchema }))
+      .input(regionalExecutionParamsInputSchema)
       .output(regionalExecutionResultSchema)
       .route({
         method: 'GET',
@@ -49,7 +52,7 @@ export const regionalRuntimeContract = populateContractRouterPaths(oc.router({
         tags: ['regionalRuntime']
       }),
     cancel: oc
-      .input(z.object({ params: regionalExecutionParamsSchema }))
+      .input(regionalExecutionParamsInputSchema)
       .output(regionalExecutionResultSchema)
       .route({
         method: 'DELETE',

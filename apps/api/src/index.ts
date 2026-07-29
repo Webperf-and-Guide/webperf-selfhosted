@@ -39,6 +39,7 @@ import type {
   ReportExportFormat,
   ExportResource,
   ExportListResponse,
+  ExecutionJob,
   ExecutionResourceContext,
   ExecutionResourceResult,
   RouteSet,
@@ -215,6 +216,8 @@ const browserAuditArtifactUploadPathPattern =
 const browserAuditArtifactDownloadPathPattern =
   /^\/v1\/browser-audits\/([^/]+)\/artifacts\/([^/]+)$/;
 const regionalExecutionPathPattern = /^\/v1\/regional-executions\/([^/]+)$/;
+const regionalRetentionPruneIntervalMs = 60 * 60 * 1_000;
+let nextRegionalRetentionPruneAt = Date.now() + regionalRetentionPruneIntervalMs;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -308,6 +311,18 @@ const buildPublicCapabilitiesPayload = () => ({
   }
 });
 
+const buildRegionalRuntimeMetadata = () => ({
+  runtime: {
+    version: runtime.runtimeVersion ?? null,
+    imageDigest: runtime.runtimeImageDigest ?? null
+  },
+  runner: {
+    id: 'probe-rs',
+    implementation: 'rust',
+    imageDigest: runtime.probeImageDigest ?? null
+  }
+});
+
 const buildRegionalRuntimeCapabilitiesPayload = () =>
   regionalRuntimeCapabilitiesSchema.parse({
     protocolVersion: regionalRuntimeProtocolVersion,
@@ -317,30 +332,14 @@ const buildRegionalRuntimeCapabilitiesPayload = () =>
     maxBatchSize: regionalRuntimeMaxBatchSize,
     maxDeadlineMs: regionalRuntimeMaxDeadlineMs,
     maxAttempts: runtime.maxTargetAttempts,
-    runtime: {
-      version: runtime.runtimeVersion ?? null,
-      imageDigest: runtime.runtimeImageDigest ?? null
-    },
-    runner: {
-      id: 'probe-rs',
-      implementation: 'rust',
-      imageDigest: runtime.probeImageDigest ?? null
-    }
+    ...buildRegionalRuntimeMetadata()
   });
 
 const buildRegionalExecutionProvenance = () =>
   regionalExecutionProvenanceSchema.parse({
     regionId: runtime.runtimeLocation.regionId,
     runnerType: 'network_probe',
-    runtime: {
-      version: runtime.runtimeVersion ?? null,
-      imageDigest: runtime.runtimeImageDigest ?? null
-    },
-    runner: {
-      id: 'probe-rs',
-      implementation: 'rust',
-      imageDigest: runtime.probeImageDigest ?? null
-    }
+    ...buildRegionalRuntimeMetadata()
   });
 
 const buildPropertyListResponse = (query?: ListQuery): PropertyListResponse =>
@@ -1789,7 +1788,7 @@ async function handleCreateRegionalExecution(request: Request) {
       maxAttempts: parsed.data.maxAttempts
     })
   );
-  const resources = [];
+  const resources: ReturnType<typeof buildNetworkExecutionResourceInput>[] = [];
   const targetLinks: RegionalExecutionRecord['targetLinks'] = [];
 
   for (const [index, job] of jobs.entries()) {
@@ -1830,7 +1829,11 @@ async function handleCreateRegionalExecution(request: Request) {
     // Regional records and their linked jobs/execution rows must cross the
     // retention boundary together so a retained idempotency key can never
     // reconstruct from partially deleted results.
-    repository.pruneRetainedData(runtime.retentionDays);
+    const now = Date.now();
+    if (now >= nextRegionalRetentionPruneAt) {
+      repository.pruneRetainedData(runtime.retentionDays);
+      nextRegionalRetentionPruneAt = now + regionalRetentionPruneIntervalMs;
+    }
     persisted = repository.createRegionalExecution({ record, resources });
   } catch (error) {
     const incidentId = logRegionalExecutionCreationFailure(error, record.id);
@@ -2004,20 +2007,16 @@ function buildRegionalExecutionTargetResult(
     status = 'queued';
   }
   const executionError = executionJob?.error;
-  const errorCode = record.deadlineExceededAt && status === 'failed'
-    ? 'regional_execution_deadline_exceeded'
-    : executionJob?.status === 'succeeded' && target?.status !== 'succeeded'
-      ? 'regional_result_missing'
-      : target?.errorCode
-        ?? (status === 'failed' ? executionError?.code ?? 'regional_execution_failed' : null);
-  const errorMessage = record.deadlineExceededAt && status === 'failed'
-    ? 'Regional execution exceeded its accepted deadline'
-    : executionJob?.status === 'succeeded' && target?.status !== 'succeeded'
-      ? 'Regional execution completed without a persisted measurement result'
-      : target?.errorMessage
-        ?? (status === 'failed'
-          ? executionError?.message ?? 'Regional execution failed before producing a measurement'
-          : null);
+  const { errorCode, errorMessage } = resolveRegionalExecutionError({
+    deadlineExceeded: record.deadlineExceededAt != null,
+    status,
+    executionJobStatus: executionJob?.status,
+    targetStatus: target?.status,
+    targetErrorCode: target?.errorCode ?? null,
+    targetErrorMessage: target?.errorMessage ?? null,
+    executionErrorCode: executionError?.code ?? null,
+    executionErrorMessage: executionError?.message ?? null
+  });
 
   return {
     targetId: link.targetId,
@@ -2035,6 +2034,51 @@ function buildRegionalExecutionTargetResult(
         : null)
   };
 }
+
+const resolveRegionalExecutionError = ({
+  deadlineExceeded,
+  status,
+  executionJobStatus,
+  targetStatus,
+  targetErrorCode,
+  targetErrorMessage,
+  executionErrorCode,
+  executionErrorMessage
+}: {
+  deadlineExceeded: boolean;
+  status: RegionalExecutionTargetResult['status'];
+  executionJobStatus: ExecutionJob['status'] | undefined;
+  targetStatus: LatencyJobTarget['status'] | undefined;
+  targetErrorCode: string | null;
+  targetErrorMessage: string | null;
+  executionErrorCode: string | null;
+  executionErrorMessage: string | null;
+}) => {
+  if (deadlineExceeded && status === 'failed') {
+    return {
+      errorCode: 'regional_execution_deadline_exceeded',
+      errorMessage: 'Regional execution exceeded its accepted deadline'
+    };
+  }
+  if (executionJobStatus === 'succeeded' && targetStatus !== 'succeeded') {
+    return {
+      errorCode: 'regional_result_missing',
+      errorMessage: 'Regional execution completed without a persisted measurement result'
+    };
+  }
+  if (status === 'failed') {
+    return {
+      errorCode: targetErrorCode ?? executionErrorCode ?? 'regional_execution_failed',
+      errorMessage: targetErrorMessage
+        ?? executionErrorMessage
+        ?? 'Regional execution failed before producing a measurement'
+    };
+  }
+  return {
+    errorCode: targetErrorCode,
+    errorMessage: targetErrorMessage
+  };
+};
 
 const regionalRuntimeUnauthorized = () => json(
   { error: 'Unauthorized regional execution request' },

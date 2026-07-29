@@ -9,6 +9,8 @@ use_dev_override="${WEBPERF_REGIONAL_SMOKE_USE_DEV_OVERRIDE:-true}"
 docker_config="${WEBPERF_REGIONAL_SMOKE_DOCKER_CONFIG:-}"
 compose_project="webperf-regional-smoke-$$"
 temp_env="$(mktemp)"
+smoke_pid=''
+watchdog_pid=''
 
 for required_file in "$compose_file" "$env_template"; do
   if [[ ! -f "$required_file" ]]; then
@@ -48,6 +50,12 @@ compose() {
 }
 
 cleanup() {
+  if [[ -n "$smoke_pid" ]]; then
+    kill -TERM "$smoke_pid" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$watchdog_pid" ]]; then
+    kill -TERM "$watchdog_pid" >/dev/null 2>&1 || true
+  fi
   compose down -v --remove-orphans >/dev/null 2>&1 || true
   rm -f "$temp_env" "${temp_env}.next"
 }
@@ -156,7 +164,29 @@ for service in regional-executor probe; do
   fi
 done
 
-REGIONAL_RUNTIME_BASE_URL="$base_url" \
-REGIONAL_RUNTIME_SHARED_SECRET="$regional_secret" \
-REGIONAL_RUNTIME_EXPECTED_REGION=smoke-region \
-bun "$root_dir/tooling/scripts/smoke-regional-runtime.ts"
+env \
+  REGIONAL_RUNTIME_BASE_URL="$base_url" \
+  REGIONAL_RUNTIME_SHARED_SECRET="$regional_secret" \
+  REGIONAL_RUNTIME_EXPECTED_REGION=smoke-region \
+  bun "$root_dir/tooling/scripts/smoke-regional-runtime.ts" &
+smoke_pid="$!"
+(
+  sleep 180
+  if kill -0 "$smoke_pid" >/dev/null 2>&1; then
+    echo 'Regional runtime smoke process exceeded 180 seconds' >&2
+    kill -TERM "$smoke_pid" >/dev/null 2>&1 || true
+    sleep 5
+    kill -KILL "$smoke_pid" >/dev/null 2>&1 || true
+  fi
+) &
+watchdog_pid="$!"
+
+set +e
+wait "$smoke_pid"
+smoke_status="$?"
+set -e
+smoke_pid=''
+kill -TERM "$watchdog_pid" >/dev/null 2>&1 || true
+wait "$watchdog_pid" >/dev/null 2>&1 || true
+watchdog_pid=''
+exit "$smoke_status"

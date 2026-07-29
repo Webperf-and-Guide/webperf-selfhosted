@@ -287,6 +287,31 @@ describe('network execution handler', () => {
     expect(savedResults).toHaveLength(0);
   });
 
+  test('classifies malformed regional handoff deadlines separately', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const context = networkContext();
+    if (context.kind !== 'network_probe') {
+      throw new Error('Expected network context');
+    }
+    context.payload.deadlineAt = 'not-a-timestamp';
+    const handler = createNetworkExecutionHandler({
+      client: createClient({ context, savedResults }),
+      leaseOwner: 'executor-network',
+      probeSharedSecret: 'network-handler-probe-secret',
+      probeBaseUrl: 'https://probe.example.test',
+      requestImpl: async () => {
+        throw new Error('Probe must not run with an invalid accepted deadline');
+      }
+    });
+
+    await expect(handler(executionJob, new AbortController().signal))
+      .rejects.toMatchObject({
+        code: 'regional_execution_invalid_deadline',
+        retryable: false
+      });
+    expect(savedResults).toHaveLength(0);
+  });
+
   test('validates the configured single probe origin as a credential-free HTTP(S) origin', () => {
     expect(parseProbeBaseUrl('https://probe.example.com')).toBe('https://probe.example.com');
     expect(parseProbeBaseUrl('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080');

@@ -7,11 +7,12 @@ import {
   createRegionalExecutionSignature,
   verifyRegionalResultSignature
 } from '@webperf/domain-core';
+import { randomUUID } from 'node:crypto';
 
 const baseUrl = requiredEnvironment('REGIONAL_RUNTIME_BASE_URL').replace(/\/$/, '');
 const sharedSecret = requiredEnvironment('REGIONAL_RUNTIME_SHARED_SECRET');
 const expectedRegion = requiredEnvironment('REGIONAL_RUNTIME_EXPECTED_REGION');
-const idempotencyKey = `smoke_${Date.now().toString(36)}`;
+const idempotencyKey = `smoke_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
 const unsignedRequest = {
   idempotencyKey,
   runnerType: 'network_probe',
@@ -80,6 +81,7 @@ await verifySignedResult(
 
 const deadline = Date.now() + 90_000;
 let status = 'queued';
+let pollIntervalMs = 250;
 while (Date.now() < deadline) {
   const response = await requestStep(
     'regional execution poll',
@@ -109,7 +111,9 @@ while (Date.now() < deadline) {
   if (status === 'failed' || status === 'cancelled') {
     throw new Error(`regional execution reached unexpected terminal status ${status}`);
   }
-  await Bun.sleep(500);
+  await Bun.sleep(pollIntervalMs);
+  const jitterMs = Math.floor(Math.random() * 100);
+  pollIntervalMs = Math.min(Math.round(pollIntervalMs * 1.5) + jitterMs, 3_000);
 }
 
 throw new Error(`regional execution did not finish before the smoke deadline (last status ${status})`);

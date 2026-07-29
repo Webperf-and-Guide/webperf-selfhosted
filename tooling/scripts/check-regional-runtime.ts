@@ -126,7 +126,12 @@ assertLoopbackPort(regionalApi, 8788, 'regional API');
 assert((executor.ports?.length ?? 0) === 0, 'executor must not publish ports');
 assert((probe.ports?.length ?? 0) === 0, 'probe must not publish ports');
 
-const profile = JSON.parse(readFileSync(profileFile, 'utf8')) as MultiContainerProfile;
+let profile: MultiContainerProfile;
+try {
+  profile = JSON.parse(readFileSync(profileFile, 'utf8')) as MultiContainerProfile;
+} catch (cause) {
+  throw new Error(`Unable to read regional runtime profile ${profileFile}`, { cause });
+}
 assert(profile.schemaVersion === 1, 'multi-container profile schemaVersion must be 1');
 assert(profile.protocolVersion === 1, 'multi-container profile protocolVersion must be 1');
 assert(

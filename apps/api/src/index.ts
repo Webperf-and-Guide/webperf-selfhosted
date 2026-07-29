@@ -147,6 +147,7 @@ import {
   summarizeTargets
 } from '@webperf/report-core';
 import { createSqliteJobRepository } from './repository';
+import { SqliteRetentionBatchLimitError } from './database/operations';
 import {
   ArtifactStoreValidationError,
   LocalBrowserAuditArtifactStore,
@@ -239,7 +240,18 @@ export const repository = createSqliteJobRepository({
 });
 export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
-repository.pruneRetainedData(runtime.retentionDays);
+try {
+  repository.pruneRetainedData(runtime.retentionDays);
+} catch (error) {
+  if (!(error instanceof SqliteRetentionBatchLimitError)) {
+    throw error;
+  }
+  console.warn(JSON.stringify({
+    service: 'webperf-api',
+    component: 'retention',
+    event: 'startup_retention_batch_limit_reached'
+  }));
+}
 await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorageKeys()));
 
 const buildHealthPayload = () => ({

@@ -55,8 +55,14 @@ const countChanges = (result: unknown) =>
   (result as { changes?: number }).changes ?? 0;
 
 const retentionDeleteBatchSize = 500;
+// At most 100,000 rows are removed per invocation. This bounds SQLite write
+// contention; callers can retry the remaining stale backlog on a later cycle.
 const retentionDeleteMaximumBatches = 200;
 export const defaultSqliteStorageCryptoVerificationLimit = 100_000;
+
+export class SqliteRetentionBatchLimitError extends Error {
+  override name = 'SqliteRetentionBatchLimitError';
+}
 
 const deleteRowsInBatches = (deleteBatch: () => unknown) => {
   let deleted = 0;
@@ -69,7 +75,9 @@ const deleteRowsInBatches = (deleteBatch: () => unknown) => {
     }
   }
 
-  throw new Error('SQLite retention cleanup exceeded its bounded batch limit');
+  throw new SqliteRetentionBatchLimitError(
+    'SQLite retention cleanup exceeded its bounded batch limit'
+  );
 };
 
 const cleanupRegionalExecutionGroups = (
@@ -172,7 +180,9 @@ const cleanupRegionalExecutionGroups = (
       }
     }
 
-    throw new Error('Regional execution retention exceeded its bounded batch limit');
+    throw new SqliteRetentionBatchLimitError(
+      'Regional execution retention exceeded its bounded batch limit'
+    );
   } finally {
     nextEligibleGroups.finalize();
     deleteJobs.finalize();

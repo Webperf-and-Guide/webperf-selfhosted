@@ -1417,7 +1417,7 @@ export const createSqliteJobRepository = ({
           return null;
         }
 
-        if (['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
+        if (isTerminalExecutionJob(executionJob)) {
           if (executionJob.status === 'failed') {
             syncTerminalExecutionResource(
               executionJob,

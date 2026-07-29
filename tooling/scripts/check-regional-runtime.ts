@@ -1,0 +1,223 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+type ComposePort = {
+  host_ip?: string;
+  target?: number;
+};
+
+type ComposeService = {
+  image?: string;
+  build?: unknown;
+  user?: string;
+  read_only?: boolean;
+  cap_add?: string[];
+  cap_drop?: string[];
+  security_opt?: string[];
+  ports?: ComposePort[];
+  expose?: number[];
+  environment?: Record<string, string>;
+  volumes?: Array<{ target?: string }>;
+};
+
+type ComposeModel = {
+  services: Record<string, ComposeService>;
+};
+
+type MultiContainerProfile = {
+  schemaVersion?: number;
+  protocolVersion?: number;
+  topology?: {
+    replicas?: { minimum?: number; maximum?: number };
+    sharedNetworkNamespace?: boolean;
+    publicContainer?: string;
+    publicPort?: number;
+    persistentVolume?: {
+      container?: string;
+      mountPath?: string;
+      required?: boolean;
+    };
+  };
+  containers?: Array<{
+    name?: string;
+    image?: string;
+    role?: string;
+    ports?: number[];
+    environment?: Record<string, string>;
+    requiredDeploymentInputs?: string[];
+  }>;
+};
+
+const repositoryRoot = resolve(import.meta.dir, '../..');
+const environmentFile = resolve(repositoryRoot, 'infra/regional-runtime/.env.example');
+const productionFile = resolve(repositoryRoot, 'infra/regional-runtime/compose.yml');
+const developmentFile = resolve(repositoryRoot, 'infra/regional-runtime/compose.dev.yml');
+const profileFile = resolve(
+  repositoryRoot,
+  'infra/regional-runtime/multi-container-profile.json'
+);
+const serviceNames = ['probe', 'regional-api', 'regional-executor'];
+const imageVersionPattern = /^ghcr\.io\/webperf-and-guide\/webperf(?:-probe)?:v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+const production = renderCompose([productionFile]);
+const development = renderCompose([productionFile, developmentFile]);
+
+assertStringArrayEqual(
+  Object.keys(production.services).sort(),
+  serviceNames,
+  'regional runtime service set'
+);
+assertStringArrayEqual(
+  Object.keys(development.services).sort(),
+  serviceNames,
+  'regional runtime development service set'
+);
+
+for (const name of serviceNames) {
+  const service = production.services[name];
+  const developmentService = development.services[name];
+  assert(service, `${name} must exist`);
+  assert(developmentService, `${name} development service must exist`);
+  assert(imageVersionPattern.test(service.image ?? ''), `${name} must use a versioned release image`);
+  assert(!service.build, `${name} production service must not contain a source build`);
+  assert(Boolean(developmentService.build), `${name} development service must build from source`);
+  assert(developmentService.image?.endsWith(':dev'), `${name} development image must use :dev`);
+  assert(service.read_only === true, `${name} must use a read-only root filesystem`);
+  assert(service.user !== undefined && service.user !== '0', `${name} must run as non-root`);
+  assert(service.cap_drop?.includes('ALL'), `${name} must drop all Linux capabilities`);
+  assert((service.cap_add?.length ?? 0) === 0, `${name} must not add Linux capabilities`);
+  assert(
+    service.security_opt?.includes('no-new-privileges:true'),
+    `${name} must prevent privilege escalation`
+  );
+}
+
+const regionalApi = production.services['regional-api'];
+const executor = production.services['regional-executor'];
+const probe = production.services.probe;
+assert(regionalApi, 'regional-api must exist');
+assert(executor, 'regional-executor must exist');
+assert(probe, 'probe must exist');
+
+assert(regionalApi.environment?.WEBPERF_ROLE === 'regional-runtime', 'API must force regional role');
+assert(
+  regionalApi.environment?.SELFHOST_SCHEDULER_MODE === 'disabled',
+  'regional API must disable scheduling'
+);
+assert(
+  regionalApi.environment?.SELFHOST_ADMIN_TOKEN === undefined,
+  'regional API must not carry the self-host administrator token'
+);
+assert(
+  executor.environment?.BROWSER_AUDIT_SHARED_SECRET === undefined
+    && executor.environment?.SELFHOST_BROWSER_AUDIT_BASE_URL === undefined,
+  'regional executor must not carry Browser Audit configuration'
+);
+assert(
+  regionalApi.volumes?.some((volume) => volume.target === '/data'),
+  'regional API must retain the durable /data volume'
+);
+assertLoopbackPort(regionalApi, 8788, 'regional API');
+assert((executor.ports?.length ?? 0) === 0, 'executor must not publish ports');
+assert((probe.ports?.length ?? 0) === 0, 'probe must not publish ports');
+
+const profile = JSON.parse(readFileSync(profileFile, 'utf8')) as MultiContainerProfile;
+assert(profile.schemaVersion === 1, 'multi-container profile schemaVersion must be 1');
+assert(profile.protocolVersion === 1, 'multi-container profile protocolVersion must be 1');
+assert(
+  profile.topology?.replicas?.minimum === 1
+    && profile.topology.replicas.maximum === 1,
+  'regional runtime profile must remain single-replica'
+);
+assert(
+  profile.topology?.sharedNetworkNamespace === true,
+  'managed multi-container profile must require one shared network namespace'
+);
+assert(
+  profile.topology?.publicContainer === 'regional-api'
+    && profile.topology.publicPort === 8788,
+  'only regional API port 8788 may be public'
+);
+assert(
+  profile.topology?.persistentVolume?.container === 'regional-api'
+    && profile.topology.persistentVolume.mountPath === '/data'
+    && profile.topology.persistentVolume.required === true,
+  'managed profile must persist regional API state at /data'
+);
+
+const profileContainers = profile.containers ?? [];
+assertStringArrayEqual(
+  profileContainers.map(({ name }) => name ?? '').sort(),
+  serviceNames,
+  'managed multi-container service set'
+);
+const publicPorts = profileContainers.flatMap(({ name, ports }) =>
+  (ports ?? []).map((port) => ({ name, port }))
+);
+assert(
+  publicPorts.some(({ name, port }) => name === 'regional-api' && port === 8788),
+  'managed profile must expose the regional API process port'
+);
+assert(
+  publicPorts.some(({ name, port }) => name === 'probe' && port === 8080),
+  'managed profile must declare the private probe process port'
+);
+assert(
+  new Set(publicPorts.map(({ port }) => port)).size === publicPorts.length,
+  'co-located containers must use distinct ports'
+);
+for (const container of profileContainers) {
+  assert(
+    (container.requiredDeploymentInputs?.length ?? 0) > 0,
+    `${container.name ?? 'unknown'} must declare deployment inputs`
+  );
+}
+
+console.log(JSON.stringify({
+  ok: true,
+  services: serviceNames,
+  publicService: 'regional-api',
+  publicPort: 8788,
+  replicas: 1
+}));
+
+function renderCompose(files: string[]): ComposeModel {
+  const command = ['docker', 'compose', '--env-file', environmentFile];
+  for (const file of files) {
+    command.push('-f', file);
+  }
+  command.push('config', '--format', 'json');
+  const result = Bun.spawnSync(command, {
+    cwd: repositoryRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 30_000
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.toString().trim() || 'regional runtime Compose render failed');
+  }
+  return JSON.parse(result.stdout.toString()) as ComposeModel;
+}
+
+function assertLoopbackPort(
+  service: ComposeService,
+  target: number,
+  label: string
+) {
+  const ports = service.ports?.filter((candidate) => candidate.target === target) ?? [];
+  assert(ports.length === 1, `${label} must publish ${target} exactly once`);
+  assert(ports[0]?.host_ip === '127.0.0.1', `${label} must bind on loopback`);
+}
+
+function assertStringArrayEqual(actual: string[], expected: string[], label: string) {
+  assert(
+    JSON.stringify(actual) === JSON.stringify(expected),
+    `${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+  );
+}
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}

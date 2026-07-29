@@ -15,7 +15,7 @@ It is the source of truth for:
 
 - control-plane contracts and result schemas
 - self-host API and scheduler behavior
-- domain models such as sites, route groups, region sets, checks, runs, comparisons, and exports
+- domain models such as sites, route groups, checks, runs, comparisons, and exports
 - deterministic reporting and diff logic
 - self-host console and API behavior
 - Rust probe runtime and portable execution flow

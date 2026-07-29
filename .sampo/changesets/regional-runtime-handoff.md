@@ -14,5 +14,7 @@ idempotency records, atomically splits batches of up to 100 targets across
 the existing durable executor queue, enforces replay and execution
 deadlines, supports current/next key rotation, and signs results with
 distinct runtime/runner image provenance. Browser Audit is intentionally
-deferred to a separate request variant. No Cloud-only logic (billing,
-tenancy, fleet) enters this repository.
+deferred to a separate request variant. Tagged releases now include the
+digest-pinned three-container Regional Runtime profile and a dedicated
+published-bundle smoke. No Cloud-only logic (billing, tenancy, fleet)
+enters this repository.

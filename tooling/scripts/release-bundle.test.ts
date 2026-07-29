@@ -256,6 +256,10 @@ npm/@webperf/contracts: patch
       outputDirectory: output
     });
     const compose = readFileSync(join(output, 'compose.yml'), 'utf8');
+    const regionalRuntimeCompose = readFileSync(
+      join(output, 'regional-runtime.compose.yml'),
+      'utf8'
+    );
     const runtimeMetadata = JSON.parse(
       readFileSync(join(output, 'runtime-metadata.json'), 'utf8')
     );
@@ -263,10 +267,12 @@ npm/@webperf/contracts: patch
     expect(result.imageCount).toBe(3);
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
+    expect(regionalRuntimeCompose).not.toContain('WEBPERF_VERSION');
     expect(compose).toContain(`WEBPERF_RUNTIME_VERSION: "${version}"`);
     // 5 services using webperf + probe + browser-audit + 2 debug = 8 image lines
     // (console/api/scheduler/executor share one webperf digest)
     expect(validateReleaseComposeImages(compose)).toHaveLength(8);
+    expect(validateReleaseComposeImages(regionalRuntimeCompose)).toHaveLength(3);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);
       for (const suffix of ['', '-linux-arm64']) {
@@ -292,6 +298,23 @@ npm/@webperf/contracts: patch
     expect(readFileSync(join(output, '.env.example'), 'utf8')).not.toContain(
       'WEBPERF_VERSION='
     );
+    expect(
+      readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
+    ).not.toContain('WEBPERF_VERSION=');
+    expect(JSON.parse(
+      readFileSync(join(output, 'regional-runtime-profile.json'), 'utf8')
+    )).toMatchObject({
+      schemaVersion: 1,
+      protocolVersion: 1,
+      topology: {
+        replicas: { minimum: 1, maximum: 1 },
+        publicContainer: 'regional-api',
+        publicPort: 8788
+      }
+    });
+    expect(
+      readFileSync(join(output, 'regional-runtime.README.md'), 'utf8')
+    ).toContain('exactly one active pod');
     expect(readFileSync(join(output, 'SHA256SUMS'), 'utf8')).toContain(
       'runtime-metadata.json'
     );
@@ -312,6 +335,10 @@ npm/@webperf/contracts: patch
     expect(checksumPaths).toContain('browser-audit-seccomp.json');
     expect(checksumPaths).toContain('browser-audit.apparmor');
     expect(checksumPaths).toContain('compose.apparmor.yml');
+    expect(checksumPaths).toContain('regional-runtime.compose.yml');
+    expect(checksumPaths).toContain('regional-runtime.env.example');
+    expect(checksumPaths).toContain('regional-runtime-profile.json');
+    expect(checksumPaths).toContain('regional-runtime.README.md');
     expect(checksumPaths).toEqual([...checksumPaths].sort((left, right) =>
       Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
     ));

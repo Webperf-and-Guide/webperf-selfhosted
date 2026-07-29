@@ -3,10 +3,11 @@
 Self-hosted release verification for teams that need to answer one practical
 question: **did this deploy get worse?**
 
-WebPerf runs repeatable network checks across representative cities, keeps run
-history and baselines in SQLite, and produces deterministic comparisons and
-exports. The default installation is a small, single-organization stack with
-an operator console, API, scheduler, durable executor, and Rust probe. An
+WebPerf runs repeatable network checks from the location where you deploy it,
+keeps run history and baselines in SQLite, and produces deterministic
+comparisons and exports. The default installation is a small,
+single-organization stack with an operator console, API with embedded
+scheduling, durable executor, and Rust probe. An
 engine-neutral Browser Audit Protocol and Lighthouse reference runner are
 available as an optional profile.
 
@@ -49,7 +50,7 @@ curl --fail http://127.0.0.1:5173/
 ```
 
 Open `http://127.0.0.1:5173`. Only the console is published, and it binds to
-loopback. The API, scheduler, executor, probe, and optional browser runner stay
+loopback. The API, executor, probe, and optional browser runner stay
 on internal Compose networks.
 
 Read the full [installation guide](docs/users/install.md) before using a
@@ -58,14 +59,14 @@ non-local hostname or upgrading an existing database.
 ## Core features
 
 - One-off Fast Checks for deploy smoke tests and incident verification.
-- Reusable Sites, Route Groups, Region Sets, and Checks with request overrides,
+- Reusable Sites, Route Groups, and Checks with request overrides,
   latency or uptime policy, webhook alerts, and interval schedules.
 - Durable SQLite-backed execution leases, bounded retry, graceful shutdown,
   and restart recovery instead of API-process fire-and-forget work.
 - Latest-vs-previous and pinned-baseline comparisons, deterministic Analysis,
   and JSON/CSV exports.
-- A 41-city public catalog with operator-controlled active probes and up to
-  four representative regions per run.
+- One explicit runtime location recorded as provenance on every Fast Check and
+  Browser Audit. Deploy one installation per location when you operate several.
 - Encrypted persisted payloads, secret redaction, HMAC-authenticated runtimes,
   and connection-layer SSRF protection.
 - Authenticated local artifact storage with size limits, SHA-256 indexes,
@@ -134,7 +135,10 @@ This repository is the public source of truth for self-host contracts, schemas,
 domain models, report logic, console/API behavior, deployment examples, and
 runtime images. It intentionally excludes billing, multi-tenancy, managed
 fleet orchestration, private provider credentials, and AI analyst product
-features. See [Cloud vs self-hosted](docs/users/cloud-vs-self-hosted.md).
+features. It also publishes the provider-neutral
+[Regional Runtime Protocol](docs/architecture/regional-runtime-handoff.md) and
+three-container deployment profile used by managed orchestrators. See
+[Cloud vs self-hosted](docs/users/cloud-vs-self-hosted.md).
 
 ## Upgrade and backup
 

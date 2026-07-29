@@ -49,8 +49,8 @@ bun run capture:console:baselines
 ## What You Get
 
 - `console`: SvelteKit UI
-- `api`: Bun-based API service with SQLite persistence
-- `scheduler`: Bun polling worker for scheduled dispatch
+- `api`: Bun-based API service with SQLite persistence and embedded scheduling
+- `executor`: Bun worker for durable network, webhook, and Browser Audit execution
 - `probe`: Rust measurement runtime on the internal Compose network
 - `browser-audit-lighthouse`: optional Bun browser-audit runtime when you enable the `browser-audit` profile
 
@@ -170,8 +170,10 @@ curl -X POST http://127.0.0.1:8788/v1/browser-audits \
 
 ## Scheduling
 
-The default local stack now includes `apps/scheduler`, which polls the API every
-60 seconds and dispatches due saved checks.
+The default local stack runs the scheduling loop inside the API process and
+dispatches due saved checks every 60 seconds. The standalone scheduler role is
+available only through the `external-scheduler` profile for operators who
+explicitly select external mode.
 
 If you need to inspect the dispatch endpoint, use the loopback debug proxy and
 the internal service credential:

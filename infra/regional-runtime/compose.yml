@@ -1,0 +1,144 @@
+name: webperf-regional-runtime
+
+x-service-defaults: &service-defaults
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: "${WEBPERF_LOG_MAX_SIZE:-10m}"
+      max-file: "${WEBPERF_LOG_MAX_FILES:-3}"
+
+x-bun-read-only: &bun-read-only
+  user: "1000:1000"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000
+
+services:
+  regional-api:
+    <<: [*service-defaults, *bun-read-only]
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in the regional runtime env file}"
+    environment:
+      WEBPERF_ROLE: regional-runtime
+      SELFHOST_API_HOST: "0.0.0.0"
+      SELFHOST_API_PORT: "8788"
+      SELFHOST_DATABASE_PATH: "/data/webperf.sqlite"
+      SELFHOST_ARTIFACTS_PATH: "/data/artifacts"
+      SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET}"
+      SELFHOST_INTERNAL_SECRET_NEXT: "${SELFHOST_INTERNAL_SECRET_NEXT:-}"
+      SELFHOST_REGION_ID: "${SELFHOST_REGION_ID:?set SELFHOST_REGION_ID}"
+      SELFHOST_REGION_LABEL: "${SELFHOST_REGION_LABEL:-}"
+      SELFHOST_PROBE_BASE_URL: "http://probe:8080"
+      SELFHOST_SCHEDULER_MODE: "disabled"
+      REGIONAL_RUNTIME_SHARED_SECRET: "${REGIONAL_RUNTIME_SHARED_SECRET:?set REGIONAL_RUNTIME_SHARED_SECRET}"
+      REGIONAL_RUNTIME_SHARED_SECRET_NEXT: "${REGIONAL_RUNTIME_SHARED_SECRET_NEXT:-}"
+      WEBPERF_RUNTIME_VERSION: "${WEBPERF_VERSION:?set WEBPERF_VERSION}"
+      WEBPERF_RUNTIME_IMAGE_DIGEST: "${WEBPERF_RUNTIME_IMAGE_DIGEST:-}"
+      WEBPERF_PROBE_IMAGE_DIGEST: "${WEBPERF_PROBE_IMAGE_DIGEST:-}"
+    ports:
+      - "127.0.0.1:${REGIONAL_RUNTIME_PUBLIC_PORT:-8788}:8788"
+    expose:
+      - "8788"
+    volumes:
+      - regional-runtime-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:8788/health'); if (!response.ok) process.exit(1);"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${REGIONAL_API_CPU_LIMIT:-1.00}"
+          memory: "${REGIONAL_API_MEMORY_LIMIT:-512M}"
+    networks:
+      - regional-control
+
+  regional-executor:
+    <<: [*service-defaults, *bun-read-only]
+    image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in the regional runtime env file}"
+    stop_grace_period: 16m
+    depends_on:
+      regional-api:
+        condition: service_healthy
+      probe:
+        condition: service_healthy
+    environment:
+      WEBPERF_ROLE: executor
+      SELFHOST_EXECUTOR_API_BASE_URL: "http://regional-api:8788"
+      SELFHOST_INTERNAL_SECRET: "${SELFHOST_INTERNAL_SECRET:?set SELFHOST_INTERNAL_SECRET}"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET}"
+      SELFHOST_PROBE_BASE_URL: "http://probe:8080"
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: "true"
+      SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP: "true"
+      SELFHOST_EXECUTOR_POLL_INTERVAL_MS: "${SELFHOST_EXECUTOR_POLL_INTERVAL_MS:-1000}"
+      SELFHOST_EXECUTOR_LEASE_DURATION_MS: "${SELFHOST_EXECUTOR_LEASE_DURATION_MS:-60000}"
+      SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: "${SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS:-20000}"
+      SELFHOST_EXECUTOR_MAX_EXECUTION_MS: "${SELFHOST_EXECUTOR_MAX_EXECUTION_MS:-900000}"
+      WEBPERF_PROCESS_HEARTBEAT_PATH: "/tmp/webperf-executor-heartbeat"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const { mtimeMs } = await (await import('node:fs/promises')).stat('/tmp/webperf-executor-heartbeat'); if (!Number.isFinite(mtimeMs) || Date.now() - mtimeMs > 45000) process.exit(1);"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${REGIONAL_EXECUTOR_CPU_LIMIT:-1.00}"
+          memory: "${REGIONAL_EXECUTOR_MEMORY_LIMIT:-384M}"
+    networks:
+      - regional-control
+      - regional-probe
+
+  probe:
+    <<: *service-defaults
+    image: "ghcr.io/webperf-and-guide/webperf-probe:${WEBPERF_VERSION:?set WEBPERF_VERSION in the regional runtime env file}"
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PROBE_LISTEN_ADDR: "0.0.0.0:8080"
+      REGION_ID: "${SELFHOST_REGION_ID:?set SELFHOST_REGION_ID}"
+      PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET}"
+      PROBE_SHARED_SECRET_NEXT: "${PROBE_SHARED_SECRET_NEXT:-}"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "/probe", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "${REGIONAL_PROBE_CPU_LIMIT:-1.00}"
+          memory: "${REGIONAL_PROBE_MEMORY_LIMIT:-256M}"
+    networks:
+      - regional-probe
+
+volumes:
+  regional-runtime-data:
+
+networks:
+  regional-control:
+  regional-probe:

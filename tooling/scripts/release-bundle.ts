@@ -498,6 +498,44 @@ export function renderReleaseBundle({
   compose = compose.replace(/\$\{WEBPERF_VERSION:[^}]+\}/g, version);
   validateReleaseComposeImages(compose);
   writeFileSync(join(outputDirectory, 'compose.yml'), compose);
+
+  let regionalRuntimeCompose = readFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/compose.yml'),
+    'utf8'
+  );
+  for (const entry of metadata.filter(({ name }) => name !== 'browser-audit-lighthouse')) {
+    const dynamicReference = new RegExp(
+      `${escapeRegExp(entry.image)}:\\$\\{WEBPERF_VERSION:[^}]+\\}`,
+      'g'
+    );
+    const matches = regionalRuntimeCompose.match(dynamicReference);
+    if (!matches?.length) {
+      throw new Error(
+        `Regional runtime Compose does not contain a version placeholder for ${entry.image}`
+      );
+    }
+    regionalRuntimeCompose = regionalRuntimeCompose.replace(
+      dynamicReference,
+      () => entry.reference
+    );
+  }
+  regionalRuntimeCompose = regionalRuntimeCompose.replace(
+    /\$\{WEBPERF_VERSION:[^}]+\}/g,
+    version
+  );
+  validateReleaseComposeImages(regionalRuntimeCompose);
+  writeFileSync(
+    join(outputDirectory, 'regional-runtime.compose.yml'),
+    regionalRuntimeCompose
+  );
+  copyFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/multi-container-profile.json'),
+    join(outputDirectory, 'regional-runtime-profile.json')
+  );
+  copyFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/README.md'),
+    join(outputDirectory, 'regional-runtime.README.md')
+  );
   copyFileSync(
     join(repositoryRoot, 'infra/docker-compose/browser-audit-seccomp.json'),
     join(outputDirectory, 'browser-audit-seccomp.json')
@@ -519,6 +557,17 @@ export function renderReleaseBundle({
     .filter((line) => !line.startsWith('WEBPERF_VERSION='))
     .join('\n');
   writeFileSync(join(outputDirectory, '.env.example'), envExample);
+  const regionalRuntimeEnvExample = readFileSync(
+    join(repositoryRoot, 'infra/regional-runtime/.env.example'),
+    'utf8'
+  )
+    .split('\n')
+    .filter((line) => !line.startsWith('WEBPERF_VERSION='))
+    .join('\n');
+  writeFileSync(
+    join(outputDirectory, 'regional-runtime.env.example'),
+    regionalRuntimeEnvExample
+  );
 
   const sbomDirectory = join(outputDirectory, 'sbom');
   mkdirSync(sbomDirectory);
@@ -1062,7 +1111,7 @@ function walkFiles(directory: string): string[] {
 }
 
 function releaseReadme(version: string) {
-  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\`, \`browser-audit.apparmor\`, and \`compose.apparmor.yml\` beside \`compose.yml\` when enabling Browser Audit. On an AppArmor 4 host, install \`browser-audit.apparmor\` as \`/etc/apparmor.d/webperf-browser-audit\`, load it with \`sudo apparmor_parser -r -W /etc/apparmor.d/webperf-browser-audit\`, then add \`-f compose.apparmor.yml\` to the Browser Audit Compose command.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
+  return `# WebPerf ${version}\n\nThis release bundle pins every runtime image by OCI digest.\n\n## Start\n\n\`\`\`sh\ncp .env.example .env\n# Replace every placeholder secret before continuing.\ndocker compose --env-file .env -f compose.yml up -d\n\`\`\`\n\nOpen \`http://127.0.0.1:5173\`. Only the console is published by default. Keep \`browser-audit-seccomp.json\`, \`browser-audit.apparmor\`, and \`compose.apparmor.yml\` beside \`compose.yml\` when enabling Browser Audit. On an AppArmor 4 host, install \`browser-audit.apparmor\` as \`/etc/apparmor.d/webperf-browser-audit\`, load it with \`sudo apparmor_parser -r -W /etc/apparmor.d/webperf-browser-audit\`, then add \`-f compose.apparmor.yml\` to the Browser Audit Compose command.\n\nThe provider-neutral managed handoff is packaged separately as \`regional-runtime.compose.yml\`, \`regional-runtime.env.example\`, \`regional-runtime-profile.json\`, and \`regional-runtime.README.md\`. It runs only the regional API, executor, and Rust probe and requires one active replica while v1 uses SQLite-backed status polling.\n\nVerify bundle files with \`sha256sum --check SHA256SUMS\`. Runtime image digests are recorded in \`runtime-metadata.json\`, and SPDX JSON SBOMs live under \`sbom/\`.\n\nRead \`SECURITY.md\` before exposing the console through a reverse proxy.\n`;
 }
 
 function escapeRegExp(value: string) {

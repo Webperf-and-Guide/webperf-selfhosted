@@ -212,7 +212,7 @@ Current repo state as of 2026-07-26:
 - formal releases now finish with a required fresh GitHub-hosted published-bundle smoke for both default and Browser Audit profiles; its bundle-aware harness is separate from a source-pinned checkout that must match the bundle runtime metadata, and the current `v0.2.1` drill passed with independently generated secrets
 - issue #14 Phase 1 is complete: PR #15 introduced the generic runtime region identity (`runtimeRegionIdSchema`, `runtimeRegionLabelSchema`, `runtimeLocationSchema`) in `@webperf/contracts` and the single-region `SELFHOST_REGION_ID`, `SELFHOST_REGION_LABEL`, and `SELFHOST_PROBE_BASE_URL` variables in `@webperf/config`; PR #17 removed the legacy 41-city enum, `regionCodeSchema`, `regionPackSchema`, `regions[]`/`regionPackId` fields, the `SELFHOST_*_JSON` configuration trio, `/v1/region-packs` and `/v1/region-sets` endpoints (now 410 Gone), the multi-region catalog UI, and the executor's per-region probe-origin map; PR #18 finalized the user and architecture documentation. One standalone deployment now measures from one fixed runtime location stamped onto every job, target, and Browser Audit as provenance, the Rust probe reads `REGION_ID` (default `local`) instead of `REGION_CODE`/Tokyo, the Console `/regions` workspace reports a single Runtime Location card, and `docs/users/regions.md`, `configure.md`, `checks.md`, `upgrade.md`, `docs/architecture/public-api-surface.md`, and `docs/quickstart/local-compose.md` document the single-region model. Per the operator decision, the legacy 3-variable compatibility parser and stored multi-region Check migration are intentionally omitted because there is no production data to preserve.
 - issue #14 Phase 2+3 is complete: the four Bun runtime images (`webperf-console`, `webperf-api`, `webperf-scheduler`, `webperf-executor`) are consolidated into a single multi-role `webperf` image built from `infra/docker/Dockerfile.webperf`. The active role is selected at container start by the `WEBPERF_ROLE` environment variable (`console`, `api`, `scheduler`, or `executor`) via the `tooling/scripts/webperf-role.ts` dispatcher. The scheduler defaults to embedded mode inside the API process (`SELFHOST_SCHEDULER_MODE=embedded`); external mode remains available. The published GHCR image set changes from six images to three (`webperf`, `webperf-probe`, `webperf-browser-audit-lighthouse`); `infra/docker/README.md`, `docs/quickstart/runtime-images.md`, `infra/release/README.md`, `docs/contributors/releases.md`, `docs/users/install.md`, `docs/users/upgrade.md`, `docs/architecture/execution-model.md`, `CONTRIBUTING.md`, and this file document the three-image model. This is a breaking change for consumers pinned to the old six-image digest-pinned Compose bundle; operators must replace the four Bun image refs with the single `webperf` image plus `WEBPERF_ROLE`.
-- issue #14 Phase 4 has started: `packages/contracts/src/regional-runtime.ts` defines a provider-neutral execution handoff protocol (idempotent request, bounded route batch, deadline, cancellation, HMAC-signed result delivery, provenance block) that a managed Cloud control plane can call to submit measurement work to one regional runtime. `docs/architecture/regional-runtime-handoff.md` documents the boundary, `docs/architecture/execution-model.md` links to it, `docs/architecture/public-api-surface.md` records the v1 boundary decision for the regional-execution routes, and `docs/users/cloud-vs-self-hosted.md` describes the Cloud↔regional-runtime relationship. PR2 will add the `regional-runtime` role to the dispatcher and capabilities/health extensions.
+- issue #14 Phase 4 is complete in the current working branch: Regional Runtime Protocol v1 is network-probe-only and provides oRPC-derived OpenAPI plus `GET /v1/regional-capabilities`, idempotent signed `POST /v1/regional-executions`, signed status polling, and idempotent cancellation. Regional mode strictly allowlists health, handoff, and internal executor routes; it uses isolated current/next HMAC credentials, a five-minute replay window, semantic conflict detection, atomic encrypted SQLite persistence, durable executor chunks, accepted deadlines, restart recovery, and distinct runtime/probe provenance. `infra/regional-runtime` provides a three-container reference Compose and a one-replica co-located multi-container profile; tagged release bundles publish digest-pinned regional assets and smoke them separately. Provider application IDs, region slots, deploy/undeploy, capacity policy, and global aggregation remain in `webperf.and.guide`.
 
 Current local dev entrypoints:
 - `bun run dev`
@@ -227,6 +227,8 @@ Current local dev entrypoints:
 - `bun run smoke:console:parallel`
 - `bun run smoke:compose`
 - `bun run smoke:compose:browser-audit`
+- `bun run compose:regional:config`
+- `bun run smoke:regional-runtime`
 - `bun run capture:console:baselines`
 
 Current local URLs:
@@ -253,9 +255,10 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. run a documented operator backup/restore drill against the released bundle
-2. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
-3. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+1. merge and release the completed issue #14 Regional Runtime Protocol and deployment profile
+2. run a documented operator backup/restore drill against the released bundle
+3. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+4. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
 
 ## Update Protocol
 

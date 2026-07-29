@@ -1,5 +1,6 @@
 import {
   regionalExecutionResultSchema,
+  regionalRuntimeCapabilitiesSchema,
   type RegionalExecutionRequest
 } from '@webperf/contracts';
 import {
@@ -34,15 +35,12 @@ const capabilitiesResponse = await fetch(`${baseUrl}/v1/regional-capabilities`, 
   signal: AbortSignal.timeout(5_000)
 });
 assert(capabilitiesResponse.ok, 'regional capabilities request failed');
-const capabilities = await capabilitiesResponse.json() as {
-  protocolVersion?: number;
-  regionId?: string;
-  runnerTypes?: string[];
-};
-assert(capabilities.protocolVersion === 1, 'unexpected regional protocol version');
+const capabilities = regionalRuntimeCapabilitiesSchema.parse(
+  await capabilitiesResponse.json()
+);
 assert(capabilities.regionId === expectedRegion, 'regional runtime reported the wrong region');
 assert(
-  capabilities.runnerTypes?.length === 1
+  capabilities.runnerTypes.length === 1
     && capabilities.runnerTypes[0] === 'network_probe',
   'regional runtime advertised an unexpected runner surface'
 );

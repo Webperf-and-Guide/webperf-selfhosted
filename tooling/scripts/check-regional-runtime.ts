@@ -56,6 +56,7 @@ const profileFile = resolve(
   repositoryRoot,
   'infra/regional-runtime/multi-container-profile.json'
 );
+const composeRenderTimeoutMs = 30_000;
 const serviceNames = ['probe', 'regional-api', 'regional-executor'];
 const imageVersionPattern = /^ghcr\.io\/webperf-and-guide\/webperf(?:-probe)?:v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
@@ -83,7 +84,11 @@ for (const name of serviceNames) {
   assert(Boolean(developmentService.build), `${name} development service must build from source`);
   assert(developmentService.image?.endsWith(':dev'), `${name} development image must use :dev`);
   assert(service.read_only === true, `${name} must use a read-only root filesystem`);
-  assert(service.user !== undefined && service.user !== '0', `${name} must run as non-root`);
+  const user = service.user?.split(':', 1)[0]?.toLowerCase();
+  assert(
+    user !== undefined && user !== '0' && user !== 'root',
+    `${name} must run as non-root`
+  );
   assert(service.cap_drop?.includes('ALL'), `${name} must drop all Linux capabilities`);
   assert((service.cap_add?.length ?? 0) === 0, `${name} must not add Linux capabilities`);
   assert(
@@ -191,12 +196,26 @@ function renderCompose(files: string[]): ComposeModel {
     cwd: repositoryRoot,
     stdout: 'pipe',
     stderr: 'pipe',
-    timeout: 30_000
+    timeout: composeRenderTimeoutMs
   });
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.toString().trim() || 'regional runtime Compose render failed');
+    const stderr = result.stderr.toString().trim();
+    if (result.exitCode === null) {
+      throw new Error(
+        `regional runtime Compose render did not complete (timeout after ${composeRenderTimeoutMs / 1_000} seconds or Docker unavailable)${stderr ? `: ${stderr}` : ''}`
+      );
+    }
+    throw new Error(stderr || 'regional runtime Compose render failed');
   }
-  return JSON.parse(result.stdout.toString()) as ComposeModel;
+
+  const stdout = result.stdout.toString();
+  try {
+    return JSON.parse(stdout) as ComposeModel;
+  } catch (error) {
+    throw new Error(
+      `regional runtime Compose render returned invalid JSON: ${error instanceof Error ? error.message : String(error)}\nOutput (truncated): ${stdout.slice(0, 500)}`
+    );
+  }
 }
 
 function assertLoopbackPort(

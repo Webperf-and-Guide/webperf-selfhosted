@@ -89,6 +89,7 @@ import {
   executionResourceResultRequestSchema,
   defaultBrowserAuditArtifactContentTypes,
   browserAuditExecutionPayloadSchema,
+  networkProbeMaxJobsPerExecution,
   networkProbeExecutionPayloadSchema,
   regionalExecutionPayloadMaxBytes,
   regionalExecutionRequestSchema,
@@ -1733,9 +1734,9 @@ async function handleCreateRegionalExecution(request: Request) {
   const resources = [];
   const targetLinks: RegionalExecutionRecord['targetLinks'] = [];
 
-  for (let offset = 0; offset < jobs.length; offset += 20) {
-    const chunk = jobs.slice(offset, offset + 20);
-    const chunkIndex = Math.floor(offset / 20);
+  for (let offset = 0; offset < jobs.length; offset += networkProbeMaxJobsPerExecution) {
+    const chunk = jobs.slice(offset, offset + networkProbeMaxJobsPerExecution);
+    const chunkIndex = Math.floor(offset / networkProbeMaxJobsPerExecution);
     const executionJobId = `exec_reg_${requestDigest.slice(0, 24)}_${chunkIndex}`;
     resources.push(buildNetworkExecutionResourceInput(chunk, null, null, {
       resourceId: parsed.data.idempotencyKey,
@@ -1919,9 +1920,11 @@ async function buildSignedRegionalExecutionResult(
     },
     acceptedAt: record.acceptedAt,
     completedAt,
-    keyVersion: 'current'
+    keyVersion: record.request.keyVersion
   });
-  const signingSecret = runtime.regionalRuntimeSecret;
+  const signingSecret = record.request.keyVersion === 'next'
+    ? runtime.regionalRuntimeSecretNext
+    : runtime.regionalRuntimeSecret;
   if (!signingSecret) {
     throw new Error('Regional runtime signing secret is unavailable');
   }

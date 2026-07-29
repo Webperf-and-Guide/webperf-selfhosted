@@ -216,6 +216,8 @@ describe('regional runtime handoff', () => {
     );
     expect(nextKeyCancelled.targets).toHaveLength(21);
     expect(nextKeyCancelled.targets.every((target) => target.status === 'cancelled')).toBe(true);
+    expect(nextKeyCancelled.keyVersion).toBe('next');
+    await expectVerifiedResult(nextKeyCancelled);
 
     expect((await fetch(
       `${harness.baseUrl}/v1/regional-executions/${encodeURIComponent(unsigned.idempotencyKey)}`,
@@ -272,8 +274,11 @@ const expectVerifiedResult = async (
   result: ReturnType<typeof regionalExecutionResultSchema.parse>
 ) => {
   const { signature, ...unsigned } = result;
+  const signingSecret = result.keyVersion === 'next'
+    ? regionalNextSecret
+    : regionalSecret;
   expect(await verifyRegionalResultSignature(
-    regionalSecret,
+    signingSecret,
     unsigned,
     signature
   )).toBe(true);

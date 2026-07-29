@@ -96,9 +96,14 @@ if (!regionalRuntimeDoc.components?.securitySchemes.regionalRuntimeToken) {
 for (const [path, methods] of Object.entries(regionalRuntimeDoc.paths)) {
   for (const operation of Object.values(methods)) {
     const shouldBePublic = path === '/v1/regional-capabilities';
-    if (shouldBePublic === Boolean(operation.security)) {
+    if (shouldBePublic && operation.security) {
       throw new Error(
-        `regional runtime path ${path} has an invalid bearer authentication declaration`
+        `public regional runtime path ${path} must remain unauthenticated in OpenAPI`
+      );
+    }
+    if (!shouldBePublic && !operation.security) {
+      throw new Error(
+        `protected regional runtime path ${path} must declare bearer authentication`
       );
     }
   }

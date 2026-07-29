@@ -169,10 +169,16 @@ const createExecutionDeadlineSignal = (
     'Regional execution exceeded its accepted deadline',
     false
   ));
-  const remainingMs = Date.parse(deadlineAt) - Date.now();
-  const timeout = remainingMs <= 0
-    ? (abortForDeadline(), null)
-    : setTimeout(abortForDeadline, remainingMs);
+  const parsedDeadlineMs = Date.parse(deadlineAt);
+  const remainingMs = Number.isNaN(parsedDeadlineMs)
+    ? 0
+    : parsedDeadlineMs - Date.now();
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  if (remainingMs <= 0) {
+    abortForDeadline();
+  } else {
+    timeout = setTimeout(abortForDeadline, remainingMs);
+  }
 
   return {
     signal: controller.signal,

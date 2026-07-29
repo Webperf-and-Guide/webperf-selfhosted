@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import {
   executionJobIdSchema,
-  regionalExecutionRequestSchema
+  regionalExecutionIdempotencyKeySchema,
+  regionalExecutionRequestSchema,
+  regionalRuntimeMaxBatchSize
 } from '@webperf/contracts';
 
 export const regionalExecutionTargetLinkSchema = z.object({
@@ -12,10 +14,12 @@ export const regionalExecutionTargetLinkSchema = z.object({
 export type RegionalExecutionTargetLink = z.infer<typeof regionalExecutionTargetLinkSchema>;
 
 export const regionalExecutionRecordSchema = z.object({
-  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).max(160),
+  id: regionalExecutionIdempotencyKeySchema,
   requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
   request: regionalExecutionRequestSchema,
-  targetLinks: z.array(regionalExecutionTargetLinkSchema).min(1).max(100),
+  targetLinks: z.array(regionalExecutionTargetLinkSchema)
+    .min(1)
+    .max(regionalRuntimeMaxBatchSize),
   acceptedAt: z.string().datetime(),
   deadlineAt: z.string().datetime(),
   cancelledAt: z.string().datetime().nullable(),

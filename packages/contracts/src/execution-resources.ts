@@ -15,10 +15,14 @@ import {
 } from './public-api';
 import { browserAuditArtifactUploadConfigSchema } from './browser-audit';
 
+export const networkProbeMaxJobsPerExecution = 20;
+
 export const networkProbeExecutionPayloadSchema = z
   .object({
     version: z.literal('v1'),
-    jobIds: z.array(z.string().min(1).max(160)).min(1).max(20),
+    jobIds: z.array(z.string().min(1).max(160))
+      .min(1)
+      .max(networkProbeMaxJobsPerExecution),
     checkId: z.string().min(1).max(160).nullable().default(null),
     runId: z.string().min(1).max(160).nullable().default(null),
     regionalExecutionId: z.string().min(1).max(160).nullable().default(null),
@@ -65,11 +69,13 @@ export const networkProbeExecutionContextSchema = z
     kind: z.literal('network_probe'),
     executionJob: executionJobSchema,
     payload: networkProbeExecutionPayloadSchema,
-    jobs: z.array(latencyJobDetailSchema).min(1).max(20),
+    jobs: z.array(latencyJobDetailSchema)
+      .min(1)
+      .max(networkProbeMaxJobsPerExecution),
     check: checkProfileSchema.nullable(),
     run: checkProfileRunSchema.nullable(),
     comparedRun: checkProfileRunSchema.nullable(),
-    comparedJobs: z.array(latencyJobDetailSchema).max(20),
+    comparedJobs: z.array(latencyJobDetailSchema).max(networkProbeMaxJobsPerExecution),
     comparisonMode: z.enum(['baseline', 'latest_previous']).nullable()
   })
   .superRefine((contextValue, issueContext) => {

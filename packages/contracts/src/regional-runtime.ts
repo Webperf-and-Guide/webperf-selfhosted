@@ -35,6 +35,9 @@ export const regionalExecutionPayloadMaxBytes = 1_500_000;
 // verification. Exported so Cloud callers can use the same skew allowance.
 export const regionalRuntimeReplayWindowSeconds = 300;
 export const regionalExecutionSignatureSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const regionalExecutionIdempotencyKeySchema = z.string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+  .max(160);
 export const regionalRuntimeImageDigestSchema = z.string()
   .regex(/^sha256:[a-f0-9]{64}$/)
   .nullable()
@@ -89,7 +92,7 @@ export type RegionalExecutionTarget = z.infer<typeof regionalExecutionTargetSche
 
 export const regionalExecutionRequestSchema = z.strictObject({
   /** Idempotency key — the runtime deduplicates requests with the same key. */
-  idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).max(160),
+  idempotencyKey: regionalExecutionIdempotencyKeySchema,
   /** Runner type for this batch. */
   runnerType: regionalRuntimeRunnerTypeSchema,
   /** Bounded route batch (1–100 targets). */
@@ -156,7 +159,7 @@ export const regionalExecutionProvenanceSchema = z.object({
 export type RegionalExecutionProvenance = z.infer<typeof regionalExecutionProvenanceSchema>;
 
 export const regionalExecutionResultSchema = z.object({
-  idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).max(160),
+  idempotencyKey: regionalExecutionIdempotencyKeySchema,
   status: regionalExecutionStatusSchema,
   targets: z.array(regionalExecutionTargetResultSchema).max(regionalRuntimeMaxBatchSize),
   provenance: regionalExecutionProvenanceSchema,

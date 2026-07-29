@@ -1,13 +1,14 @@
 import { oc, populateContractRouterPaths, type as orpcType } from '@orpc/contract';
 import { z } from 'zod';
 import {
+  regionalExecutionIdempotencyKeySchema,
   regionalExecutionRequestSchema,
   regionalExecutionResultSchema,
   regionalRuntimeCapabilitiesSchema
 } from './regional-runtime';
 
 const regionalExecutionParamsSchema = z.object({
-  idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).max(160)
+  idempotencyKey: regionalExecutionIdempotencyKeySchema
 });
 
 export const REGIONAL_RUNTIME_OPENAPI_TAG_DEFINITIONS = [{

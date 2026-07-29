@@ -24,11 +24,7 @@ export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): 
     return null;
   }
 
-  const expectedTokens = isInternalPath(url.pathname)
-    ? [secrets.internalSecret, secrets.internalSecretNext]
-    : isRegionalExecutionPath(url.pathname)
-      ? [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext]
-      : [secrets.adminToken, secrets.adminTokenNext];
+  const expectedTokens = resolveExpectedTokens(url.pathname, secrets);
 
   if (matchesBearerToken(request.headers.get('authorization'), expectedTokens)) {
     return null;
@@ -46,6 +42,19 @@ export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): 
       }
     }
   );
+};
+
+const resolveExpectedTokens = (
+  pathname: string,
+  secrets: ApiAuthSecrets
+): Array<string | undefined> => {
+  if (isInternalPath(pathname)) {
+    return [secrets.internalSecret, secrets.internalSecretNext];
+  }
+  if (isRegionalExecutionPath(pathname)) {
+    return [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext];
+  }
+  return [secrets.adminToken, secrets.adminTokenNext];
 };
 
 // Scheduler dispatch predates the /internal namespace and remains a compatibility

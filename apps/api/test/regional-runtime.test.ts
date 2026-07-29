@@ -10,6 +10,7 @@ import {
 import { createExecutorApiClient } from '../../executor/src/client';
 import { createNetworkExecutionHandler } from '../../executor/src/network-handler';
 import { processExecutionJob, type ExecutorLogger } from '../../executor/src/runner';
+import { createSqliteJobRepository } from '../src/repository';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -174,6 +175,43 @@ describe('regional runtime handoff', () => {
       headers: internalHeaders,
       body: '{}'
     })).status).toBe(404);
+
+    const legacyRepository = createSqliteJobRepository({
+      databasePath: join(harness.directory, 'webperf.sqlite'),
+      encryptionSecret: internalSecret
+    });
+    const legacyQueuedAt = new Date('2026-07-29T00:00:00.000Z');
+    legacyRepository.enqueueExecutionJob({
+      id: 'exec_legacy_browser',
+      kind: 'browser_audit',
+      resourceId: 'audit_legacy_browser',
+      maxAttempts: 1,
+      payload: {
+        version: 'v1',
+        auditId: 'audit_legacy_browser'
+      }
+    }, legacyQueuedAt);
+    legacyRepository.claimExecutionJob({
+      leaseOwner: 'legacy-full-executor',
+      leaseDurationMs: 1_000
+    }, legacyQueuedAt);
+    legacyRepository.close();
+
+    const regionalOnlyClient = createExecutorApiClient({
+      baseUrl: harness.baseUrl,
+      internalSecret
+    });
+    expect(await regionalOnlyClient.claim({
+      leaseOwner: 'regional-runtime-scope-check',
+      leaseDurationMs: 60_000
+    })).toBeNull();
+    const legacyStatusRepository = createSqliteJobRepository({
+      databasePath: join(harness.directory, 'webperf.sqlite'),
+      encryptionSecret: internalSecret
+    });
+    expect(legacyStatusRepository.getExecutionJob('exec_legacy_browser')?.status)
+      .toBe('leased');
+    legacyStatusRepository.close();
 
     const unsigned = createUnsignedRequest('release_123:tokyo');
     expect((await fetch(`${harness.baseUrl}/v1/regional-executions`, {

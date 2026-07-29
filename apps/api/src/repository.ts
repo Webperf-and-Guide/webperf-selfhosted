@@ -181,7 +181,7 @@ export type JobRepository = {
   }, now?: Date): ExecutionJob[] | null;
   getExecutionJob(id: string): ExecutionJob | null;
   listExecutionJobs(): ExecutionJob[];
-  claimExecutionJob(input: ExecutionJobLeaseInput, now?: Date): ExecutionJob | null;
+  claimExecutionJob(input: ExecutionJobClaimInput, now?: Date): ExecutionJob | null;
   markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
   renewExecutionJobLease(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
   completeExecutionJob(input: ExecutionJobOwnerInput, now?: Date): ExecutionJob | null;
@@ -196,6 +196,10 @@ export type JobRepository = {
 export type ExecutionJobLeaseInput = {
   leaseOwner: string;
   leaseDurationMs: number;
+};
+
+export type ExecutionJobClaimInput = ExecutionJobLeaseInput & {
+  kind?: ExecutionJob['kind'];
 };
 
 export type ExecutionJobOwnerInput = {
@@ -536,6 +540,8 @@ export const createSqliteJobRepository = ({
     string,
     string,
     string,
+    string | null,
+    string | null,
     string,
     string,
     number
@@ -551,6 +557,7 @@ export const createSqliteJobRepository = ({
       SELECT id
       FROM execution_jobs
       WHERE attempt_count >= max_attempts
+        AND (? IS NULL OR kind = ?)
         AND (
           (status = 'queued' AND available_at <= ?)
           OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
@@ -560,7 +567,15 @@ export const createSqliteJobRepository = ({
       )
     RETURNING *
   `);
-  const claimExecutionJobStatement = db.query<ExecutionJobRow, [string, string, string, string, string]>(`
+  const claimExecutionJobStatement = db.query<ExecutionJobRow, [
+    string,
+    string,
+    string,
+    string | null,
+    string | null,
+    string,
+    string
+  ]>(`
     UPDATE execution_jobs
     SET status = 'leased',
         lease_owner = ?,
@@ -571,7 +586,8 @@ export const createSqliteJobRepository = ({
     WHERE id = (
       SELECT id
       FROM execution_jobs
-      WHERE attempt_count < max_attempts
+      WHERE (? IS NULL OR kind = ?)
+        AND attempt_count < max_attempts
         AND (
           (status = 'queued' AND available_at <= ?)
           OR (status IN ('leased', 'running') AND lease_expires_at <= ?)
@@ -1347,6 +1363,7 @@ export const createSqliteJobRepository = ({
     claimExecutionJob(input, now = new Date()) {
       const leaseExpiresAt = getLeaseExpiresAt(input, now);
       const nowIso = now.toISOString();
+      const executionKind = input.kind ?? null;
       const exhaustedError = storageCrypto.stringify({
         code: 'lease_attempts_exhausted',
         message: 'Execution stopped after the maximum number of lease attempts',
@@ -1358,6 +1375,8 @@ export const createSqliteJobRepository = ({
           exhaustedError,
           nowIso,
           nowIso,
+          executionKind,
+          executionKind,
           nowIso,
           nowIso,
           executionExhaustionFinalizationBatchSize
@@ -1374,6 +1393,8 @@ export const createSqliteJobRepository = ({
           input.leaseOwner,
           leaseExpiresAt,
           nowIso,
+          executionKind,
+          executionKind,
           nowIso,
           nowIso
         );

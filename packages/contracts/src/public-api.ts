@@ -68,7 +68,9 @@ export const requestHeaderSchema = z.object({
     .min(1)
     .max(120)
     .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/),
-  value: z.string().max(4_000)
+  value: z.string()
+    .max(4_000)
+    .regex(/^[\t\x20-\x7e]*$/)
 });
 export type RequestHeader = z.infer<typeof requestHeaderSchema>;
 

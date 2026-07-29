@@ -76,6 +76,34 @@ describe('regional runtime v1 contracts', () => {
     }
   });
 
+  test('rejects unsafe regional header values before queue admission', () => {
+    for (const value of ['ok\rbad', 'ok\nbad', 'ok\0bad', 'non-ascii-\u00e9']) {
+      expect(regionalExecutionRequestSchema.safeParse({
+        ...validRequest,
+        targets: [{
+          ...validRequest.targets[0],
+          request: {
+            method: 'GET',
+            headers: [{ name: 'x-test', value }],
+            body: null
+          }
+        }]
+      }).success).toBe(false);
+    }
+
+    expect(regionalExecutionRequestSchema.safeParse({
+      ...validRequest,
+      targets: [{
+        ...validRequest.targets[0],
+        request: {
+          method: 'GET',
+          headers: [{ name: 'x-test', value: 'visible\tvalue' }],
+          body: null
+        }
+      }]
+    }).success).toBe(true);
+  });
+
   test('rejects unknown regional target fields before queue admission', () => {
     expect(regionalExecutionRequestSchema.safeParse({
       ...validRequest,

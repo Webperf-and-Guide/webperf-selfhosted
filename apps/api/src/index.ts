@@ -2207,7 +2207,12 @@ async function handleClaimExecutionJob(request: Request) {
     return body.response;
   }
 
-  const executionJob = repository.claimExecutionJob(body.data);
+  const executionJob = repository.claimExecutionJob({
+    ...body.data,
+    kind: runtime.runtimeMode === 'regional-runtime'
+      ? 'network_probe'
+      : undefined
+  });
 
   if (!executionJob) {
     return new Response(null, {

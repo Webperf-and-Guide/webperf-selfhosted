@@ -30,8 +30,24 @@ export const regionalRuntimeProtocolVersion = 1 as const;
 export const regionalRuntimeMaxBatchSize = 100;
 export const regionalRuntimeMaxDeadlineMs = 900_000;
 export const regionalRuntimeMaxAttempts = 20;
+// Enforced by the regional execution POST handler before request HMAC
+// verification. Exported so Cloud callers can use the same skew allowance.
 export const regionalRuntimeReplayWindowSeconds = 300;
 export const regionalExecutionSignatureSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const regionalRuntimeImageDigestSchema = z.string()
+  .regex(/^sha256:[a-f0-9]{64}$/)
+  .nullable()
+  .default(null);
+export const regionalRuntimeMetadataSchema = z.object({
+  /** WebPerf runtime version (matches the immutable release metadata). */
+  version: z.string().min(1).nullable().default(null),
+  imageDigest: regionalRuntimeImageDigestSchema
+});
+export const regionalRunnerMetadataSchema = z.object({
+  id: z.literal('probe-rs'),
+  implementation: probeImplementationSchema,
+  imageDigest: regionalRuntimeImageDigestSchema
+});
 
 // ---------------------------------------------------------------------------
 // Capabilities discovery
@@ -53,16 +69,8 @@ export const regionalRuntimeCapabilitiesSchema = z.object({
   maxDeadlineMs: z.number().int().positive().max(regionalRuntimeMaxDeadlineMs),
   /** Maximum retry attempts per target. */
   maxAttempts: z.number().int().positive().max(regionalRuntimeMaxAttempts),
-  runtime: z.object({
-    /** WebPerf runtime version (matches the immutable release metadata). */
-    version: z.string().min(1).nullable().default(null),
-    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).nullable().default(null)
-  }),
-  runner: z.object({
-    id: z.literal('probe-rs'),
-    implementation: probeImplementationSchema,
-    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).nullable().default(null)
-  })
+  runtime: regionalRuntimeMetadataSchema,
+  runner: regionalRunnerMetadataSchema
 });
 export type RegionalRuntimeCapabilities = z.infer<typeof regionalRuntimeCapabilitiesSchema>;
 
@@ -141,15 +149,8 @@ export type RegionalExecutionTargetResult = z.infer<typeof regionalExecutionTarg
 export const regionalExecutionProvenanceSchema = z.object({
   regionId: runtimeRegionIdSchema,
   runnerType: regionalRuntimeRunnerTypeSchema,
-  runtime: z.object({
-    version: z.string().min(1).nullable().default(null),
-    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).nullable().default(null)
-  }),
-  runner: z.object({
-    id: z.literal('probe-rs'),
-    implementation: probeImplementationSchema,
-    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).nullable().default(null)
-  })
+  runtime: regionalRuntimeMetadataSchema,
+  runner: regionalRunnerMetadataSchema
 });
 export type RegionalExecutionProvenance = z.infer<typeof regionalExecutionProvenanceSchema>;
 

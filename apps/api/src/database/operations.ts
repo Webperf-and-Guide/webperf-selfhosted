@@ -62,6 +62,10 @@ export const defaultSqliteStorageCryptoVerificationLimit = 100_000;
 
 export class SqliteRetentionBatchLimitError extends Error {
   override name = 'SqliteRetentionBatchLimitError';
+
+  constructor(readonly phase: 'general' | 'regional-execution') {
+    super(`SQLite ${phase} retention exceeded its bounded batch limit`);
+  }
 }
 
 const deleteRowsInBatches = (deleteBatch: () => unknown) => {
@@ -75,9 +79,7 @@ const deleteRowsInBatches = (deleteBatch: () => unknown) => {
     }
   }
 
-  throw new SqliteRetentionBatchLimitError(
-    'SQLite retention cleanup exceeded its bounded batch limit'
-  );
+  throw new SqliteRetentionBatchLimitError('general');
 };
 
 const cleanupRegionalExecutionGroups = (
@@ -180,9 +182,7 @@ const cleanupRegionalExecutionGroups = (
       }
     }
 
-    throw new SqliteRetentionBatchLimitError(
-      'Regional execution retention exceeded its bounded batch limit'
-    );
+    throw new SqliteRetentionBatchLimitError('regional-execution');
   } finally {
     nextEligibleGroups.finalize();
     deleteJobs.finalize();

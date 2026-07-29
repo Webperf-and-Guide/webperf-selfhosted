@@ -240,17 +240,26 @@ export const repository = createSqliteJobRepository({
 });
 export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
+const warnRetentionBatchLimit = (
+  component: 'retention' | 'regional-retention',
+  event: 'startup_retention_batch_limit_reached' | 'regional_retention_prune_batch_limit_reached',
+  error: SqliteRetentionBatchLimitError
+) => {
+  console.warn(JSON.stringify({
+    service: 'webperf-api',
+    component,
+    event,
+    phase: error.phase
+  }));
+};
+
 try {
   repository.pruneRetainedData(runtime.retentionDays);
 } catch (error) {
   if (!(error instanceof SqliteRetentionBatchLimitError)) {
     throw error;
   }
-  console.warn(JSON.stringify({
-    service: 'webperf-api',
-    component: 'retention',
-    event: 'startup_retention_batch_limit_reached'
-  }));
+  warnRetentionBatchLimit('retention', 'startup_retention_batch_limit_reached', error);
 }
 await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorageKeys()));
 
@@ -1586,6 +1595,14 @@ if (runtime.runtimeMode === 'regional-runtime') {
     try {
       repository.pruneRetainedData(runtime.retentionDays);
     } catch (error) {
+      if (error instanceof SqliteRetentionBatchLimitError) {
+        warnRetentionBatchLimit(
+          'regional-retention',
+          'regional_retention_prune_batch_limit_reached',
+          error
+        );
+        return;
+      }
       console.error(JSON.stringify({
         service: 'webperf-api',
         component: 'regional-retention',

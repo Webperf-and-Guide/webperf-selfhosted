@@ -63,7 +63,7 @@ export const requestBodyModeSchema = z.enum(requestBodyModeValues);
 export type RequestBodyMode = z.infer<typeof requestBodyModeSchema>;
 
 export const requestHeaderSchema = z.object({
-  name: z.string().min(1).max(120),
+  name: z.string().trim().min(1).max(120),
   value: z.string().max(4_000)
 });
 export type RequestHeader = z.infer<typeof requestHeaderSchema>;

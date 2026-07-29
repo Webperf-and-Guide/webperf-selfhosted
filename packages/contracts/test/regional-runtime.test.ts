@@ -59,6 +59,20 @@ describe('regional runtime v1 contracts', () => {
     })).toThrow();
   });
 
+  test('rejects request headers without a normalized name before queue admission', () => {
+    expect(regionalExecutionRequestSchema.safeParse({
+      ...validRequest,
+      targets: [{
+        ...validRequest.targets[0],
+        request: {
+          method: 'GET',
+          headers: [{ name: '  ', value: 'ignored' }],
+          body: null
+        }
+      }]
+    }).success).toBe(false);
+  });
+
   test('reports distinct runtime and runner image provenance', () => {
     expect(regionalRuntimeCapabilitiesSchema.parse({
       protocolVersion: 1,

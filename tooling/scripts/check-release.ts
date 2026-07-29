@@ -380,12 +380,13 @@ try {
     readFileSync(join(root, 'infra/docker-compose/.env.example'), 'utf8')
   );
   const regionalEnvPath = join(root, 'infra/regional-runtime/.env.example');
-  if (!existsSync(regionalEnvPath)) {
+  const regionalEnvExists = existsSync(regionalEnvPath);
+  if (!regionalEnvExists) {
     violations.push(
       'infra/regional-runtime/.env.example: required release environment file is missing'
     );
   }
-  const regionalVersion = existsSync(regionalEnvPath)
+  const regionalVersion = regionalEnvExists
     ? composeEnvironmentVersion(readFileSync(regionalEnvPath, 'utf8'))
     : undefined;
   for (const [path, version] of [

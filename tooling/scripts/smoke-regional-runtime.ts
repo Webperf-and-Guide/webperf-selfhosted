@@ -121,16 +121,16 @@ async function requestStep(
 ) {
   try {
     return await fetch(url, init);
-  } catch {
-    throw new Error(`${step} request failed`);
+  } catch (cause) {
+    throw new Error(`${step} request failed`, { cause });
   }
 }
 
 async function parseJsonStep(step: string, response: Response) {
   try {
     return await response.json();
-  } catch {
-    throw new Error(`${step} returned invalid JSON`);
+  } catch (cause) {
+    throw new Error(`${step} returned invalid JSON`, { cause });
   }
 }
 

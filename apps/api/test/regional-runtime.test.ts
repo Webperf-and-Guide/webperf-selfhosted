@@ -42,12 +42,20 @@ afterEach(async () => {
 describe('regional runtime handoff', () => {
   test('accepts, deduplicates, executes, signs, and cancels Cloud work', async () => {
     const probeRequests: unknown[] = [];
+    const retryAttempts = new Map<string, number>();
     const probe = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
         const payload = await request.json() as { url: string; region: string };
         probeRequests.push(payload);
+        if (payload.url.includes('/retry-')) {
+          const attempt = (retryAttempts.get(payload.url) ?? 0) + 1;
+          retryAttempts.set(payload.url, attempt);
+          if (attempt === 1) {
+            return new Response('retry', { status: 503 });
+          }
+        }
         return Response.json({
           measurement: {
             region: payload.region,
@@ -176,6 +184,35 @@ describe('regional runtime handoff', () => {
       }]
     });
     await expectVerifiedResult(succeeded);
+
+    const independentRetries = {
+      ...createUnsignedRequest('independent_retries:tokyo'),
+      targets: ['a', 'b'].map((suffix) => ({
+        targetId: `retry-${suffix}`,
+        url: `https://example.com/retry-${suffix}`,
+        request: {
+          method: 'GET' as const,
+          headers: [],
+          body: null
+        }
+      }))
+    };
+    expect((await sendRegionalExecution(harness.baseUrl, independentRetries)).status).toBe(202);
+    await drainRegionalExecutions(harness.baseUrl, probe.port!);
+    await Bun.sleep(1_100);
+    await drainRegionalExecutions(harness.baseUrl, probe.port!);
+    const independentlyRetried = regionalExecutionResultSchema.parse(
+      await (await fetch(
+        `${harness.baseUrl}/v1/regional-executions/${
+          encodeURIComponent(independentRetries.idempotencyKey)
+        }`,
+        { headers: regionalAuthorization() }
+      )).json()
+    );
+    expect(independentlyRetried.status).toBe('succeeded');
+    expect(independentlyRetried.targets.every((target) => target.status === 'succeeded')).toBe(true);
+    expect([...retryAttempts.values()]).toEqual([2, 2]);
+
     const completedCancellation = regionalExecutionResultSchema.parse(
       await (await fetch(
         `${harness.baseUrl}/v1/regional-executions/${encodeURIComponent(unsigned.idempotencyKey)}`,

@@ -439,6 +439,15 @@ export const createSqliteJobRepository = ({
     WHERE kind = ?
       AND id = ?
   `);
+  const saveRegionalExecutionTargetStatement = db.query(`
+    INSERT INTO regional_execution_targets (
+      regional_execution_id,
+      execution_job_id,
+      job_id
+    ) VALUES (?, ?, ?)
+    ON CONFLICT (regional_execution_id, job_id) DO UPDATE SET
+      execution_job_id = excluded.execution_job_id
+  `);
   const saveCheckProfileRunStatement = db.query(`
     INSERT INTO check_profile_runs (id, profile_id, created_at, payload_json)
     VALUES (?, ?, ?, ?)
@@ -782,6 +791,18 @@ export const createSqliteJobRepository = ({
   const deleteEntity = (kind: EntityKind, id: string) => {
     const result = deleteEntityStatement.run(kind, id) as { changes?: number };
     return (result.changes ?? 0) > 0;
+  };
+
+  const persistRegionalExecutionTargetLinks = (
+    record: RegionalExecutionRecord
+  ) => {
+    for (const target of record.targetLinks) {
+      saveRegionalExecutionTargetStatement.run(
+        record.id,
+        target.executionJobId,
+        target.jobId
+      );
+    }
   };
 
   const persistJob = (job: LatencyJobDetail) => {
@@ -1167,6 +1188,7 @@ export const createSqliteJobRepository = ({
           if (!existing) {
             throw new Error('Persisted regional execution could not be decoded');
           }
+          persistRegionalExecutionTargetLinks(existing);
           return {
             record: existing,
             created: false
@@ -1182,6 +1204,7 @@ export const createSqliteJobRepository = ({
         }
 
         saveEntity('regional_execution', record);
+        persistRegionalExecutionTargetLinks(record);
         return {
           record,
           created: true

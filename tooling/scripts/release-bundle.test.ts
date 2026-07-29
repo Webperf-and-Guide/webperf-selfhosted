@@ -67,6 +67,10 @@ Keep report comparison output deterministic across equivalent inputs.
       join(root, 'infra/docker-compose/.env.example'),
       'utf8'
     )).toContain('WEBPERF_VERSION=0.2.1');
+    expect(readFileSync(
+      join(root, 'infra/regional-runtime/.env.example'),
+      'utf8'
+    )).toContain('WEBPERF_VERSION=0.2.1');
     const preparedChangelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
     expect(preparedChangelog).toContain(
       '## [0.2.1] — 2026-07-26\n\n### Changes\n\n'
@@ -94,6 +98,10 @@ Keep report comparison output deterministic across equivalent inputs.
     expect(readFileSync(join(root, 'CHANGELOG.md'), 'utf8')).toBe(preparedChangelog);
     expect(composeEnvironmentVersion(readFileSync(
       join(root, 'infra/docker-compose/.env.example'),
+      'utf8'
+    ))).toBe('0.2.1');
+    expect(composeEnvironmentVersion(readFileSync(
+      join(root, 'infra/regional-runtime/.env.example'),
       'utf8'
     ))).toBe('0.2.1');
     expect(prepareRepositoryRelease({ root, date: '2026-07-27' })).toEqual(
@@ -300,6 +308,20 @@ npm/@webperf/contracts: patch
     );
     expect(
       readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
+    ).toContain(
+      `WEBPERF_RUNTIME_IMAGE_DIGEST=${
+        runtimeMetadata.images.find(({ name }: { name: string }) => name === 'webperf').digest
+      }`
+    );
+    expect(
+      readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
+    ).toContain(
+      `WEBPERF_PROBE_IMAGE_DIGEST=${
+        runtimeMetadata.images.find(({ name }: { name: string }) => name === 'probe').digest
+      }`
+    );
+    expect(
+      readFileSync(join(output, 'regional-runtime.env.example'), 'utf8')
     ).not.toContain('WEBPERF_VERSION=');
     expect(JSON.parse(
       readFileSync(join(output, 'regional-runtime-profile.json'), 'utf8')
@@ -451,12 +473,18 @@ function writeRepositoryReleaseFixture({
   const root = makeTemporaryDirectory();
   const changesetsDirectory = join(root, '.sampo/changesets');
   const composeDirectory = join(root, 'infra/docker-compose');
+  const regionalDirectory = join(root, 'infra/regional-runtime');
   mkdirSync(changesetsDirectory, { recursive: true });
   mkdirSync(composeDirectory, { recursive: true });
+  mkdirSync(regionalDirectory, { recursive: true });
   writeFileSync(join(root, 'VERSION'), `${version}\n`);
   writeFileSync(
     join(composeDirectory, '.env.example'),
     `WEBPERF_VERSION=${version}\nUNCHANGED=value\n`
+  );
+  writeFileSync(
+    join(regionalDirectory, '.env.example'),
+    `WEBPERF_VERSION=${version}\nREGIONAL=value\n`
   );
   writeFileSync(
     join(root, 'CHANGELOG.md'),

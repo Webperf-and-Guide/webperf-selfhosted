@@ -104,9 +104,11 @@ same work with a fresh timestamp or rotated key:
 - same key + different target/deadline/attempt policy returns `409`;
 - concurrent duplicates are resolved atomically in SQLite.
 
-The API writes the regional record, target jobs, and durable execution queue in
-one transaction. Batches larger than the executor payload limit are split into
-ordered chunks while preserving the original target order.
+The API writes the regional record, target jobs, durable execution queue, and
+retention links in one transaction. Each target receives its own execution job
+and retry budget, while the signed aggregate preserves the original target
+order. Completed sibling results remain retained for as long as any target in
+the same regional request can still resume.
 
 ## Polling, deadline, and cancellation
 
@@ -126,7 +128,7 @@ the execution reaches a terminal state.
 The accepted deadline is persisted and also propagated to the executor. If it
 expires:
 
-- queued and leased execution chunks become terminal failures;
+- queued and leased target executions become terminal failures;
 - active probe work is aborted through the executor signal;
 - subsequent polling returns a signed failed result.
 

@@ -252,7 +252,11 @@ export const createRegionalExecutionRequestDigest = async (
     stableStringify({
       idempotencyKey: request.idempotencyKey,
       runnerType: request.runnerType,
-      targets: request.targets,
+      targets: request.targets.map((target) => ({
+        targetId: target.targetId,
+        url: target.url,
+        request: canonicalizeRequestConfig(target.request)
+      })),
       deadlineMs: request.deadlineMs,
       maxAttempts: request.maxAttempts
     })

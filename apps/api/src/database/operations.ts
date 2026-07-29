@@ -253,7 +253,31 @@ export const cleanupSqliteRetention = (
   let artifactIndexes = 0;
 
   if (tableExists(database, 'jobs')) {
-    const statement = database.query<never, [string, number]>(`
+    const statement = (
+      tableExists(database, 'regional_execution_targets')
+      && tableExists(database, 'execution_jobs')
+    )
+      ? database.query<never, [string, number]>(`
+      DELETE FROM jobs
+      WHERE rowid IN (
+        SELECT job.rowid
+        FROM jobs AS job
+        WHERE job.requested_at < ?
+          AND job.status IN ('succeeded', 'failed', 'partial')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM regional_execution_targets AS target_link
+            JOIN execution_jobs AS active_execution
+              ON active_execution.resource_id = target_link.regional_execution_id
+            WHERE target_link.job_id = job.id
+              -- Preserve every completed sibling result while any target in
+              -- the same regional request can still resume.
+              AND active_execution.status IN ('queued', 'leased', 'running')
+          )
+        LIMIT ?
+      )
+    `)
+      : database.query<never, [string, number]>(`
       DELETE FROM jobs
       WHERE rowid IN (
         SELECT rowid FROM jobs
@@ -284,7 +308,26 @@ export const cleanupSqliteRetention = (
   }
 
   if (tableExists(database, 'execution_jobs')) {
-    const statement = database.query<never, [string, number]>(`
+    const statement = tableExists(database, 'regional_execution_targets')
+      ? database.query<never, [string, number]>(`
+      DELETE FROM execution_jobs
+      WHERE rowid IN (
+        SELECT execution.rowid
+        FROM execution_jobs AS execution
+        WHERE execution.status IN ('succeeded', 'failed', 'cancelled')
+          AND execution.completed_at < ?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM regional_execution_targets AS target_link
+            JOIN execution_jobs AS active_execution
+              ON active_execution.resource_id = target_link.regional_execution_id
+            WHERE target_link.execution_job_id = execution.id
+              AND active_execution.status IN ('queued', 'leased', 'running')
+          )
+        LIMIT ?
+      )
+    `)
+      : database.query<never, [string, number]>(`
       DELETE FROM execution_jobs
       WHERE rowid IN (
         SELECT rowid FROM execution_jobs
@@ -393,6 +436,21 @@ export const cleanupSqliteRetention = (
     } finally {
       statement.finalize();
     }
+  }
+
+  if (
+    tableExists(database, 'regional_execution_targets')
+    && tableExists(database, 'saved_entities')
+  ) {
+    database.exec(`
+      DELETE FROM regional_execution_targets
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM saved_entities AS entity
+        WHERE entity.kind = 'regional_execution'
+          AND entity.id = regional_execution_targets.regional_execution_id
+      )
+    `);
   }
 
   return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };

@@ -89,7 +89,6 @@ import {
   executionResourceResultRequestSchema,
   defaultBrowserAuditArtifactContentTypes,
   browserAuditExecutionPayloadSchema,
-  networkProbeMaxJobsPerExecution,
   networkProbeExecutionPayloadSchema,
   regionalExecutionPayloadMaxBytes,
   regionalExecutionProvenanceSchema,
@@ -1771,27 +1770,23 @@ async function handleCreateRegionalExecution(request: Request) {
   const resources = [];
   const targetLinks: RegionalExecutionRecord['targetLinks'] = [];
 
-  for (let offset = 0; offset < jobs.length; offset += networkProbeMaxJobsPerExecution) {
-    const chunk = jobs.slice(offset, offset + networkProbeMaxJobsPerExecution);
-    const chunkIndex = Math.floor(offset / networkProbeMaxJobsPerExecution);
-    const executionJobId = `exec_reg_${requestDigest.slice(0, 24)}_${chunkIndex}`;
-    resources.push(buildNetworkExecutionResourceInput(chunk, null, null, {
+  for (const [index, job] of jobs.entries()) {
+    const executionJobId = `exec_${job.id}`;
+    resources.push(buildNetworkExecutionResourceInput([job], null, null, {
       resourceId: parsed.data.idempotencyKey,
       executionJobId,
       deadlineAt,
       regionalExecutionId: parsed.data.idempotencyKey
     }));
-    for (const [chunkOffset, job] of chunk.entries()) {
-      const requestTarget = parsed.data.targets[offset + chunkOffset];
-      if (!requestTarget) {
-        throw new Error('Regional execution target mapping is incomplete');
-      }
-      targetLinks.push({
-        targetId: requestTarget.targetId,
-        jobId: job.id,
-        executionJobId
-      });
+    const requestTarget = parsed.data.targets[index];
+    if (!requestTarget) {
+      throw new Error('Regional execution target mapping is incomplete');
     }
+    targetLinks.push({
+      targetId: requestTarget.targetId,
+      jobId: job.id,
+      executionJobId
+    });
   }
 
   const record: RegionalExecutionRecord = {

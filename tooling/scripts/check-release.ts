@@ -379,13 +379,21 @@ try {
   const composeVersion = composeEnvironmentVersion(
     readFileSync(join(root, 'infra/docker-compose/.env.example'), 'utf8')
   );
-  if (
-    composeVersion !== repositoryVersion
-    && !(recoverablePreparation && composeVersion === latestChangelogVersion)
-  ) {
-    violations.push(
-      `infra/docker-compose/.env.example: WEBPERF_VERSION ${composeVersion} does not match repository release state`
-    );
+  const regionalVersion = composeEnvironmentVersion(
+    readFileSync(join(root, 'infra/regional-runtime/.env.example'), 'utf8')
+  );
+  for (const [path, version] of [
+    ['infra/docker-compose/.env.example', composeVersion],
+    ['infra/regional-runtime/.env.example', regionalVersion]
+  ] as const) {
+    if (
+      version !== repositoryVersion
+      && !(recoverablePreparation && version === latestChangelogVersion)
+    ) {
+      violations.push(
+        `${path}: WEBPERF_VERSION ${version} does not match repository release state`
+      );
+    }
   }
 } catch (error) {
   violations.push(

@@ -113,6 +113,25 @@ describe('regional runtime signatures', () => {
 
     expect(await createRegionalExecutionRequestDigest(retried))
       .toBe(await createRegionalExecutionRequestDigest(unsignedRequest));
+    const explicitDefaultRequest = {
+      ...unsignedRequest,
+      targets: unsignedRequest.targets.map((target) => ({
+        targetId: target.targetId,
+        url: target.url,
+        request: {
+          method: 'GET' as const,
+          headers: [],
+          body: null
+        }
+      }))
+    };
+    expect(await createRegionalExecutionRequestDigest({
+      ...explicitDefaultRequest,
+      targets: explicitDefaultRequest.targets.map((target) => ({
+        targetId: target.targetId,
+        url: target.url
+      }))
+    })).toBe(await createRegionalExecutionRequestDigest(explicitDefaultRequest));
     expect(await createRegionalExecutionRequestDigest({
       ...unsignedRequest,
       deadlineMs: 120_000

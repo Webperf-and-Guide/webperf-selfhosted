@@ -340,6 +340,11 @@ describe('SQLite operations', () => {
       VALUES (?, 'https://example.com/', 'succeeded', ?, ?, 'payload')
     `);
     insertJob.run('job_old', '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z');
+    insertJob.run(
+      'job_regional_completed',
+      '2026-05-01T00:00:00.000Z',
+      '2026-05-01T00:00:00.000Z'
+    );
     insertJob.run('job_recent', '2026-07-20T00:00:00.000Z', '2026-07-20T00:00:00.000Z');
     database.query(`
       INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
@@ -370,6 +375,26 @@ describe('SQLite operations', () => {
         'exec_active', 'browser_audit', 'audit_active', 'queued', NULL, NULL,
         0, 3, '2026-05-01T00:00:00.000Z', 'payload', NULL,
         '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', NULL
+      )
+    `).run();
+    database.query(`
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      ) VALUES (
+        'exec_regional_completed', 'network_probe', 'regional_active',
+        'succeeded', NULL, NULL,
+        1, 3, '2026-05-01T00:00:00.000Z', 'payload', NULL,
+        '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z',
+        '2026-05-01T00:00:00.000Z'
+      )
+    `).run();
+    database.query(`
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (
+        'regional_active', 'exec_regional_completed', 'job_regional_completed'
       )
     `).run();
     database.query(`
@@ -419,7 +444,18 @@ describe('SQLite operations', () => {
       artifactIndexes: 1
     });
     expect(database.query<{ id: string }, []>('SELECT id FROM jobs ORDER BY id').all())
-      .toEqual([{ id: 'job_active' }, { id: 'job_recent' }]);
+      .toEqual([
+        { id: 'job_active' },
+        { id: 'job_recent' },
+        { id: 'job_regional_completed' }
+      ]);
+    expect(database.query<{ id: string }, []>(`
+      SELECT id FROM execution_jobs ORDER BY id
+    `).all()).toEqual([
+      { id: 'exec_active' },
+      { id: 'exec_regional_active' },
+      { id: 'exec_regional_completed' }
+    ]);
     expect(database.query<{ id: string }, []>('SELECT id FROM saved_entities ORDER BY id').all())
       .toEqual([
         { id: 'audit_active' },

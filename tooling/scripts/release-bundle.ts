@@ -179,6 +179,42 @@ export function prepareRepositoryRelease({
   const composeEnvironmentFile = join(root, 'infra/docker-compose/.env.example');
   const composeEnvironment = readFileSync(composeEnvironmentFile, 'utf8');
   const composeVersion = composeEnvironmentVersion(composeEnvironment);
+  const regionalEnvironmentFile = join(root, 'infra/regional-runtime/.env.example');
+  const regionalEnvironment = readFileSync(regionalEnvironmentFile, 'utf8');
+  const regionalVersion = composeEnvironmentVersion(regionalEnvironment);
+  const versionedEnvironments = [
+    {
+      label: 'Compose environment',
+      file: composeEnvironmentFile,
+      contents: composeEnvironment,
+      version: composeVersion
+    },
+    {
+      label: 'Regional runtime environment',
+      file: regionalEnvironmentFile,
+      contents: regionalEnvironment,
+      version: regionalVersion
+    }
+  ];
+  const updateVersionedEnvironments = (
+    targetVersion: string,
+    allowedVersions: readonly string[],
+    state: string
+  ) => {
+    for (const environment of versionedEnvironments) {
+      if (!allowedVersions.includes(environment.version)) {
+        throw new Error(
+          `${environment.label} version ${environment.version} does not match ${state}`
+        );
+      }
+      if (environment.version !== targetVersion) {
+        writeTextFileAtomically(
+          environment.file,
+          renderComposeEnvironmentVersion(environment.contents, targetVersion)
+        );
+      }
+    }
+  };
   const changelog = readFileSync(changelogFile, 'utf8');
   const firstReleaseHeading = changelog.search(/^## \[/m);
   if (firstReleaseHeading === -1) {
@@ -200,31 +236,21 @@ export function prepareRepositoryRelease({
       throw new Error('The latest CHANGELOG.md release marker has an invalid version transition');
     }
     if (currentVersion === preparedFromVersion) {
-      if (composeVersion !== preparedFromVersion && composeVersion !== preparedVersion) {
-        throw new Error(
-          `Compose environment version ${composeVersion} does not match the recoverable repository release`
-        );
-      }
-      if (composeVersion !== preparedVersion) {
-        writeTextFileAtomically(
-          composeEnvironmentFile,
-          renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
-        );
-      }
+      updateVersionedEnvironments(
+        preparedVersion,
+        [preparedFromVersion, preparedVersion],
+        'the recoverable repository release'
+      );
       writeTextFileAtomically(join(root, 'VERSION'), `${preparedVersion}\n`);
     } else if (currentVersion !== preparedVersion) {
       throw new Error(
         `The latest CHANGELOG.md release marker does not match VERSION ${currentVersion}`
       );
-    } else if (composeVersion !== preparedVersion) {
-      if (composeVersion !== preparedFromVersion) {
-        throw new Error(
-          `Compose environment version ${composeVersion} does not match the prepared repository release`
-        );
-      }
-      writeTextFileAtomically(
-        composeEnvironmentFile,
-        renderComposeEnvironmentVersion(composeEnvironment, preparedVersion)
+    } else {
+      updateVersionedEnvironments(
+        preparedVersion,
+        [preparedFromVersion, preparedVersion],
+        'the prepared repository release'
       );
     }
     return repositoryReleaseResult({
@@ -239,10 +265,12 @@ export function prepareRepositoryRelease({
       `The latest CHANGELOG.md entry ${latestChangelogVersion ?? '(unreadable)'} must match VERSION ${currentVersion}`
     );
   }
-  if (composeVersion !== currentVersion) {
-    throw new Error(
-      `Compose environment version ${composeVersion} must match VERSION ${currentVersion}`
-    );
+  for (const environment of versionedEnvironments) {
+    if (environment.version !== currentVersion) {
+      throw new Error(
+        `${environment.label} version ${environment.version} must match VERSION ${currentVersion}`
+      );
+    }
   }
   const nextVersion = bumpRepositoryReleaseVersion(currentVersion, packageBump);
   const nextHeading = new RegExp(`^## \\[${escapeRegExp(nextVersion)}\\](?:\\s|$)`, 'm');
@@ -269,12 +297,16 @@ export function prepareRepositoryRelease({
   const nextChangelog = `${introduction}\n\n${entry}\n\n${priorReleases}\n${releaseLink}\n`;
 
   // Each replacement is atomic. Writing the changelog first is intentional:
-  // its release marker lets a retry recognize and finish any cross-file
-  // partial state without incrementing the version twice.
+  // its release marker lets a retry recognize and finish any partial VERSION
+  // or deployment-template update without incrementing the version twice.
   writeTextFileAtomically(changelogFile, nextChangelog);
   writeTextFileAtomically(
     composeEnvironmentFile,
     renderComposeEnvironmentVersion(composeEnvironment, nextVersion)
+  );
+  writeTextFileAtomically(
+    regionalEnvironmentFile,
+    renderComposeEnvironmentVersion(regionalEnvironment, nextVersion)
   );
   writeTextFileAtomically(join(root, 'VERSION'), `${nextVersion}\n`);
 
@@ -563,9 +595,33 @@ export function renderReleaseBundle({
   const regionalRuntimeEnvExample = readReleaseEnvExample(
     join(repositoryRoot, 'infra/regional-runtime/.env.example')
   );
+  const runtimeImageDigest = metadata.find(({ name }) => name === 'webperf')?.digest;
+  const probeImageDigest = metadata.find(({ name }) => name === 'probe')?.digest;
+  if (!runtimeImageDigest || !probeImageDigest) {
+    throw new Error('Regional runtime release metadata is missing runtime or probe provenance');
+  }
+  const renderedRegionalRuntimeEnvExample = regionalRuntimeEnvExample
+    .replace(
+      /^WEBPERF_RUNTIME_IMAGE_DIGEST=.*$/m,
+      `WEBPERF_RUNTIME_IMAGE_DIGEST=${runtimeImageDigest}`
+    )
+    .replace(
+      /^WEBPERF_PROBE_IMAGE_DIGEST=.*$/m,
+      `WEBPERF_PROBE_IMAGE_DIGEST=${probeImageDigest}`
+    );
+  if (
+    !renderedRegionalRuntimeEnvExample.includes(
+      `WEBPERF_RUNTIME_IMAGE_DIGEST=${runtimeImageDigest}`
+    )
+    || !renderedRegionalRuntimeEnvExample.includes(
+      `WEBPERF_PROBE_IMAGE_DIGEST=${probeImageDigest}`
+    )
+  ) {
+    throw new Error('Regional runtime environment does not expose provenance digest fields');
+  }
   writeFileSync(
     join(outputDirectory, 'regional-runtime.env.example'),
-    regionalRuntimeEnvExample
+    renderedRegionalRuntimeEnvExample
   );
 
   const sbomDirectory = join(outputDirectory, 'sbom');

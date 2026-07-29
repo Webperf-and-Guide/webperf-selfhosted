@@ -317,7 +317,8 @@ describe('durable execution repository', () => {
             checkId: null,
             runId: null,
             regionalExecutionId: record.id,
-            deadlineAt
+            deadlineAt,
+            expectedProvenance: record.provenance
           }
         },
         result: {

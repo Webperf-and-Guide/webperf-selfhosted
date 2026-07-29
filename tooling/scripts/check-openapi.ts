@@ -67,47 +67,22 @@ if (!publicDoc.components?.securitySchemes.selfhostAdminToken) {
   throw new Error('public OpenAPI document is missing the self-host admin bearer scheme');
 }
 
-for (const [path, methods] of Object.entries(publicDoc.paths)) {
-  for (const operation of Object.values(methods)) {
-    const shouldBePublic = path === '/v1/capabilities';
-
-    if (shouldBePublic && operation.security) {
-      throw new Error(`public path ${path} must remain unauthenticated in OpenAPI`);
-    }
-
-    if (!shouldBePublic && !operation.security) {
-      throw new Error(`protected path ${path} must declare bearer authentication`);
-    }
-  }
-}
-
-for (const [path, methods] of Object.entries(controlDoc.paths)) {
-  for (const operation of Object.values(methods)) {
-    if (!operation.security) {
-      throw new Error(`compatibility path ${path} must declare bearer authentication`);
-    }
-  }
-}
+assertPathSecurity(
+  'public',
+  publicDoc.paths,
+  (path) => path === '/v1/capabilities'
+);
+assertPathSecurity('compatibility', controlDoc.paths, () => false);
 
 if (!regionalRuntimeDoc.components?.securitySchemes.regionalRuntimeToken) {
   throw new Error('regional runtime OpenAPI document is missing its bearer scheme');
 }
 
-for (const [path, methods] of Object.entries(regionalRuntimeDoc.paths)) {
-  for (const operation of Object.values(methods)) {
-    const shouldBePublic = path === '/v1/regional-capabilities';
-    if (shouldBePublic && operation.security) {
-      throw new Error(
-        `public regional runtime path ${path} must remain unauthenticated in OpenAPI`
-      );
-    }
-    if (!shouldBePublic && !operation.security) {
-      throw new Error(
-        `protected regional runtime path ${path} must declare bearer authentication`
-      );
-    }
-  }
-}
+assertPathSecurity(
+  'regional runtime',
+  regionalRuntimeDoc.paths,
+  (path) => path === '/v1/regional-capabilities'
+);
 
 console.log(
   JSON.stringify(
@@ -131,5 +106,23 @@ function assertPaths(
 
   if (missing.length > 0) {
     throw new Error(`${label} OpenAPI document is missing required paths: ${missing.join(', ')}`);
+  }
+}
+
+function assertPathSecurity(
+  label: string,
+  paths: Record<string, Record<string, { security?: unknown }>>,
+  isPublicPath: (path: string) => boolean
+) {
+  for (const [path, methods] of Object.entries(paths)) {
+    for (const operation of Object.values(methods)) {
+      const shouldBePublic = isPublicPath(path);
+      if (shouldBePublic && operation.security) {
+        throw new Error(`public ${label} path ${path} must remain unauthenticated in OpenAPI`);
+      }
+      if (!shouldBePublic && !operation.security) {
+        throw new Error(`protected ${label} path ${path} must declare bearer authentication`);
+      }
+    }
   }
 }

@@ -373,9 +373,15 @@ export function renderReleasePullRequest({
   const packageChanges = [...previousPackages]
     .flatMap(([name, previousVersion]) => {
       const nextVersion = currentPackages.get(name);
-      return nextVersion !== undefined && nextVersion !== previousVersion
-        ? [{ name, previousVersion, nextVersion }]
-        : [];
+      if (nextVersion === undefined || nextVersion === previousVersion) {
+        return [];
+      }
+      if (compareSemanticVersions(previousVersion, nextVersion) >= 0) {
+        throw new Error(
+          `Public package ${name} was downgraded from ${previousVersion} to ${nextVersion}`
+        );
+      }
+      return [{ name, previousVersion, nextVersion }];
     });
   if (packageChanges.length === 0) {
     throw new Error('Sampo did not change any public package versions');
@@ -841,6 +847,79 @@ function parseReleaseVersion(version: string): ParsedReleaseVersion {
   };
 }
 
+function compareSemanticVersions(left: string, right: string) {
+  const parse = (version: string) => {
+    const buildSeparator = version.indexOf('+');
+    const withoutBuild = buildSeparator === -1 ? version : version.slice(0, buildSeparator);
+    const build = buildSeparator === -1 ? [] : version.slice(buildSeparator + 1).split('.');
+    const prereleaseSeparator = withoutBuild.indexOf('-');
+    const core = prereleaseSeparator === -1
+      ? withoutBuild
+      : withoutBuild.slice(0, prereleaseSeparator);
+    const prerelease = prereleaseSeparator === -1
+      ? []
+      : withoutBuild.slice(prereleaseSeparator + 1).split('.');
+    const coreParts = core.split('.');
+    if (
+      coreParts.length !== 3
+      || coreParts.some((part) => !/^(?:0|[1-9]\d*)$/.test(part))
+      || prerelease.some(
+        (part) =>
+          !/^[0-9A-Za-z-]+$/.test(part)
+          || (/^\d+$/.test(part) && !/^(?:0|[1-9]\d*)$/.test(part))
+      )
+      || build.some((part) => !/^[0-9A-Za-z-]+$/.test(part))
+    ) {
+      throw new Error(`Public package version is not valid SemVer: ${version}`);
+    }
+    const numericCore = coreParts.map(Number);
+    if (!numericCore.every(Number.isSafeInteger)) {
+      throw new Error(`Public package version components must be safe integers: ${version}`);
+    }
+    return {
+      core: numericCore,
+      prerelease
+    };
+  };
+
+  const leftVersion = parse(left);
+  const rightVersion = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = leftVersion.core[index] - rightVersion.core[index];
+    if (difference !== 0) {
+      return Math.sign(difference);
+    }
+  }
+  if (leftVersion.prerelease.length === 0 || rightVersion.prerelease.length === 0) {
+    return leftVersion.prerelease.length === rightVersion.prerelease.length
+      ? 0
+      : leftVersion.prerelease.length === 0 ? 1 : -1;
+  }
+  const length = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftIdentifier = leftVersion.prerelease[index];
+    const rightIdentifier = rightVersion.prerelease[index];
+    if (leftIdentifier === undefined || rightIdentifier === undefined) {
+      return leftIdentifier === rightIdentifier ? 0 : leftIdentifier === undefined ? -1 : 1;
+    }
+    if (leftIdentifier === rightIdentifier) {
+      continue;
+    }
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      return leftIdentifier.length === rightIdentifier.length
+        ? leftIdentifier < rightIdentifier ? -1 : 1
+        : leftIdentifier.length < rightIdentifier.length ? -1 : 1;
+    }
+    if (leftNumeric !== rightNumeric) {
+      return leftNumeric ? -1 : 1;
+    }
+    return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
+  return 0;
+}
+
 function readPendingChangesets(root: string): PendingChangeset[] {
   const changesetsDirectory = join(root, '.sampo/changesets');
   if (!existsSync(changesetsDirectory) || !lstatSync(changesetsDirectory).isDirectory()) {
@@ -994,6 +1073,8 @@ function validateReleasePullRequestPreparation(
       || typeof changeset.description !== 'string'
       || changeset.description.trim() !== changeset.description
       || changeset.description.length === 0
+      || /^#{1,6}\s/.test(changeset.description)
+      || /<!-- webperf-release:/.test(changeset.description)
       || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(changeset.description)
     ) {
       throw new Error('Release pull request preparation has an invalid changeset');

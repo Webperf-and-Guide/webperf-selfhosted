@@ -83,18 +83,22 @@ for (const name of serviceNames) {
   assert(!service.build, `${name} production service must not contain a source build`);
   assert(Boolean(developmentService.build), `${name} development service must build from source`);
   assert(developmentService.image?.endsWith(':dev'), `${name} development image must use :dev`);
-  assert(service.read_only === true, `${name} must use a read-only root filesystem`);
-  const user = service.user?.split(':', 1)[0]?.toLowerCase();
-  assert(
-    user !== undefined && user !== '' && user !== '0' && user !== 'root',
-    `${name} must run as non-root`
-  );
-  assert(service.cap_drop?.includes('ALL'), `${name} must drop all Linux capabilities`);
-  assert((service.cap_add?.length ?? 0) === 0, `${name} must not add Linux capabilities`);
-  assert(
-    service.security_opt?.includes('no-new-privileges:true'),
-    `${name} must prevent privilege escalation`
-  );
+  assertServiceSecurity(service, name);
+  assertServiceSecurity(developmentService, `${name} development service`);
+  for (const sensitiveVariable of [
+    'SELFHOST_ADMIN_TOKEN',
+    'BROWSER_AUDIT_SHARED_SECRET',
+    'SELFHOST_BROWSER_AUDIT_BASE_URL'
+  ]) {
+    assert(
+      service.environment?.[sensitiveVariable] === undefined,
+      `${name} must not carry ${sensitiveVariable}`
+    );
+    assert(
+      developmentService.environment?.[sensitiveVariable] === undefined,
+      `${name} development service must not carry ${sensitiveVariable}`
+    );
+  }
 }
 
 const regionalApi = production.services['regional-api'];
@@ -110,21 +114,23 @@ assert(
   'regional API must disable scheduling'
 );
 assert(
-  regionalApi.environment?.SELFHOST_ADMIN_TOKEN === undefined,
-  'regional API must not carry the self-host administrator token'
-);
-assert(
-  executor.environment?.BROWSER_AUDIT_SHARED_SECRET === undefined
-    && executor.environment?.SELFHOST_BROWSER_AUDIT_BASE_URL === undefined,
-  'regional executor must not carry Browser Audit configuration'
-);
-assert(
   regionalApi.volumes?.some((volume) => volume.target === '/data'),
   'regional API must retain the durable /data volume'
 );
 assertLoopbackPort(regionalApi, 8788, 'regional API');
 assert((executor.ports?.length ?? 0) === 0, 'executor must not publish ports');
 assert((probe.ports?.length ?? 0) === 0, 'probe must not publish ports');
+assert((executor.expose?.length ?? 0) === 0, 'executor must not expose ports');
+assertStringArrayEqual(
+  (regionalApi.expose ?? []).map(String),
+  ['8788'],
+  'regional API exposed process port'
+);
+assertStringArrayEqual(
+  (probe.expose ?? []).map(String),
+  ['8080'],
+  'probe exposed process port'
+);
 
 let profile: MultiContainerProfile;
 try {
@@ -252,6 +258,21 @@ function assertStringArrayEqual(actual: string[], expected: string[], label: str
   assert(
     JSON.stringify(actual) === JSON.stringify(expected),
     `${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+  );
+}
+
+function assertServiceSecurity(service: ComposeService, label: string) {
+  assert(service.read_only === true, `${label} must use a read-only root filesystem`);
+  const user = service.user?.split(':', 1)[0]?.toLowerCase();
+  assert(
+    user !== undefined && user !== '' && user !== '0' && user !== 'root',
+    `${label} must run as non-root`
+  );
+  assert(service.cap_drop?.includes('ALL'), `${label} must drop all Linux capabilities`);
+  assert((service.cap_add?.length ?? 0) === 0, `${label} must not add Linux capabilities`);
+  assert(
+    service.security_opt?.includes('no-new-privileges:true'),
+    `${label} must prevent privilege escalation`
   );
 }
 

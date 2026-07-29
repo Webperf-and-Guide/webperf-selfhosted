@@ -103,6 +103,8 @@ cleanup() {
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 generate_smoke_secret() {
   local value

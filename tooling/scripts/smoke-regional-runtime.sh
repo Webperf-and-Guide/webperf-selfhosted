@@ -60,6 +60,8 @@ cleanup() {
   rm -f "$temp_env" "${temp_env}.next"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cp "$env_template" "$temp_env"
 internal_secret="$(openssl rand -hex 32)"

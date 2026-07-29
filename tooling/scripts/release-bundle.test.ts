@@ -213,6 +213,39 @@ Expose regional runtime mode through self-host configuration.
     expect(pullRequest.body).toContain(
       'the protected release workflow will prepare `v0.3.0`'
     );
+
+    const prereleasePreparation = {
+      ...preparation,
+      packageVersions: preparation.packageVersions.map((entry) =>
+        entry.name === '@webperf/contracts'
+          ? { ...entry, version: '0.3.0-beta.2' }
+          : entry
+      )
+    };
+    writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.3.0-beta.10');
+    expect(
+      renderReleasePullRequest({ root, preparation: prereleasePreparation }).packageChanges
+    ).toContainEqual({
+      name: '@webperf/contracts',
+      previousVersion: '0.3.0-beta.2',
+      nextVersion: '0.3.0-beta.10'
+    });
+
+    expect(() => renderReleasePullRequest({
+      root,
+      preparation: {
+        ...preparation,
+        changesets: preparation.changesets.map((changeset, index) =>
+          index === 0
+            ? { ...changeset, description: '# Injected release heading' }
+            : changeset
+        )
+      }
+    })).toThrow('Release pull request preparation has an invalid changeset');
+
+    writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.1.9');
+    expect(() => renderReleasePullRequest({ root, preparation }))
+      .toThrow('Public package @webperf/contracts was downgraded from 0.2.0 to 0.1.9');
   });
 
   test('rejects malformed or empty repository release preparation', () => {

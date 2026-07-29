@@ -4,6 +4,7 @@ import { probeImplementationSchema } from './probe-model';
 import {
   requestBodyModeSchema,
   requestHeaderSchema,
+  requestHeaderValueSchema,
   requestMethodSchema
 } from './public-api';
 
@@ -88,7 +89,7 @@ export type RegionalRuntimeCapabilities = z.infer<typeof regionalRuntimeCapabili
 
 export const regionalExecutionRequestBodySchema = z.strictObject({
   mode: requestBodyModeSchema,
-  contentType: z.string().min(1).max(120).nullable(),
+  contentType: requestHeaderValueSchema.min(1).max(120).nullable(),
   value: z.string().max(10_000)
 });
 export const regionalExecutionRequestConfigSchema = z.strictObject({

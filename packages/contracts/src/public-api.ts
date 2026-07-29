@@ -62,21 +62,23 @@ export const requestBodyModeValues = ['text'] as const;
 export const requestBodyModeSchema = z.enum(requestBodyModeValues);
 export type RequestBodyMode = z.infer<typeof requestBodyModeSchema>;
 
+export const requestHeaderValueSchema = z.string()
+  .max(4_000)
+  .regex(/^[\t\x20-\x7e]*$/);
+
 export const requestHeaderSchema = z.object({
   name: z.string()
     .trim()
     .min(1)
     .max(120)
     .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/),
-  value: z.string()
-    .max(4_000)
-    .regex(/^[\t\x20-\x7e]*$/)
+  value: requestHeaderValueSchema
 });
 export type RequestHeader = z.infer<typeof requestHeaderSchema>;
 
 export const requestBodySchema = z.object({
   mode: requestBodyModeSchema.default('text'),
-  contentType: z.string().min(1).max(120).nullable().default(null),
+  contentType: requestHeaderValueSchema.min(1).max(120).nullable().default(null),
   value: z.string().max(10_000)
 });
 export type RequestBody = z.infer<typeof requestBodySchema>;

@@ -104,6 +104,26 @@ describe('regional runtime v1 contracts', () => {
     }).success).toBe(true);
   });
 
+  test('rejects unsafe regional body content types before queue admission', () => {
+    for (const contentType of ['text/plain\rx-bad: yes', 'text/plain\nbad', 'text/plain\0']) {
+      expect(regionalExecutionRequestSchema.safeParse({
+        ...validRequest,
+        targets: [{
+          ...validRequest.targets[0],
+          request: {
+            method: 'POST',
+            headers: [],
+            body: {
+              mode: 'text',
+              contentType,
+              value: 'body'
+            }
+          }
+        }]
+      }).success).toBe(false);
+    }
+  });
+
   test('rejects unknown regional target fields before queue admission', () => {
     expect(regionalExecutionRequestSchema.safeParse({
       ...validRequest,

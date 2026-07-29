@@ -56,14 +56,15 @@ describe('regional runtime handoff', () => {
             return new Response('retry', { status: 503 });
           }
         }
+        const measurementFailed = payload.url.includes('/measurement-failure');
         return Response.json({
           measurement: {
             region: payload.region,
             url: payload.url,
             latencyMs: 87,
             measuredAt: new Date().toISOString(),
-            statusCode: 200,
-            success: true,
+            statusCode: measurementFailed ? null : 200,
+            success: !measurementFailed,
             probeImpl: 'rust',
             finalUrl: payload.url,
             redirectCount: 0,
@@ -75,7 +76,7 @@ describe('regional runtime handoff', () => {
               ttfbMs: 52
             },
             tls: null,
-            error: null
+            error: measurementFailed ? 'fixture measurement failed' : null
           }
         });
       }
@@ -276,6 +277,35 @@ describe('regional runtime handoff', () => {
     expect(independentlyRetried.status).toBe('succeeded');
     expect(independentlyRetried.targets.every((target) => target.status === 'succeeded')).toBe(true);
     expect([...retryAttempts.values()]).toEqual([2, 2]);
+
+    const failedMeasurement = {
+      ...createUnsignedRequest('failed_measurement:tokyo'),
+      targets: [{
+        targetId: 'measurement-failure',
+        url: 'https://example.com/measurement-failure',
+        request: {
+          method: 'GET' as const,
+          headers: [],
+          body: null
+        }
+      }]
+    };
+    expect((await sendRegionalExecution(harness.baseUrl, failedMeasurement)).status).toBe(202);
+    await drainRegionalExecutions(harness.baseUrl, probe.port!);
+    const failedMeasurementResult = regionalExecutionResultSchema.parse(
+      await (await fetch(
+        `${harness.baseUrl}/v1/regional-executions/${
+          encodeURIComponent(failedMeasurement.idempotencyKey)
+        }`,
+        { headers: regionalAuthorization() }
+      )).json()
+    );
+    expect(failedMeasurementResult.status).toBe('failed');
+    expect(failedMeasurementResult.targets[0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'probe_measurement_failed',
+      errorMessage: 'Network probe measurement failed'
+    });
 
     const completedCancellation = regionalExecutionResultSchema.parse(
       await (await fetch(

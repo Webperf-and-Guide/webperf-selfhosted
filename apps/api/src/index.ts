@@ -2091,7 +2091,11 @@ const resolveRegionalExecutionError = ({
       errorMessage: 'Regional execution exceeded its accepted deadline'
     };
   }
-  if (executionJobStatus === 'succeeded' && targetStatus !== 'succeeded') {
+  if (
+    executionJobStatus === 'succeeded'
+    && targetStatus !== 'succeeded'
+    && targetStatus !== 'failed'
+  ) {
     return {
       errorCode: 'regional_result_missing',
       errorMessage: 'Regional execution completed without a persisted measurement result'

@@ -20,7 +20,9 @@ probe communicate through `127.0.0.1` on distinct ports.
 
 ## Runtime invariants
 
-- One deployment has one fixed `SELFHOST_REGION_ID`.
+- One deployment has one fixed `SELFHOST_REGION_ID`; the managed profile maps
+  that same input to the probe's `REGION_ID` so API provenance and physical
+  measurement origin cannot be configured independently.
 - Version 1 executes network probes only.
 - The public ingress exposes only regional API port `8788`.
 - Executor and probe ports remain private.

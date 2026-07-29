@@ -214,6 +214,54 @@ describe('network execution handler', () => {
     expect(JSON.stringify(savedResults)).not.toContain('raw-sensitive-probe-error');
   });
 
+  test('rejects a probe response attributed to a different region', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const handler = createNetworkExecutionHandler({
+      client: createClient({ savedResults }),
+      leaseOwner: 'executor-network',
+      probeSharedSecret: 'network-handler-probe-secret',
+      probeBaseUrl: 'http://probe.test:8080',
+      allowInsecureProbeHttp: true,
+      requestImpl: async () => Response.json({
+        measurement: {
+          region: 'frankfurt',
+          url: 'https://example.com/',
+          latencyMs: 123,
+          measuredAt: '2026-07-22T00:00:05.000Z',
+          statusCode: 200,
+          success: true,
+          probeImpl: 'rust',
+          finalUrl: 'https://example.com/',
+          redirectCount: 0,
+          timings: {
+            totalMs: 123,
+            dnsMs: 12,
+            tcpMs: null,
+            tlsMs: null,
+            ttfbMs: 80
+          },
+          tls: null,
+          error: null
+        }
+      })
+    });
+
+    await handler(executionJob, new AbortController().signal);
+
+    const result = savedResults.at(-1)?.result;
+    if (result?.kind !== 'network_probe') {
+      throw new Error('Expected a network result');
+    }
+    expect(result.jobs[0]?.targets[0]).toMatchObject({
+      region: 'local',
+      status: 'failed',
+      errorClass: 'terminal',
+      errorCode: 'probe_region_mismatch',
+      errorMessage: 'Network probe returned a result from an unexpected region',
+      measurement: null
+    });
+  });
+
   test('fails terminally before probing after a regional handoff deadline', async () => {
     const savedResults: ExecutionResourceResultRequest[] = [];
     const context = networkContext();

@@ -58,10 +58,11 @@
       "role": "probe",
       "ports": [8080],
       "environment": {
-        "PROBE_LISTEN_ADDR": "0.0.0.0:8080"
+        "PROBE_LISTEN_ADDR": "0.0.0.0:8080",
+        "REGION_ID": "${SELFHOST_REGION_ID}"
       },
       "requiredDeploymentInputs": [
-        "REGION_ID",
+        "SELFHOST_REGION_ID",
         "PROBE_SHARED_SECRET"
       ]
     }

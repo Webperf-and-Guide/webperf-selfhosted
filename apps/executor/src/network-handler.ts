@@ -290,6 +290,16 @@ const processNetworkJob = async ({
         continue;
       }
 
+      if (parsed.data.measurement.region !== target.region) {
+        markTargetFailed(
+          target,
+          'probe_region_mismatch',
+          'Network probe returned a result from an unexpected region'
+        );
+        await recomputeAndPersistJob(job, persist);
+        continue;
+      }
+
       applyMeasurement(target, parsed.data);
       await recomputeAndPersistJob(job, persist);
     } catch (error) {

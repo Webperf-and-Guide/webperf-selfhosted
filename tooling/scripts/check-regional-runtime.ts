@@ -177,6 +177,21 @@ for (const container of profileContainers) {
     `${container.name ?? 'unknown'} must declare deployment inputs`
   );
 }
+const profileApi = profileContainers.find(({ name }) => name === 'regional-api');
+const profileProbe = profileContainers.find(({ name }) => name === 'probe');
+assert(
+  profileApi?.requiredDeploymentInputs?.includes('SELFHOST_REGION_ID'),
+  'managed profile API must require the deployment region input'
+);
+assert(
+  profileProbe?.environment?.REGION_ID === '${SELFHOST_REGION_ID}',
+  'managed profile probe REGION_ID must derive from SELFHOST_REGION_ID'
+);
+assert(
+  profileProbe.requiredDeploymentInputs?.includes('SELFHOST_REGION_ID')
+    && !profileProbe.requiredDeploymentInputs.includes('REGION_ID'),
+  'managed profile must expose one region deployment input for API and probe'
+);
 
 console.log(JSON.stringify({
   ok: true,

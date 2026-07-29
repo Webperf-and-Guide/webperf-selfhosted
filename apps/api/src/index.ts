@@ -1460,13 +1460,30 @@ const isRegionalRuntimeSurface = (pathname: string) =>
   || pathname === '/openapi/regional-runtime.json'
   || regionalExecutionPathPattern.test(pathname);
 
+const isRegionalInternalExecutionSurface = (pathname: string, method: string) => {
+  if (method !== 'POST') {
+    return false;
+  }
+
+  if (pathname === '/internal/execution-jobs/claim') {
+    return true;
+  }
+
+  if (executionJobMutationPathPattern.test(pathname)) {
+    return true;
+  }
+
+  const resourceMatch = pathname.match(executionJobResourcePathPattern);
+  return resourceMatch?.[2] === 'context' || resourceMatch?.[2] === 'result';
+};
+
 const isRuntimeSurfaceAllowed = (pathname: string, method: string) => {
   if (runtime.runtimeMode === 'full') {
     return !isRegionalRuntimeSurface(pathname);
   }
 
   if (pathname.startsWith('/internal/')) {
-    return true;
+    return isRegionalInternalExecutionSurface(pathname, method);
   }
 
   if (

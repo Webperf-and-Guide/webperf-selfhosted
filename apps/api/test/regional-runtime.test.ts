@@ -129,6 +129,31 @@ describe('regional runtime handoff', () => {
     expect((await fetch(`${harness.baseUrl}/rpc/app`, {
       headers: { authorization: `Bearer ${adminToken}` }
     })).status).toBe(404);
+    const internalHeaders = {
+      authorization: `Bearer ${internalSecret}`,
+      'content-type': 'application/json'
+    };
+    expect((await fetch(
+      `${harness.baseUrl}/internal/execution-jobs/not-a-network-job/artifact-upload-grant`,
+      {
+        method: 'POST',
+        headers: internalHeaders,
+        body: '{}'
+      }
+    )).status).toBe(404);
+    expect((await fetch(
+      `${harness.baseUrl}/internal/browser-audits/not-a-network-job/artifacts`,
+      {
+        method: 'POST',
+        headers: internalHeaders,
+        body: '{}'
+      }
+    )).status).toBe(404);
+    expect((await fetch(`${harness.baseUrl}/internal/future-managed-surface`, {
+      method: 'POST',
+      headers: internalHeaders,
+      body: '{}'
+    })).status).toBe(404);
 
     const unsigned = createUnsignedRequest('release_123:tokyo');
     expect((await fetch(`${harness.baseUrl}/v1/regional-executions`, {

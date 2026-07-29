@@ -83,5 +83,15 @@ describe('regional execution record', () => {
       ...record,
       cancelledAt: '2026-07-29T00:00:00.100Z'
     }).success).toBe(true);
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      deadlineExceededAt: '2026-07-29T00:00:30.000Z',
+      updatedAt: '2026-07-29T00:01:00.100Z'
+    }).success).toBe(false);
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      deadlineExceededAt: record.deadlineAt,
+      updatedAt: record.deadlineAt
+    }).success).toBe(true);
   });
 });

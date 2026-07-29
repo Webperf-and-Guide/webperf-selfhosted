@@ -440,7 +440,8 @@ describe('SQLite operations', () => {
       jobs: 2,
       checkRuns: 1,
       executionJobs: 2,
-      derivedResources: 3,
+      derivedResources: 1,
+      regionalExecutions: 2,
       regionalTargetLinks: 1,
       artifactIndexes: 1
     });
@@ -545,6 +546,7 @@ describe('SQLite operations', () => {
       checkRuns: 0,
       executionJobs: 0,
       derivedResources: 0,
+      regionalExecutions: 0,
       regionalTargetLinks: 0,
       artifactIndexes: 0
     });
@@ -575,7 +577,8 @@ describe('SQLite operations', () => {
       jobs: 1,
       checkRuns: 0,
       executionJobs: 1,
-      derivedResources: 1,
+      derivedResources: 0,
+      regionalExecutions: 1,
       regionalTargetLinks: 1,
       artifactIndexes: 0
     });
@@ -649,7 +652,8 @@ describe('SQLite operations', () => {
       jobs: 1,
       checkRuns: 0,
       executionJobs: 1,
-      derivedResources: 1,
+      derivedResources: 0,
+      regionalExecutions: 1,
       regionalTargetLinks: 1,
       artifactIndexes: 0
     });
@@ -701,12 +705,55 @@ describe('SQLite operations', () => {
       jobs: 1,
       checkRuns: 0,
       executionJobs: 1,
-      derivedResources: 1,
+      derivedResources: 0,
+      regionalExecutions: 1,
       regionalTargetLinks: 1,
       artifactIndexes: 0
     });
     expect(database.query<{ count: number }, []>(`
       SELECT COUNT(*) AS count FROM jobs
+    `).get()?.count).toBe(0);
+    database.close();
+  });
+
+  test('removes regional target links whose execution row is missing', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    database.exec(`
+      INSERT INTO saved_entities (
+        kind, id, created_at, updated_at, payload_json
+      ) VALUES (
+        'regional_execution', 'regional_missing_execution',
+        '2026-07-22T00:00:00.000Z', '2026-07-22T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO jobs (
+        id, url, status, requested_at, updated_at, payload_json
+      ) VALUES (
+        'job_missing_execution', 'https://example.com/', 'queued',
+        '2026-07-22T00:00:00.000Z', '2026-07-22T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (
+        'regional_missing_execution', 'exec_missing', 'job_missing_execution'
+      );
+    `);
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 0,
+      checkRuns: 0,
+      executionJobs: 0,
+      derivedResources: 0,
+      regionalExecutions: 0,
+      regionalTargetLinks: 1,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM regional_execution_targets
     `).get()?.count).toBe(0);
     database.close();
   });
@@ -772,7 +819,8 @@ describe('SQLite operations', () => {
       jobs: 501,
       checkRuns: 0,
       executionJobs: 501,
-      derivedResources: 501,
+      derivedResources: 0,
+      regionalExecutions: 501,
       regionalTargetLinks: 501,
       artifactIndexes: 0
     });
@@ -808,6 +856,7 @@ describe('SQLite operations', () => {
       checkRuns: 0,
       executionJobs: 0,
       derivedResources: 1,
+      regionalExecutions: 0,
       regionalTargetLinks: 0,
       artifactIndexes: 0
     });

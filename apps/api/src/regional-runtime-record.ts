@@ -52,6 +52,22 @@ export const regionalExecutionRecordSchema = z.object({
   const deadlineAtMs = Date.parse(record.deadlineAt);
   const createdAtMs = Date.parse(record.createdAt);
   const updatedAtMs = Date.parse(record.updatedAt);
+  const parsedRecordTimes = {
+    acceptedAt: acceptedAtMs,
+    deadlineAt: deadlineAtMs,
+    createdAt: createdAtMs,
+    updatedAt: updatedAtMs
+  };
+  const invalidRecordTime = Object.entries(parsedRecordTimes)
+    .find(([, timestamp]) => !Number.isFinite(timestamp));
+  if (invalidRecordTime) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Regional execution record contains an unparseable timestamp',
+      path: [invalidRecordTime[0]]
+    });
+    return;
+  }
   if (deadlineAtMs <= acceptedAtMs) {
     context.addIssue({
       code: 'custom',
@@ -68,11 +84,13 @@ export const regionalExecutionRecordSchema = z.object({
   }
   for (const terminalField of ['cancelledAt', 'deadlineExceededAt'] as const) {
     const terminalAt = record[terminalField];
+    const terminalAtMs = terminalAt === null ? null : Date.parse(terminalAt);
     if (
-      terminalAt !== null
+      terminalAtMs !== null
       && (
-        Date.parse(terminalAt) < acceptedAtMs
-        || Date.parse(terminalAt) > updatedAtMs
+        !Number.isFinite(terminalAtMs)
+        || terminalAtMs < acceptedAtMs
+        || terminalAtMs > updatedAtMs
       )
     ) {
       context.addIssue({
@@ -81,6 +99,16 @@ export const regionalExecutionRecordSchema = z.object({
         path: [terminalField]
       });
     }
+  }
+  if (
+    record.deadlineExceededAt !== null
+    && Date.parse(record.deadlineExceededAt) < deadlineAtMs
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Regional execution deadline-exceeded time must not precede its deadline',
+      path: ['deadlineExceededAt']
+    });
   }
 
   const requestTargetIds = record.request.targets.map((target) => target.targetId);

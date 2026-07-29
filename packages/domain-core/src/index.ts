@@ -176,20 +176,25 @@ const canonicalizeHeaders = (headers: RequestHeader[]) =>
       return left.name.localeCompare(right.name);
     });
 
+const normalizeRequestBody = (
+  body: CustomRequestConfig['body'] | undefined
+): CustomRequestConfig['body'] => (
+  body === null || body === undefined
+    ? null
+    : {
+      mode: body.mode,
+      contentType: body.contentType,
+      value: body.value
+    }
+);
+
 const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => {
   const normalized = request ?? defaultCustomRequestConfig();
 
   return {
     method: normalized.method,
     headers: canonicalizeHeaders(normalized.headers ?? []),
-    body:
-      normalized.body === null || normalized.body === undefined
-        ? null
-        : {
-          mode: normalized.body.mode,
-          contentType: normalized.body.contentType,
-          value: normalized.body.value
-        }
+    body: normalizeRequestBody(normalized.body)
   };
 };
 
@@ -210,14 +215,7 @@ export const normalizeRegionalRequestConfig = (
   return {
     method: normalized.method,
     headers: (normalized.headers ?? []).map(normalizeRequestHeader),
-    body:
-      normalized.body === null || normalized.body === undefined
-        ? null
-        : {
-          mode: normalized.body.mode,
-          contentType: normalized.body.contentType,
-          value: normalized.body.value
-        }
+    body: normalizeRequestBody(normalized.body)
   };
 };
 

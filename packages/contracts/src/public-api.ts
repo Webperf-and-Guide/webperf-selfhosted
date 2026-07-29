@@ -541,8 +541,8 @@ const nullableStatusCodeSchema = z.number().int().min(100).max(599).nullable();
 
 export const checkProfileRegionComparisonSchema = z.object({
   region: runtimeRegionIdSchema,
-  currentJobId: z.string().min(1).nullable(),
-  previousJobId: z.string().min(1).nullable(),
+  currentJobId: latencyJobIdSchema.nullable(),
+  previousJobId: latencyJobIdSchema.nullable(),
   currentStatus: jobStatusSchema.nullable(),
   previousStatus: jobStatusSchema.nullable(),
   currentLatencyMs: nullableNumberSchema,
@@ -790,7 +790,7 @@ export const schedulerDispatchResponseSchema = z.object({
   triggeredProfiles: z.array(
     z.object({
       profileId: z.string().min(1),
-      jobIds: z.array(z.string().min(1)).min(1),
+      jobIds: z.array(latencyJobIdSchema).min(1),
       nextRunAt: z.string().datetime().nullable()
     })
   )

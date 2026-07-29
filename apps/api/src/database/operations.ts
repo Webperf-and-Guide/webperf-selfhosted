@@ -25,6 +25,7 @@ export type SqliteRetentionResult = {
   checkRuns: number;
   executionJobs: number;
   derivedResources: number;
+  regionalExecutions: number;
   regionalTargetLinks: number;
   artifactIndexes: number;
 };
@@ -54,18 +55,21 @@ const countChanges = (result: unknown) =>
   (result as { changes?: number }).changes ?? 0;
 
 const retentionDeleteBatchSize = 500;
+const retentionDeleteMaximumBatches = 200;
 export const defaultSqliteStorageCryptoVerificationLimit = 100_000;
 
 const deleteRowsInBatches = (deleteBatch: () => unknown) => {
   let deleted = 0;
 
-  while (true) {
+  for (let batch = 0; batch < retentionDeleteMaximumBatches; batch += 1) {
     const changes = countChanges(deleteBatch());
     deleted += changes;
     if (changes < retentionDeleteBatchSize) {
       return deleted;
     }
   }
+
+  throw new Error('SQLite retention cleanup exceeded its bounded batch limit');
 };
 
 const cleanupRegionalExecutionGroups = (
@@ -131,7 +135,7 @@ const cleanupRegionalExecutionGroups = (
     );
     let batchJobs = 0;
     let batchExecutionJobs = 0;
-    let batchDerivedResources = 0;
+    let batchRegionalExecutions = 0;
     let batchRegionalTargetLinks = 0;
 
     for (const candidate of candidates) {
@@ -140,33 +144,35 @@ const cleanupRegionalExecutionGroups = (
         deleteExecutionJobs.run(candidate.id)
       );
       batchRegionalTargetLinks += countChanges(deleteTargetLinks.run(candidate.id));
-      batchDerivedResources += countChanges(deleteRegionalExecution.run(candidate.id));
+      batchRegionalExecutions += countChanges(deleteRegionalExecution.run(candidate.id));
     }
     return {
       groupCount: candidates.length,
       jobs: batchJobs,
       executionJobs: batchExecutionJobs,
-      derivedResources: batchDerivedResources,
+      regionalExecutions: batchRegionalExecutions,
       regionalTargetLinks: batchRegionalTargetLinks
     };
   });
 
   let jobs = 0;
   let executionJobs = 0;
-  let derivedResources = 0;
+  let regionalExecutions = 0;
   let regionalTargetLinks = 0;
 
   try {
-    while (true) {
+    for (let batch = 0; batch < retentionDeleteMaximumBatches; batch += 1) {
       const deleted = deleteGroupBatch.immediate();
       jobs += deleted.jobs;
       executionJobs += deleted.executionJobs;
-      derivedResources += deleted.derivedResources;
+      regionalExecutions += deleted.regionalExecutions;
       regionalTargetLinks += deleted.regionalTargetLinks;
       if (deleted.groupCount < retentionDeleteBatchSize) {
-        return { jobs, executionJobs, derivedResources, regionalTargetLinks };
+        return { jobs, executionJobs, regionalExecutions, regionalTargetLinks };
       }
     }
+
+    throw new Error('Regional execution retention exceeded its bounded batch limit');
   } finally {
     nextEligibleGroups.finalize();
     deleteJobs.finalize();
@@ -359,6 +365,7 @@ export const cleanupSqliteRetention = (
   let checkRuns = 0;
   let executionJobs = 0;
   let derivedResources = 0;
+  let regionalExecutions = 0;
   let regionalTargetLinks = 0;
   let artifactIndexes = 0;
 
@@ -372,7 +379,7 @@ export const cleanupSqliteRetention = (
     const regionalGroups = cleanupRegionalExecutionGroups(database, cutoffIso);
     jobs += regionalGroups.jobs;
     executionJobs += regionalGroups.executionJobs;
-    derivedResources += regionalGroups.derivedResources;
+    regionalExecutions += regionalGroups.regionalExecutions;
     regionalTargetLinks += regionalGroups.regionalTargetLinks;
   }
 
@@ -388,7 +395,7 @@ export const cleanupSqliteRetention = (
       )
     `);
     try {
-      derivedResources += deleteRowsInBatches(
+      regionalExecutions += deleteRowsInBatches(
         () => statement.run(cutoffIso, retentionDeleteBatchSize)
       );
     } finally {
@@ -564,17 +571,37 @@ export const cleanupSqliteRetention = (
     tableExists(database, 'regional_execution_targets')
     && tableExists(database, 'saved_entities')
   ) {
-    const statement = database.query<never, [number]>(`
-      DELETE FROM regional_execution_targets
-      WHERE rowid IN (
-        SELECT target_link.rowid
-        FROM regional_execution_targets AS target_link
-        WHERE NOT EXISTS (
+    const orphanPredicate = hasRegionalGroupTables
+      ? `
+        NOT EXISTS (
           SELECT 1
           FROM saved_entities AS entity
           WHERE entity.kind = 'regional_execution'
             AND entity.id = target_link.regional_execution_id
         )
+        OR NOT EXISTS (
+          SELECT 1 FROM jobs AS job WHERE job.id = target_link.job_id
+        )
+        OR NOT EXISTS (
+          SELECT 1
+          FROM execution_jobs AS execution
+          WHERE execution.id = target_link.execution_job_id
+        )
+      `
+      : `
+        NOT EXISTS (
+          SELECT 1
+          FROM saved_entities AS entity
+          WHERE entity.kind = 'regional_execution'
+            AND entity.id = target_link.regional_execution_id
+        )
+      `;
+    const statement = database.query<never, [number]>(`
+      DELETE FROM regional_execution_targets
+      WHERE rowid IN (
+        SELECT target_link.rowid
+        FROM regional_execution_targets AS target_link
+        WHERE ${orphanPredicate}
         LIMIT ?
       )
     `);
@@ -592,6 +619,7 @@ export const cleanupSqliteRetention = (
     checkRuns,
     executionJobs,
     derivedResources,
+    regionalExecutions,
     regionalTargetLinks,
     artifactIndexes
   };

@@ -86,7 +86,7 @@ for (const name of serviceNames) {
   assert(service.read_only === true, `${name} must use a read-only root filesystem`);
   const user = service.user?.split(':', 1)[0]?.toLowerCase();
   assert(
-    user !== undefined && user !== '0' && user !== 'root',
+    user !== undefined && user !== '' && user !== '0' && user !== 'root',
     `${name} must run as non-root`
   );
   assert(service.cap_drop?.includes('ALL'), `${name} must drop all Linux capabilities`);

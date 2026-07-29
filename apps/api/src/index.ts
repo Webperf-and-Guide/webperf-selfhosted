@@ -33,6 +33,9 @@ import type {
   ListQuery,
   Property,
   PropertyListResponse,
+  RegionalExecutionRequest,
+  RegionalExecutionResult,
+  RegionalExecutionTargetResult,
   ReportExportFormat,
   ExportResource,
   ExportListResponse,
@@ -87,6 +90,14 @@ import {
   defaultBrowserAuditArtifactContentTypes,
   browserAuditExecutionPayloadSchema,
   networkProbeExecutionPayloadSchema,
+  regionalExecutionPayloadMaxBytes,
+  regionalExecutionRequestSchema,
+  regionalExecutionResultSchema,
+  regionalRuntimeCapabilitiesSchema,
+  regionalRuntimeMaxBatchSize,
+  regionalRuntimeMaxDeadlineMs,
+  regionalRuntimeProtocolVersion,
+  regionalRuntimeReplayWindowSeconds,
   webhookDeliveryExecutionPayloadSchema,
   jobListResponseSchema,
   listQuerySchema,
@@ -107,6 +118,7 @@ import {
 } from '@webperf/contracts';
 import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi';
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
+import { buildRegionalRuntimeOpenApiDocument } from '@webperf/contracts/regional-runtime-openapi';
 import {
   JsonBodyEmptyError,
   JsonBodyTooLargeError,
@@ -117,9 +129,12 @@ import { RPCHandler } from '@orpc/server/fetch';
 import { isDeepStrictEqual } from 'node:util';
 import {
   applyListQuery,
+  createRegionalExecutionRequestDigest,
+  createRegionalResultSignature,
   parseListQueryFromSearchParams,
   resolveRuntimeLocation,
-  validateMeasurementUrl
+  validateMeasurementUrl,
+  verifyRegionalExecutionSignature
 } from '@webperf/domain-core';
 import { parseSelfhostApiVars } from '@webperf/config/selfhost';
 import {
@@ -140,6 +155,7 @@ import {
 } from './browser-audit-upload-token';
 import { authorizeApiRequest } from './auth';
 import { describeSafeError } from './diagnostics';
+import type { RegionalExecutionRecord } from './regional-runtime-record';
 import {
   describeSchedulerError,
   dispatchScheduledChecks,
@@ -174,6 +190,11 @@ type SelfhostRuntime = {
   schedulerMode: 'embedded' | 'external' | 'disabled';
   schedulerPollIntervalSeconds: number;
   runtimeMode: 'full' | 'regional-runtime';
+  regionalRuntimeSecret?: string;
+  regionalRuntimeSecretNext?: string;
+  runtimeVersion?: string;
+  runtimeImageDigest?: string;
+  probeImageDigest?: string;
 };
 
 type MutableTarget = LatencyJobTarget;
@@ -192,6 +213,7 @@ const browserAuditArtifactUploadPathPattern =
   /^\/internal\/browser-audits\/([^/]+)\/artifacts$/;
 const browserAuditArtifactDownloadPathPattern =
   /^\/v1\/browser-audits\/([^/]+)\/artifacts\/([^/]+)$/;
+const regionalExecutionPathPattern = /^\/v1\/regional-executions\/([^/]+)$/;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -279,6 +301,26 @@ const buildPublicCapabilitiesPayload = () => ({
     }
   }
 });
+
+const buildRegionalRuntimeCapabilitiesPayload = () =>
+  regionalRuntimeCapabilitiesSchema.parse({
+    protocolVersion: regionalRuntimeProtocolVersion,
+    regionId: runtime.runtimeLocation.regionId,
+    regionLabel: runtime.runtimeLocation.label,
+    runnerTypes: ['network_probe'],
+    maxBatchSize: regionalRuntimeMaxBatchSize,
+    maxDeadlineMs: regionalRuntimeMaxDeadlineMs,
+    maxAttempts: runtime.maxTargetAttempts,
+    runtime: {
+      version: runtime.runtimeVersion ?? null,
+      imageDigest: runtime.runtimeImageDigest ?? null
+    },
+    runner: {
+      id: 'probe-rs',
+      implementation: 'rust',
+      imageDigest: runtime.probeImageDigest ?? null
+    }
+  });
 
 const buildPropertyListResponse = (query?: ListQuery): PropertyListResponse =>
   propertyListResponseSchema.parse({
@@ -719,6 +761,14 @@ const routeRequest = async (request: Request) => {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
+    if (
+      pathname === '/openapi/regional-runtime.json'
+      && request.method === 'GET'
+      && runtime.runtimeMode === 'regional-runtime'
+    ) {
+      return json(await getRegionalRuntimeOpenApiDocument());
+    }
+
     if (pathname === '/openapi/control.json' && request.method === 'GET') {
       return json(await getControlOpenApiDocument());
     }
@@ -756,6 +806,39 @@ const routeRequest = async (request: Request) => {
 
     if (pathname === '/health') {
       return json({ service: 'webperf-api', ok: true });
+    }
+
+    if (
+      pathname === '/v1/regional-capabilities'
+      && request.method === 'GET'
+      && runtime.runtimeMode === 'regional-runtime'
+    ) {
+      return json(buildRegionalRuntimeCapabilitiesPayload());
+    }
+
+    if (
+      pathname === '/v1/regional-executions'
+      && request.method === 'POST'
+      && runtime.runtimeMode === 'regional-runtime'
+    ) {
+      return handleCreateRegionalExecution(request);
+    }
+
+    const regionalExecutionMatch = pathname.match(regionalExecutionPathPattern);
+    if (
+      regionalExecutionMatch?.[1]
+      && request.method === 'GET'
+      && runtime.runtimeMode === 'regional-runtime'
+    ) {
+      return handleGetRegionalExecution(decodePathSegment(regionalExecutionMatch[1]));
+    }
+
+    if (
+      regionalExecutionMatch?.[1]
+      && request.method === 'DELETE'
+      && runtime.runtimeMode === 'regional-runtime'
+    ) {
+      return handleCancelRegionalExecution(decodePathSegment(regionalExecutionMatch[1]));
     }
 
     if (pathname === '/v1/health') {
@@ -1347,11 +1430,53 @@ const routeRequest = async (request: Request) => {
     );
 };
 
+const decodePathSegment = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return '';
+  }
+};
+
+const isRegionalRuntimeSurface = (pathname: string) =>
+  pathname === '/v1/regional-capabilities'
+  || pathname === '/v1/regional-executions'
+  || pathname === '/openapi/regional-runtime.json'
+  || regionalExecutionPathPattern.test(pathname);
+
+const isRuntimeSurfaceAllowed = (pathname: string, method: string) => {
+  if (runtime.runtimeMode === 'full') {
+    return !isRegionalRuntimeSurface(pathname);
+  }
+
+  if (pathname.startsWith('/internal/')) {
+    return true;
+  }
+
+  if (
+    pathname === '/health'
+    || pathname === '/v1/regional-capabilities'
+    || pathname === '/openapi/regional-runtime.json'
+  ) {
+    return method === 'GET';
+  }
+
+  if (pathname === '/v1/regional-executions') {
+    return method === 'POST';
+  }
+
+  return regionalExecutionPathPattern.test(pathname)
+    && (method === 'GET' || method === 'DELETE');
+};
+
 export const server = Bun.serve({
   hostname: runtime.host,
   port: runtime.port,
   async fetch(request) {
     const pathname = new URL(request.url).pathname;
+    if (!isRuntimeSurfaceAllowed(pathname, request.method)) {
+      return json({ error: 'Not found' }, { status: 404 });
+    }
     const usesScopedArtifactToken = request.method === 'POST'
       && browserAuditArtifactUploadPathPattern.test(pathname);
     const unauthorized = usesScopedArtifactToken
@@ -1365,6 +1490,7 @@ export const server = Bun.serve({
     const routedResponse = await routeRequest(request);
     const response = (
       isExecutionTransportPath(pathname)
+      || isRegionalRuntimeSurface(pathname)
       || (request.method === 'GET' && browserAuditArtifactDownloadPathPattern.test(pathname))
     )
       ? routedResponse
@@ -1514,6 +1640,379 @@ async function handleCreateJob(request: Request) {
     },
     { status: 201 }
   );
+}
+
+async function handleCreateRegionalExecution(request: Request) {
+  const body = await parseJsonBody<RegionalExecutionRequest>(
+    request,
+    regionalExecutionPayloadMaxBytes
+  );
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const parsed = regionalExecutionRequestSchema.safeParse(body.data);
+  if (!parsed.success) {
+    return json(
+      {
+        error: 'Invalid regional execution payload',
+        issues: parsed.error.flatten()
+      },
+      { status: 400 }
+    );
+  }
+
+  const timestampMs = Date.parse(parsed.data.timestamp);
+  const replayWindowMs = regionalRuntimeReplayWindowSeconds * 1_000;
+  if (Math.abs(Date.now() - timestampMs) > replayWindowMs) {
+    return regionalRuntimeUnauthorized();
+  }
+
+  const signingSecret = parsed.data.keyVersion === 'current'
+    ? runtime.regionalRuntimeSecret
+    : runtime.regionalRuntimeSecretNext;
+  if (!signingSecret) {
+    return regionalRuntimeUnauthorized();
+  }
+
+  const { signature, ...unsignedRequest } = parsed.data;
+  if (!await verifyRegionalExecutionSignature(signingSecret, unsignedRequest, signature)) {
+    return regionalRuntimeUnauthorized();
+  }
+
+  if (parsed.data.maxAttempts > runtime.maxTargetAttempts) {
+    return json(
+      {
+        error: `maxAttempts exceeds this runtime's limit of ${runtime.maxTargetAttempts}`
+      },
+      { status: 400 }
+    );
+  }
+
+  for (const target of parsed.data.targets) {
+    try {
+      validateMeasurementUrl(target.url);
+    } catch {
+      return json(
+        {
+          error: 'Regional execution contains a blocked or invalid target URL',
+          targetId: target.targetId
+        },
+        { status: 400 }
+      );
+    }
+  }
+
+  const requestDigest = await createRegionalExecutionRequestDigest(unsignedRequest);
+  const existing = repository.getRegionalExecution(parsed.data.idempotencyKey);
+  if (existing) {
+    if (existing.requestDigest !== requestDigest) {
+      return regionalExecutionConflict();
+    }
+    const current = expireRegionalExecutionIfNeeded(existing);
+    return json(await buildSignedRegionalExecutionResult(current));
+  }
+
+  const acceptedAt = new Date().toISOString();
+  const deadlineAt = new Date(
+    Date.parse(acceptedAt) + parsed.data.deadlineMs
+  ).toISOString();
+  const jobIdPrefix = `reg_${requestDigest.slice(0, 32)}`;
+  const jobs = parsed.data.targets.map((target, index) =>
+    createJobRecord({
+      id: `${jobIdPrefix}_${index}`,
+      url: target.url,
+      note: `Regional execution target ${target.targetId}`,
+      requestConfig: target.request,
+      monitorPolicy: undefined,
+      requesterIp: null,
+      maxAttempts: parsed.data.maxAttempts
+    })
+  );
+  const resources = [];
+  const targetLinks: RegionalExecutionRecord['targetLinks'] = [];
+
+  for (let offset = 0; offset < jobs.length; offset += 20) {
+    const chunk = jobs.slice(offset, offset + 20);
+    const chunkIndex = Math.floor(offset / 20);
+    const executionJobId = `exec_reg_${requestDigest.slice(0, 24)}_${chunkIndex}`;
+    resources.push(buildNetworkExecutionResourceInput(chunk, null, null, {
+      resourceId: parsed.data.idempotencyKey,
+      executionJobId,
+      deadlineAt,
+      regionalExecutionId: parsed.data.idempotencyKey
+    }));
+    for (const [chunkOffset, job] of chunk.entries()) {
+      const requestTarget = parsed.data.targets[offset + chunkOffset];
+      if (!requestTarget) {
+        throw new Error('Regional execution target mapping is incomplete');
+      }
+      targetLinks.push({
+        targetId: requestTarget.targetId,
+        jobId: job.id,
+        executionJobId
+      });
+    }
+  }
+
+  const record: RegionalExecutionRecord = {
+    id: parsed.data.idempotencyKey,
+    requestDigest,
+    request: parsed.data,
+    targetLinks,
+    acceptedAt,
+    deadlineAt,
+    cancelledAt: null,
+    deadlineExceededAt: null,
+    createdAt: acceptedAt,
+    updatedAt: acceptedAt
+  };
+
+  let persisted: ReturnType<typeof repository.createRegionalExecution>;
+  try {
+    repository.pruneJobsOlderThan(runtime.retentionDays);
+    persisted = repository.createRegionalExecution({ record, resources });
+  } catch (error) {
+    const incidentId = logRegionalExecutionCreationFailure(error, record.id);
+    return json(
+      {
+        error: 'Failed to queue regional execution',
+        incidentId
+      },
+      { status: 500 }
+    );
+  }
+
+  if (persisted.record.requestDigest !== requestDigest) {
+    return regionalExecutionConflict();
+  }
+
+  return json(
+    await buildSignedRegionalExecutionResult(
+      expireRegionalExecutionIfNeeded(persisted.record)
+    ),
+    { status: persisted.created ? 202 : 200 }
+  );
+}
+
+async function handleGetRegionalExecution(idempotencyKey: string) {
+  const record = repository.getRegionalExecution(idempotencyKey);
+  if (!record) {
+    return json({ error: 'Regional execution not found' }, { status: 404 });
+  }
+
+  return json(await buildSignedRegionalExecutionResult(
+    expireRegionalExecutionIfNeeded(record)
+  ));
+}
+
+async function handleCancelRegionalExecution(idempotencyKey: string) {
+  const stored = repository.getRegionalExecution(idempotencyKey);
+  if (!stored) {
+    return json({ error: 'Regional execution not found' }, { status: 404 });
+  }
+
+  const record = expireRegionalExecutionIfNeeded(stored);
+  const existingResult = await buildSignedRegionalExecutionResult(record);
+  if (['succeeded', 'failed', 'cancelled'].includes(existingResult.status)) {
+    return json(existingResult);
+  }
+
+  if (!record.cancelledAt && !record.deadlineExceededAt) {
+    const now = new Date().toISOString();
+    for (const executionJobId of new Set(
+      record.targetLinks.map((target) => target.executionJobId)
+    )) {
+      repository.cancelExecutionJob(executionJobId, new Date(now));
+    }
+    record.cancelledAt = now;
+    record.updatedAt = now;
+    repository.saveRegionalExecution(record);
+  }
+
+  return json(await buildSignedRegionalExecutionResult(record));
+}
+
+function expireRegionalExecutionIfNeeded(record: RegionalExecutionRecord) {
+  if (
+    record.cancelledAt
+    || record.deadlineExceededAt
+    || Date.parse(record.deadlineAt) > Date.now()
+  ) {
+    return record;
+  }
+
+  const executionJobs = [...new Set(
+    record.targetLinks.map((target) => target.executionJobId)
+  )].map((executionJobId) => repository.getExecutionJob(executionJobId));
+  const hasInflight = executionJobs.some(
+    (executionJob) => executionJob && !['succeeded', 'failed', 'cancelled'].includes(executionJob.status)
+  );
+  if (!hasInflight) {
+    return record;
+  }
+
+  const now = new Date().toISOString();
+  for (const executionJob of executionJobs) {
+    if (executionJob && !['succeeded', 'failed', 'cancelled'].includes(executionJob.status)) {
+      repository.cancelExecutionJob(executionJob.id, new Date(now));
+    }
+  }
+  const expired = {
+    ...record,
+    deadlineExceededAt: now,
+    updatedAt: now
+  };
+  repository.saveRegionalExecution(expired);
+  return expired;
+}
+
+async function buildSignedRegionalExecutionResult(
+  record: RegionalExecutionRecord
+): Promise<RegionalExecutionResult> {
+  const targets = record.targetLinks.map((link) =>
+    buildRegionalExecutionTargetResult(record, link)
+  );
+  const terminal = targets.every((target) =>
+    ['succeeded', 'failed', 'cancelled'].includes(target.status)
+  );
+  const status = record.deadlineExceededAt
+    ? 'failed'
+    : record.cancelledAt
+      ? 'cancelled'
+      : targets.every((target) => target.status === 'succeeded')
+        ? 'succeeded'
+        : terminal
+          ? 'failed'
+          : targets.some((target) => target.status !== 'queued')
+            ? 'running'
+            : 'queued';
+  const completionCandidates = targets
+    .map((target) => target.finishedAt)
+    .filter((value): value is string => value != null)
+    .sort();
+  const completedAt = ['succeeded', 'failed', 'cancelled'].includes(status)
+    ? completionCandidates.at(-1)
+      ?? record.cancelledAt
+      ?? record.deadlineExceededAt
+      ?? record.updatedAt
+    : null;
+  const unsignedResult = regionalExecutionResultSchema.omit({
+    signature: true
+  }).parse({
+    idempotencyKey: record.id,
+    status,
+    targets,
+    provenance: {
+      regionId: runtime.runtimeLocation.regionId,
+      runnerType: 'network_probe',
+      runtime: {
+        version: runtime.runtimeVersion ?? null,
+        imageDigest: runtime.runtimeImageDigest ?? null
+      },
+      runner: {
+        id: 'probe-rs',
+        implementation: 'rust',
+        imageDigest: runtime.probeImageDigest ?? null
+      }
+    },
+    acceptedAt: record.acceptedAt,
+    completedAt,
+    keyVersion: 'current'
+  });
+  const signingSecret = runtime.regionalRuntimeSecret;
+  if (!signingSecret) {
+    throw new Error('Regional runtime signing secret is unavailable');
+  }
+
+  return regionalExecutionResultSchema.parse({
+    ...unsignedResult,
+    signature: await createRegionalResultSignature(signingSecret, unsignedResult)
+  });
+}
+
+function buildRegionalExecutionTargetResult(
+  record: RegionalExecutionRecord,
+  link: RegionalExecutionRecord['targetLinks'][number]
+): RegionalExecutionTargetResult {
+  const job = repository.getJob(link.jobId);
+  const target = job?.targets[0] ?? null;
+  const executionJob = repository.getExecutionJob(link.executionJobId);
+  const status = target?.status === 'succeeded'
+    ? 'succeeded'
+    : target?.status === 'failed'
+      ? 'failed'
+      : record.deadlineExceededAt
+        ? 'failed'
+        : record.cancelledAt || executionJob?.status === 'cancelled'
+          ? 'cancelled'
+          : executionJob?.status === 'failed'
+            ? 'failed'
+            : executionJob?.status === 'succeeded'
+              ? 'failed'
+              : target?.status === 'measuring' || executionJob?.status === 'running'
+                ? 'running'
+                : 'queued';
+  const executionError = executionJob?.error;
+  const errorCode = record.deadlineExceededAt && status === 'failed'
+    ? 'regional_execution_deadline_exceeded'
+    : executionJob?.status === 'succeeded' && target?.status !== 'succeeded'
+      ? 'regional_result_missing'
+      : target?.errorCode
+        ?? (status === 'failed' ? executionError?.code ?? 'regional_execution_failed' : null);
+  const errorMessage = record.deadlineExceededAt && status === 'failed'
+    ? 'Regional execution exceeded its accepted deadline'
+    : executionJob?.status === 'succeeded' && target?.status !== 'succeeded'
+      ? 'Regional execution completed without a persisted measurement result'
+      : target?.errorMessage
+        ?? (status === 'failed'
+          ? executionError?.message ?? 'Regional execution failed before producing a measurement'
+          : null);
+
+  return {
+    targetId: link.targetId,
+    status,
+    region: runtime.runtimeLocation.regionId,
+    latencyMs: target?.latencyMs == null ? null : Math.round(target.latencyMs),
+    statusCode: target?.statusCode ?? null,
+    success: target?.success ?? null,
+    errorCode: errorCode?.slice(0, 120) ?? null,
+    errorMessage: errorMessage?.slice(0, 1_000) ?? null,
+    startedAt: target?.startedAt ?? null,
+    finishedAt: target?.finishedAt
+      ?? (['succeeded', 'failed', 'cancelled'].includes(status)
+        ? executionJob?.completedAt ?? record.cancelledAt ?? record.deadlineExceededAt
+        : null)
+  };
+}
+
+const regionalRuntimeUnauthorized = () => json(
+  { error: 'Unauthorized regional execution request' },
+  {
+    status: 401,
+    headers: {
+      'cache-control': 'no-store',
+      'www-authenticate': 'Bearer realm="webperf-regional-runtime"'
+    }
+  }
+);
+
+const regionalExecutionConflict = () => json(
+  { error: 'Idempotency key already belongs to a different regional execution' },
+  { status: 409 }
+);
+
+function logRegionalExecutionCreationFailure(error: unknown, resourceId: string) {
+  const incidentId = crypto.randomUUID();
+  console.error(JSON.stringify({
+    service: 'webperf-api',
+    event: 'regional_execution_creation_failed',
+    resourceId,
+    incidentId,
+    ...describeSafeError(error)
+  }));
+  return incidentId;
 }
 
 async function handleClaimExecutionJob(request: Request) {
@@ -1777,7 +2276,8 @@ function buildExecutionResourceContext(
 ): ExecutionResourceContext {
   if (executionJob.kind === 'network_probe') {
     const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
-    const expectedResourceId = payload.runId ?? payload.jobIds[0];
+    const expectedResourceId =
+      payload.runId ?? payload.regionalExecutionId ?? payload.jobIds[0];
 
     if (executionJob.resourceId !== expectedResourceId) {
       throw new Error('Network execution resource does not match its payload');
@@ -3077,13 +3577,17 @@ function createJobRecord({
   note,
   requestConfig,
   monitorPolicy,
-  requesterIp
+  requesterIp,
+  id,
+  maxAttempts
 }: {
   url: string;
   note: string | null;
   requestConfig?: CreateLatencyJobInput['request'];
   monitorPolicy?: CreateLatencyJobInput['monitorPolicy'];
   requesterIp: string | null;
+  id?: string;
+  maxAttempts?: number;
 }) {
   validateMeasurementUrl(url);
 
@@ -3092,13 +3596,13 @@ function createJobRecord({
   // every target as provenance.
   const region: RuntimeRegionId = runtime.runtimeLocation.regionId;
   const now = new Date().toISOString();
-  const jobId = `job_${crypto.randomUUID()}`;
+  const jobId = id ?? `job_${crypto.randomUUID()}`;
   const target: MutableTarget = {
     jobId,
     region,
     status: 'queued',
     attemptNo: 0,
-    maxAttempts: runtime.maxTargetAttempts,
+    maxAttempts: maxAttempts ?? runtime.maxTargetAttempts,
     latencyMs: null,
     statusCode: null,
     success: null,
@@ -3148,13 +3652,29 @@ function createNetworkExecutionResource(
   run: CheckProfileRun | null,
   checkId: string | null
 ) {
+  const resource = buildNetworkExecutionResourceInput(jobs, run, checkId);
+  repository.pruneJobsOlderThan(runtime.retentionDays);
+  return repository.createExecutionResource(resource);
+}
+
+function buildNetworkExecutionResourceInput(
+  jobs: LatencyJobDetail[],
+  run: CheckProfileRun | null,
+  checkId: string | null,
+  options: {
+    resourceId?: string;
+    executionJobId?: string;
+    deadlineAt?: string | null;
+    regionalExecutionId?: string | null;
+  } = {}
+) {
   const firstJob = jobs[0];
 
   if (!firstJob) {
     throw new Error('Network execution requires at least one job');
   }
 
-  const resourceId = run?.id ?? firstJob.id;
+  const resourceId = options.resourceId ?? run?.id ?? firstJob.id;
   const attemptCounts = jobs.flatMap((job) =>
     job.targets.map((target) => target.maxAttempts)
   );
@@ -3168,25 +3688,25 @@ function createNetworkExecutionResource(
     version: 'v1',
     jobIds: jobs.map((job) => job.id),
     checkId,
-    runId: run?.id ?? null
+    runId: run?.id ?? null,
+    regionalExecutionId: options.regionalExecutionId ?? null,
+    deadlineAt: options.deadlineAt ?? null
   });
 
-  repository.pruneJobsOlderThan(runtime.retentionDays);
-
-  return repository.createExecutionResource({
+  return {
     executionJob: {
-      id: `exec_${resourceId}`,
-      kind: 'network_probe',
+      id: options.executionJobId ?? `exec_${resourceId}`,
+      kind: 'network_probe' as const,
       resourceId,
       maxAttempts,
       payload
     },
     result: {
-      kind: 'network_probe',
+      kind: 'network_probe' as const,
       jobs,
       run
     }
-  });
+  };
 }
 
 function logExecutionCreationFailure(
@@ -3643,7 +4163,12 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS,
     schedulerMode: parsed.SELFHOST_SCHEDULER_MODE,
     schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS,
-    runtimeMode: parsed.SELFHOST_RUNTIME_MODE
+    runtimeMode: parsed.SELFHOST_RUNTIME_MODE,
+    regionalRuntimeSecret: parsed.REGIONAL_RUNTIME_SHARED_SECRET,
+    regionalRuntimeSecretNext: parsed.REGIONAL_RUNTIME_SHARED_SECRET_NEXT,
+    runtimeVersion: parsed.WEBPERF_RUNTIME_VERSION,
+    runtimeImageDigest: parsed.WEBPERF_RUNTIME_IMAGE_DIGEST,
+    probeImageDigest: parsed.WEBPERF_PROBE_IMAGE_DIGEST
   };
 }
 
@@ -4674,6 +5199,7 @@ const opsRpcHandler = new RPCHandler<OrpcContext>(opsRouter as never);
 
 let controlOpenApiDocumentPromise: Promise<unknown> | undefined;
 let publicOpenApiDocumentPromise: Promise<unknown> | undefined;
+let regionalRuntimeOpenApiDocumentPromise: Promise<unknown> | undefined;
 
 const getControlOpenApiDocument = async () => {
   if (!controlOpenApiDocumentPromise) {
@@ -4705,6 +5231,22 @@ const getPublicOpenApiDocument = async () => {
   }
 
   return await publicOpenApiDocumentPromise;
+};
+
+const getRegionalRuntimeOpenApiDocument = async () => {
+  if (!regionalRuntimeOpenApiDocumentPromise) {
+    regionalRuntimeOpenApiDocumentPromise = Promise.resolve(
+      buildRegionalRuntimeOpenApiDocument({
+        title: 'WebPerf Regional Runtime API',
+        version: `v${regionalRuntimeProtocolVersion}`,
+        description:
+          'Signed, idempotent network-probe handoff from a managed Cloud control plane to one fixed regional runtime.',
+        serverUrl: '/'
+      })
+    );
+  }
+
+  return await regionalRuntimeOpenApiDocumentPromise;
 };
 
 export type SelfhostControlServer = typeof server;

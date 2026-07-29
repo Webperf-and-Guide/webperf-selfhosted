@@ -20,7 +20,10 @@ export const networkProbeExecutionPayloadSchema = z
     version: z.literal('v1'),
     jobIds: z.array(z.string().min(1).max(160)).min(1).max(20),
     checkId: z.string().min(1).max(160).nullable().default(null),
-    runId: z.string().min(1).max(160).nullable().default(null)
+    runId: z.string().min(1).max(160).nullable().default(null),
+    regionalExecutionId: z.string().min(1).max(160).nullable().default(null),
+    /** Optional managed handoff deadline. Normal self-host runs leave this null. */
+    deadlineAt: z.string().datetime().nullable().default(null)
   })
   .superRefine((payload, context) => {
     if (Boolean(payload.checkId) !== Boolean(payload.runId)) {
@@ -28,6 +31,13 @@ export const networkProbeExecutionPayloadSchema = z
         code: 'custom',
         message: 'checkId and runId must either both be present or both be null',
         path: ['runId']
+      });
+    }
+    if (payload.regionalExecutionId && (payload.checkId || payload.runId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Regional execution payloads cannot reference a saved check run',
+        path: ['regionalExecutionId']
       });
     }
   });

@@ -30,6 +30,7 @@ export const regionalRuntimeProtocolVersion = 1 as const;
 export const regionalRuntimeMaxBatchSize = 100;
 export const regionalRuntimeMaxDeadlineMs = 900_000;
 export const regionalRuntimeMaxAttempts = 20;
+export const regionalExecutionPayloadMaxBytes = 1_500_000;
 // Enforced by the regional execution POST handler before request HMAC
 // verification. Exported so Cloud callers can use the same skew allowance.
 export const regionalRuntimeReplayWindowSeconds = 300;

@@ -76,6 +76,7 @@ export const createNetworkExecutionHandler = ({
     );
   }
 
+  const deadline = createExecutionDeadlineSignal(context.payload.deadlineAt, signal);
   const jobs = context.jobs.map((job) => structuredClone(job));
   let run = context.run ? structuredClone(context.run) : null;
   const persist = async () => {
@@ -89,55 +90,99 @@ export const createNetworkExecutionHandler = ({
     });
   };
 
-  for (const job of jobs) {
-    await processNetworkJob({
-      executionJob,
-      job,
-      persist,
-      probeSharedSecret,
-      probeBaseUrl,
-      allowInsecureProbeHttp,
-      requestImpl,
-      logger,
-      signal
-    });
-  }
-
-  if (run && context.check) {
-    const comparison = context.comparisonMode
-      ? buildCheckProfileComparison({
-          currentRun: run,
-          currentJobs: jobs,
-          comparedRun: context.comparedRun,
-          comparedJobs: context.comparedJobs,
-          mode: context.comparisonMode
-        })
-      : null;
-    run = {
-      ...run,
-      evaluation: evaluateMonitorTargets({
-        monitorPolicy: context.check.monitorPolicy,
-        targets: jobs.flatMap((job) => job.targets),
-        regressedCount: comparison?.summary.regressed ?? 0
-      })
-    };
-    await persist();
-
-    const followups = buildWebhookFollowups({
-      executionJob,
-      run,
-      check: context.check,
-      jobs,
-      comparisonSummary: comparison?.summary ?? null
-    });
-
-    if (followups.length > 0) {
-      await client.enqueueFollowups(executionJob.id, {
-        leaseOwner,
-        jobs: followups
+  try {
+    for (const job of jobs) {
+      await processNetworkJob({
+        executionJob,
+        job,
+        persist,
+        probeSharedSecret,
+        probeBaseUrl,
+        allowInsecureProbeHttp,
+        requestImpl,
+        logger,
+        signal: deadline.signal
       });
     }
+
+    if (run && context.check) {
+      const comparison = context.comparisonMode
+        ? buildCheckProfileComparison({
+            currentRun: run,
+            currentJobs: jobs,
+            comparedRun: context.comparedRun,
+            comparedJobs: context.comparedJobs,
+            mode: context.comparisonMode
+          })
+        : null;
+      run = {
+        ...run,
+        evaluation: evaluateMonitorTargets({
+          monitorPolicy: context.check.monitorPolicy,
+          targets: jobs.flatMap((job) => job.targets),
+          regressedCount: comparison?.summary.regressed ?? 0
+        })
+      };
+      await persist();
+
+      const followups = buildWebhookFollowups({
+        executionJob,
+        run,
+        check: context.check,
+        jobs,
+        comparisonSummary: comparison?.summary ?? null
+      });
+
+      if (followups.length > 0) {
+        await client.enqueueFollowups(executionJob.id, {
+          leaseOwner,
+          jobs: followups
+        });
+      }
+    }
+  } finally {
+    deadline.dispose();
   }
+};
+
+const createExecutionDeadlineSignal = (
+  deadlineAt: string | null,
+  parentSignal: AbortSignal
+) => {
+  if (!deadlineAt) {
+    return {
+      signal: parentSignal,
+      dispose: () => {}
+    };
+  }
+
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal.reason);
+  if (parentSignal.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const abortForDeadline = () => controller.abort(new ExecutionFailure(
+    'regional_execution_deadline_exceeded',
+    'Regional execution exceeded its accepted deadline',
+    false
+  ));
+  const remainingMs = Date.parse(deadlineAt) - Date.now();
+  const timeout = remainingMs <= 0
+    ? (abortForDeadline(), null)
+    : setTimeout(abortForDeadline, remainingMs);
+
+  return {
+    signal: controller.signal,
+    dispose() {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      parentSignal.removeEventListener('abort', abortFromParent);
+    }
+  };
 };
 
 const processNetworkJob = async ({

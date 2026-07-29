@@ -1,5 +1,6 @@
 import { buildControlOpenApiDocument } from '../../packages/contracts/src/control-openapi';
 import { buildPublicOpenApiDocument } from '../../packages/contracts/src/public-openapi';
+import { buildRegionalRuntimeOpenApiDocument } from '../../packages/contracts/src/regional-runtime-openapi';
 
 const publicDoc = buildPublicOpenApiDocument({
   title: 'WebPerf Public API',
@@ -11,6 +12,12 @@ const controlDoc = buildControlOpenApiDocument({
   title: 'WebPerf Control API',
   version: 'v1',
   description: 'Compatibility control API surface.'
+});
+
+const regionalRuntimeDoc = buildRegionalRuntimeOpenApiDocument({
+  title: 'WebPerf Regional Runtime API',
+  version: 'v1',
+  description: 'Managed Cloud handoff to one fixed regional runtime.'
 });
 
 const requiredPublicPaths = [
@@ -50,6 +57,11 @@ const requiredControlPaths = [
 
 assertPaths('public', publicDoc.paths, requiredPublicPaths);
 assertPaths('control', controlDoc.paths, requiredControlPaths);
+assertPaths('regional-runtime', regionalRuntimeDoc.paths, [
+  '/v1/regional-capabilities',
+  '/v1/regional-executions',
+  '/v1/regional-executions/{idempotencyKey}'
+]);
 
 if (!publicDoc.components?.securitySchemes.selfhostAdminToken) {
   throw new Error('public OpenAPI document is missing the self-host admin bearer scheme');
@@ -77,12 +89,28 @@ for (const [path, methods] of Object.entries(controlDoc.paths)) {
   }
 }
 
+if (!regionalRuntimeDoc.components?.securitySchemes.regionalRuntimeToken) {
+  throw new Error('regional runtime OpenAPI document is missing its bearer scheme');
+}
+
+for (const [path, methods] of Object.entries(regionalRuntimeDoc.paths)) {
+  for (const operation of Object.values(methods)) {
+    const shouldBePublic = path === '/v1/regional-capabilities';
+    if (shouldBePublic === Boolean(operation.security)) {
+      throw new Error(
+        `regional runtime path ${path} has an invalid bearer authentication declaration`
+      );
+    }
+  }
+}
+
 console.log(
   JSON.stringify(
     {
       ok: true,
       publicPathCount: Object.keys(publicDoc.paths).length,
-      controlPathCount: Object.keys(controlDoc.paths).length
+      controlPathCount: Object.keys(controlDoc.paths).length,
+      regionalRuntimePathCount: Object.keys(regionalRuntimeDoc.paths).length
     },
     null,
     2
@@ -90,7 +118,7 @@ console.log(
 );
 
 function assertPaths(
-  label: 'public' | 'control',
+  label: 'public' | 'control' | 'regional-runtime',
   paths: Record<string, unknown>,
   requiredPaths: readonly string[]
 ) {

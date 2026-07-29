@@ -59,6 +59,10 @@ import {
 } from './database/operations';
 import { applySqliteMigrations, openSqliteDatabase } from './database/sqlite';
 import { browserAuditArtifactLimitTriggerName } from './database/migrations/20260722_003_browser_audit_artifacts';
+import {
+  regionalExecutionRecordSchema,
+  type RegionalExecutionRecord
+} from './regional-runtime-record';
 
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.
@@ -143,6 +147,18 @@ export type JobRepository = {
   getBrowserAuditArtifact(auditId: string, artifactId: string): BrowserAuditArtifactRecord | null;
   listBrowserAuditArtifacts(auditId: string): BrowserAuditArtifactRecord[];
   listBrowserAuditArtifactStorageKeys(): string[];
+  getRegionalExecution(id: string): RegionalExecutionRecord | null;
+  createRegionalExecution(input: {
+    record: RegionalExecutionRecord;
+    resources: Array<{
+      executionJob: EnqueueExecutionJob;
+      result: ExecutionResourceResult;
+    }>;
+  }, now?: Date): {
+    record: RegionalExecutionRecord;
+    created: boolean;
+  };
+  saveRegionalExecution(record: RegionalExecutionRecord): void;
   createExecutionResource(input: {
     executionJob: EnqueueExecutionJob;
     result: ExecutionResourceResult;
@@ -202,7 +218,8 @@ type EntityKind =
   | 'comparison'
   | 'export'
   | 'analysis'
-  | 'browser_audit';
+  | 'browser_audit'
+  | 'regional_execution';
 
 type SavedEntityRow = {
   payload_json: string;
@@ -1128,6 +1145,49 @@ export const createSqliteJobRepository = ({
       return listBrowserAuditArtifactStorageKeysStatement
         .all()
         .map((row) => row.storage_key);
+    },
+    getRegionalExecution(id) {
+      return getEntity('regional_execution', id, regionalExecutionRecordSchema);
+    },
+    createRegionalExecution(input, now = new Date()) {
+      const record = regionalExecutionRecordSchema.parse(input.record);
+      const create = db.transaction(() => {
+        const existingRow = getEntityStatement.get('regional_execution', record.id);
+
+        if (existingRow) {
+          const existing = parseEntity(
+            'regional_execution',
+            existingRow,
+            regionalExecutionRecordSchema
+          );
+          if (!existing) {
+            throw new Error('Persisted regional execution could not be decoded');
+          }
+          return {
+            record: existing,
+            created: false
+          };
+        }
+
+        for (const resource of input.resources) {
+          if (resource.executionJob.kind !== resource.result.kind) {
+            throw new Error('Regional execution resource kind does not match its queue job');
+          }
+          persistExecutionResource(resource.result);
+          enqueueExecution(resource.executionJob, now);
+        }
+
+        saveEntity('regional_execution', record);
+        return {
+          record,
+          created: true
+        };
+      });
+
+      return create();
+    },
+    saveRegionalExecution(record) {
+      saveEntity('regional_execution', regionalExecutionRecordSchema.parse(record));
     },
     createExecutionResource(input, now = new Date()) {
       if (input.executionJob.kind !== input.result.kind) {

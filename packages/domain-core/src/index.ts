@@ -159,12 +159,14 @@ export const defaultCustomRequestConfig = (): CustomRequestConfig => ({
   body: null
 });
 
+const normalizeRequestHeader = (header: RequestHeader): RequestHeader => ({
+  name: header.name.trim().toLowerCase(),
+  value: header.value.trim()
+});
+
 const canonicalizeHeaders = (headers: RequestHeader[]) =>
   [...headers]
-    .map((header) => ({
-      name: header.name.trim().toLowerCase(),
-      value: header.value.trim()
-    }))
+    .map(normalizeRequestHeader)
     .filter((header) => header.name.length > 0)
     .sort((left, right) => {
       if (left.name === right.name) {
@@ -181,7 +183,7 @@ const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => 
     method: normalized.method,
     headers: canonicalizeHeaders(normalized.headers ?? []),
     body:
-      normalized.body == null
+      normalized.body === null || normalized.body === undefined
         ? null
         : {
           mode: normalized.body.mode,
@@ -207,12 +209,9 @@ export const normalizeRegionalRequestConfig = (
 
   return {
     method: normalized.method,
-    headers: (normalized.headers ?? []).map((header) => ({
-      name: header.name.trim().toLowerCase(),
-      value: header.value.trim()
-    })),
+    headers: (normalized.headers ?? []).map(normalizeRequestHeader),
     body:
-      normalized.body == null
+      normalized.body === null || normalized.body === undefined
         ? null
         : {
           mode: normalized.body.mode,

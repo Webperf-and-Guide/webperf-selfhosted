@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export type ApiAuthSecrets = {
-  adminToken: string;
+  adminToken?: string;
   adminTokenNext?: string;
   internalSecret: string;
   internalSecretNext?: string;

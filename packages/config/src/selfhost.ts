@@ -38,7 +38,7 @@ export const selfhostApiEnvSchema = z.object({
     z.coerce.number().int().positive()
   ),
   SELFHOST_MIGRATION_BACKUP: normalizedBoolean('false'),
-  SELFHOST_ADMIN_TOKEN: z.string().trim().min(16),
+  SELFHOST_ADMIN_TOKEN: emptyStringToUndefined(z.string().trim().min(16)),
   SELFHOST_ADMIN_TOKEN_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
   SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
   SELFHOST_INTERNAL_SECRET_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
@@ -71,6 +71,14 @@ export const selfhostApiEnvSchema = z.object({
     z.string().regex(/^sha256:[a-f0-9]{64}$/)
   )
 }).superRefine((config, context) => {
+  if (config.SELFHOST_RUNTIME_MODE === 'full' && !config.SELFHOST_ADMIN_TOKEN) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Full self-host mode requires an administrator token',
+      path: ['SELFHOST_ADMIN_TOKEN']
+    });
+  }
+
   if (config.SELFHOST_RUNTIME_MODE === 'regional-runtime' && !config.REGIONAL_RUNTIME_SHARED_SECRET) {
     context.addIssue({
       code: 'custom',

@@ -100,12 +100,12 @@ describe('strict self-host configuration', () => {
 
   test('Issue #14 Phase 4: requires isolated credentials in regional runtime mode', () => {
     expect(() => parseSelfhostApiVars({
-      ...requiredApiSecrets,
+      SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
       SELFHOST_RUNTIME_MODE: 'regional-runtime'
     })).toThrow('dedicated shared secret');
 
     expect(parseSelfhostApiVars({
-      ...requiredApiSecrets,
+      SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
       SELFHOST_RUNTIME_MODE: 'regional-runtime',
       REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
       REGIONAL_RUNTIME_SHARED_SECRET_NEXT: 'regional-runtime-next-secret',
@@ -120,7 +120,7 @@ describe('strict self-host configuration', () => {
     });
 
     expect(() => parseSelfhostApiVars({
-      ...requiredApiSecrets,
+      SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
       SELFHOST_RUNTIME_MODE: 'regional-runtime',
       REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
       WEBPERF_RUNTIME_IMAGE_DIGEST: 'sha256:not-a-digest'
@@ -151,7 +151,7 @@ describe('strict self-host configuration', () => {
     expect(
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
-        ...executionSecrets
+        PROBE_SHARED_SECRET: executionSecrets.PROBE_SHARED_SECRET
       })
     ).toMatchObject({
       SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: false,
@@ -161,6 +161,14 @@ describe('strict self-host configuration', () => {
       SELFHOST_EXECUTOR_LEASE_DURATION_MS: 60_000,
       SELFHOST_EXECUTOR_MAX_EXECUTION_MS: 900_000
     });
+    expect(() =>
+      parseSelfhostExecutorVars({
+        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,
+        PROBE_SHARED_SECRET: executionSecrets.PROBE_SHARED_SECRET,
+        SELFHOST_BROWSER_AUDIT_BASE_URL: 'http://browser-audit:8080',
+        SELFHOST_EXECUTOR_ALLOW_INSECURE_BROWSER_AUDIT_HTTP: 'true'
+      })
+    ).toThrow('requires its shared secret');
     expect(() =>
       parseSelfhostExecutorVars({
         SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET,

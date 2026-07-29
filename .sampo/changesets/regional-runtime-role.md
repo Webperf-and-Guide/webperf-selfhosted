@@ -9,4 +9,6 @@ Cloud control plane and requires an isolated current/next handoff secret.
 The `WEBPERF_ROLE=regional-runtime` dispatcher now forces the restricted
 mode so role selection cannot accidentally expose the full self-host
 surface, while optional immutable image metadata supports result
-provenance.
+provenance. The restricted role no longer requires the unused self-host
+administrator credential, and executors without a Browser Audit origin no
+longer require an unused Browser Audit secret.

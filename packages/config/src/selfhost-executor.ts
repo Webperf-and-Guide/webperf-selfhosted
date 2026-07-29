@@ -27,7 +27,7 @@ export const selfhostExecutorEnvSchema = z
     SELFHOST_EXECUTOR_API_BASE_URL: z.string().url().default('http://127.0.0.1:8788'),
     SELFHOST_INTERNAL_SECRET: z.string().trim().min(16),
     PROBE_SHARED_SECRET: z.string().trim().min(16),
-    BROWSER_AUDIT_SHARED_SECRET: z.string().trim().min(16),
+    BROWSER_AUDIT_SHARED_SECRET: emptyStringToUndefined(z.string().trim().min(16)),
     SELFHOST_PROBE_BASE_URL: z.string().url().default(defaultSelfhostProbeBaseUrl),
     SELFHOST_BROWSER_AUDIT_BASE_URL: emptyStringToUndefined(z.string().url()),
     SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP: z.preprocess(
@@ -67,6 +67,14 @@ export const selfhostExecutorEnvSchema = z
     )
   })
   .superRefine((config, context) => {
+    if (config.SELFHOST_BROWSER_AUDIT_BASE_URL && !config.BROWSER_AUDIT_SHARED_SECRET) {
+      context.addIssue({
+        code: 'custom',
+        message: 'A configured Browser Audit runner requires its shared secret',
+        path: ['BROWSER_AUDIT_SHARED_SECRET']
+      });
+    }
+
     let apiUrl: URL | null = null;
 
     try {

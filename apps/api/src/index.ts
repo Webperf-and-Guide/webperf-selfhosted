@@ -180,7 +180,7 @@ type SelfhostRuntime = {
   artifactUploadTtlSeconds: number;
   retentionDays: number;
   migrationBackup: boolean;
-  adminToken: string;
+  adminToken?: string;
   adminTokenNext?: string;
   internalSecret: string;
   internalSecretNext?: string;
@@ -1496,7 +1496,10 @@ export const server = Bun.serve({
     )
       ? routedResponse
       : await redactJsonResponse(routedResponse);
-    return addCompatibilityDeprecationHeaders(request, response);
+    const cacheBoundedResponse = isRegionalRuntimeSurface(pathname)
+      ? withNoStore(response)
+      : response;
+    return addCompatibilityDeprecationHeaders(request, cacheBoundedResponse);
   }
 });
 

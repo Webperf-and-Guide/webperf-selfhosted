@@ -77,6 +77,7 @@ describe('regional runtime handoff', () => {
 
     const capabilitiesResponse = await fetch(`${harness.baseUrl}/v1/regional-capabilities`);
     expect(capabilitiesResponse.status).toBe(200);
+    expect(capabilitiesResponse.headers.get('cache-control')).toBe('no-store');
     expect(await capabilitiesResponse.json()).toMatchObject({
       protocolVersion: 1,
       regionId: 'tokyo',
@@ -152,6 +153,7 @@ describe('regional runtime handoff', () => {
       { headers: regionalAuthorization() }
     );
     expect(succeededResponse.status).toBe(200);
+    expect(succeededResponse.headers.get('cache-control')).toBe('no-store');
     const succeeded = regionalExecutionResultSchema.parse(await succeededResponse.json());
     expect(succeeded).toMatchObject({
       status: 'succeeded',

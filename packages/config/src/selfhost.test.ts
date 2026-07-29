@@ -98,6 +98,35 @@ describe('strict self-host configuration', () => {
     })).toThrow();
   });
 
+  test('Issue #14 Phase 4: requires isolated credentials in regional runtime mode', () => {
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_RUNTIME_MODE: 'regional-runtime'
+    })).toThrow('dedicated shared secret');
+
+    expect(parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_RUNTIME_MODE: 'regional-runtime',
+      REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
+      REGIONAL_RUNTIME_SHARED_SECRET_NEXT: 'regional-runtime-next-secret',
+      WEBPERF_RUNTIME_VERSION: '0.3.0',
+      WEBPERF_RUNTIME_IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`,
+      WEBPERF_PROBE_IMAGE_DIGEST: `sha256:${'b'.repeat(64)}`
+    })).toMatchObject({
+      SELFHOST_RUNTIME_MODE: 'regional-runtime',
+      REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
+      REGIONAL_RUNTIME_SHARED_SECRET_NEXT: 'regional-runtime-next-secret',
+      WEBPERF_RUNTIME_VERSION: '0.3.0'
+    });
+
+    expect(() => parseSelfhostApiVars({
+      ...requiredApiSecrets,
+      SELFHOST_RUNTIME_MODE: 'regional-runtime',
+      REGIONAL_RUNTIME_SHARED_SECRET: 'regional-runtime-current-secret',
+      WEBPERF_RUNTIME_IMAGE_DIGEST: 'sha256:not-a-digest'
+    })).toThrow();
+  });
+
   test('requires server-side console, scheduler, and executor credentials', () => {
     expect(() => parseSelfhostConsoleVars({})).toThrow();
     expect(() => parseSelfhostSchedulerVars({})).toThrow();

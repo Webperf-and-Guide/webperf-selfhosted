@@ -600,6 +600,76 @@ describe('SQLite operations', () => {
     database.close();
   });
 
+  test('deletes regional lifecycle groups across bounded batches', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    const insertEntity = database.query(`
+      INSERT INTO saved_entities (
+        kind, id, created_at, updated_at, payload_json
+      ) VALUES (
+        'regional_execution', ?,
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'
+      )
+    `);
+    const insertJob = database.query(`
+      INSERT INTO jobs (
+        id, url, status, requested_at, updated_at, payload_json
+      ) VALUES (
+        ?, 'https://example.com/', 'succeeded',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'payload'
+      )
+    `);
+    const insertExecution = database.query(`
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      ) VALUES (
+        ?, 'network_probe', ?, 'succeeded', NULL, NULL, 1, 3,
+        '2026-01-01T00:00:00.000Z', 'payload', NULL,
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z'
+      )
+    `);
+    const insertLink = database.query(`
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (?, ?, ?)
+    `);
+    const seed = database.transaction(() => {
+      for (let index = 0; index < 501; index += 1) {
+        const regionalId = `regional_batch_${index}`;
+        const executionId = `exec_regional_batch_${index}`;
+        const jobId = `job_regional_batch_${index}`;
+        insertEntity.run(regionalId);
+        insertJob.run(jobId);
+        insertExecution.run(executionId, regionalId);
+        insertLink.run(regionalId, executionId, jobId);
+      }
+    });
+    seed.immediate();
+    insertEntity.finalize();
+    insertJob.finalize();
+    insertExecution.finalize();
+    insertLink.finalize();
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 501,
+      checkRuns: 0,
+      executionJobs: 501,
+      derivedResources: 501,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM regional_execution_targets
+    `).get()?.count).toBe(0);
+    database.close();
+  });
+
   test('cleans derived resources from an intentionally partial schema', () => {
     const database = new Database(':memory:');
     database.exec(`

@@ -1970,6 +1970,9 @@ function buildRegionalExecutionTargetResult(
   const target = job?.targets[0] ?? null;
   const executionJob = repository.getExecutionJob(link.executionJobId);
   let status: RegionalExecutionTargetResult['status'];
+  // Result persistence happens before the executor commits the terminal queue
+  // transition. Keep a finished measurement non-terminal until both records
+  // agree so Cloud never observes success that can later regress.
   if (
     executionJob?.status === 'succeeded'
     && target?.status === 'succeeded'

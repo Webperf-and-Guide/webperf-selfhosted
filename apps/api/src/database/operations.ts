@@ -71,20 +71,10 @@ const cleanupRegionalExecutionGroups = (
   database: Database,
   cutoffIso: string
 ) => {
-  if (
-    !tableExists(database, 'saved_entities')
-    || !tableExists(database, 'regional_execution_targets')
-    || !tableExists(database, 'jobs')
-    || !tableExists(database, 'execution_jobs')
-  ) {
-    return {
-      jobs: 0,
-      executionJobs: 0,
-      derivedResources: 0
-    };
-  }
-
-  const nextEligibleGroup = database.query<{ id: string }, [string, string, string]>(`
+  const nextEligibleGroups = database.query<
+    { id: string },
+    [string, string, string, number]
+  >(`
     SELECT entity.id
     FROM saved_entities AS entity
     WHERE entity.kind = 'regional_execution'
@@ -112,7 +102,7 @@ const cleanupRegionalExecutionGroups = (
           )
       )
     ORDER BY entity.updated_at ASC, entity.id ASC
-    LIMIT 1
+    LIMIT ?
   `);
   const deleteJobs = database.query(`
     DELETE FROM jobs
@@ -140,19 +130,31 @@ const cleanupRegionalExecutionGroups = (
     WHERE kind = 'regional_execution'
       AND id = ?
   `);
-  const deleteOneGroup = database.transaction(() => {
-    const candidate = nextEligibleGroup.get(cutoffIso, cutoffIso, cutoffIso);
-    if (!candidate) {
-      return null;
-    }
-
-    const jobs = countChanges(deleteJobs.run(candidate.id));
-    const executionJobs = countChanges(
-      deleteExecutionJobs.run(candidate.id, candidate.id)
+  const deleteGroupBatch = database.transaction(() => {
+    const candidates = nextEligibleGroups.all(
+      cutoffIso,
+      cutoffIso,
+      cutoffIso,
+      retentionDeleteBatchSize
     );
-    deleteTargetLinks.run(candidate.id);
-    const derivedResources = countChanges(deleteRegionalExecution.run(candidate.id));
-    return { jobs, executionJobs, derivedResources };
+    let jobs = 0;
+    let executionJobs = 0;
+    let derivedResources = 0;
+
+    for (const candidate of candidates) {
+      jobs += countChanges(deleteJobs.run(candidate.id));
+      executionJobs += countChanges(
+        deleteExecutionJobs.run(candidate.id, candidate.id)
+      );
+      deleteTargetLinks.run(candidate.id);
+      derivedResources += countChanges(deleteRegionalExecution.run(candidate.id));
+    }
+    return {
+      groupCount: candidates.length,
+      jobs,
+      executionJobs,
+      derivedResources
+    };
   });
 
   let jobs = 0;
@@ -161,16 +163,16 @@ const cleanupRegionalExecutionGroups = (
 
   try {
     while (true) {
-      const deleted = deleteOneGroup.immediate();
-      if (!deleted) {
-        return { jobs, executionJobs, derivedResources };
-      }
+      const deleted = deleteGroupBatch.immediate();
       jobs += deleted.jobs;
       executionJobs += deleted.executionJobs;
       derivedResources += deleted.derivedResources;
+      if (deleted.groupCount < retentionDeleteBatchSize) {
+        return { jobs, executionJobs, derivedResources };
+      }
     }
   } finally {
-    nextEligibleGroup.finalize();
+    nextEligibleGroups.finalize();
     deleteJobs.finalize();
     deleteExecutionJobs.finalize();
     deleteTargetLinks.finalize();
@@ -369,10 +371,12 @@ export const cleanupSqliteRetention = (
     && tableExists(database, 'jobs')
     && tableExists(database, 'execution_jobs')
   );
-  const regionalGroups = cleanupRegionalExecutionGroups(database, cutoffIso);
-  jobs += regionalGroups.jobs;
-  executionJobs += regionalGroups.executionJobs;
-  derivedResources += regionalGroups.derivedResources;
+  if (hasRegionalGroupTables) {
+    const regionalGroups = cleanupRegionalExecutionGroups(database, cutoffIso);
+    jobs += regionalGroups.jobs;
+    executionJobs += regionalGroups.executionJobs;
+    derivedResources += regionalGroups.derivedResources;
+  }
 
   if (!hasRegionalGroupTables && tableExists(database, 'saved_entities')) {
     const statement = database.query<never, [string, number]>(`

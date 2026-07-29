@@ -361,20 +361,24 @@ const verifyHmacSha256 = async (
     return false;
   }
 
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(sharedSecret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify']
-  );
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(sharedSecret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
 
-  return crypto.subtle.verify(
-    'HMAC',
-    key,
-    hexToBytes(signature),
-    new TextEncoder().encode(payload)
-  );
+    return await crypto.subtle.verify(
+      'HMAC',
+      key,
+      hexToBytes(signature),
+      new TextEncoder().encode(payload)
+    );
+  } catch {
+    return false;
+  }
 };
 
 const createSha256 = async (payload: string) =>
@@ -385,8 +389,15 @@ const createSha256 = async (payload: string) =>
 const bytesToHex = (value: Uint8Array) =>
   [...value].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
-const hexToBytes = (value: string) =>
-  Uint8Array.from(value.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16));
+const hexToBytes = (value: string) => {
+  if (value.length % 2 !== 0 || !/^[a-f0-9]*$/.test(value)) {
+    throw new Error('Hex input must contain complete lowercase byte pairs');
+  }
+  return Uint8Array.from(
+    value.match(/.{2}/g) ?? [],
+    (byte) => Number.parseInt(byte, 16)
+  );
+};
 
 const stableStringify = (value: unknown): string =>
   JSON.stringify(sortJsonValue(value));

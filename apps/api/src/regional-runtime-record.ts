@@ -5,12 +5,13 @@ import {
   regionalExecutionProvenanceSchema,
   regionalExecutionRequestSchema,
   regionalExecutionSignatureSchema,
+  regionalExecutionTargetSchema,
   regionalRuntimeMaxBatchSize
 } from '@webperf/contracts';
 
 export const regionalExecutionTargetLinkSchema = z.object({
-  targetId: z.string().min(1).max(120),
-  jobId: z.string().min(1).max(160),
+  targetId: regionalExecutionTargetSchema.shape.targetId,
+  jobId: executionJobIdSchema,
   executionJobId: executionJobIdSchema
 });
 export type RegionalExecutionTargetLink = z.infer<typeof regionalExecutionTargetLinkSchema>;

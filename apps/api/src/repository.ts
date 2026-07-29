@@ -1240,7 +1240,7 @@ export const createSqliteJobRepository = ({
             regionalExecutionRecordSchema
           );
           if (!existing) {
-            throw new Error('Persisted regional execution could not be decoded');
+            throw new Error(`Regional execution ${record.id} could not be decoded`);
           }
           persistRegionalExecutionTargetLinks(existing);
           return {
@@ -1251,7 +1251,10 @@ export const createSqliteJobRepository = ({
 
         for (const resource of input.resources) {
           if (resource.executionJob.kind !== resource.result.kind) {
-            throw new Error('Regional execution resource kind does not match its queue job');
+            throw new Error(
+              `Regional execution resource kind ${resource.result.kind} does not match `
+              + `queue job kind ${resource.executionJob.kind}`
+            );
           }
           persistExecutionResource(resource.result);
           enqueueExecution(resource.executionJob, now);
@@ -1282,7 +1285,7 @@ export const createSqliteJobRepository = ({
           regionalExecutionRecordSchema
         );
         if (!record) {
-          throw new Error('Persisted regional execution could not be decoded');
+          throw new Error(`Regional execution ${input.id} could not be decoded`);
         }
         const nowIso = now.toISOString();
         return terminateRegionalExecutionRecord(record, input.reason, nowIso);

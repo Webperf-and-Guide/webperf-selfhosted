@@ -54,4 +54,15 @@ describe('regional execution record', () => {
       deadlineExceededAt: '2026-07-29T00:01:00.100Z'
     }).success).toBe(false);
   });
+
+  test('reuses bounded safe identifiers for persisted target links', () => {
+    expect(regionalExecutionRecordSchema.safeParse(record).success).toBe(true);
+    expect(regionalExecutionRecordSchema.safeParse({
+      ...record,
+      targetLinks: [{
+        ...record.targetLinks[0],
+        jobId: '../job-homepage'
+      }]
+    }).success).toBe(false);
+  });
 });

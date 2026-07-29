@@ -49,7 +49,7 @@ compose() {
 
 cleanup() {
   compose down -v --remove-orphans >/dev/null 2>&1 || true
-  rm -f "$temp_env"
+  rm -f "$temp_env" "${temp_env}.next"
 }
 trap cleanup EXIT
 
@@ -62,17 +62,17 @@ replace_env() {
   local key="$1"
   local value="$2"
   local next_file="${temp_env}.next"
-  awk -v target="$key" -v replacement="$value" '
+  AWK_TARGET="$key" AWK_REPLACEMENT="$value" awk '
     BEGIN { found = 0 }
-    index($0, target "=") == 1 {
-      print target "=" replacement
+    index($0, ENVIRON["AWK_TARGET"] "=") == 1 {
+      print ENVIRON["AWK_TARGET"] "=" ENVIRON["AWK_REPLACEMENT"]
       found = 1
       next
     }
     { print }
     END {
       if (!found) {
-        print target "=" replacement
+        print ENVIRON["AWK_TARGET"] "=" ENVIRON["AWK_REPLACEMENT"]
       }
     }
   ' "$temp_env" > "$next_file"

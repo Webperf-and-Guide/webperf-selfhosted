@@ -16,6 +16,7 @@ import {
 import { browserAuditArtifactUploadConfigSchema } from './browser-audit';
 
 export const networkProbeMaxJobsPerExecution = 20;
+export const executionFollowupMaxJobs = 20;
 
 export const networkProbeExecutionPayloadSchema = z
   .object({
@@ -161,13 +162,13 @@ export type ExecutionResourceResultRequest = z.infer<typeof executionResourceRes
 export const executionFollowupsRequestSchema = executionJobOwnerRequestSchema.extend({
   jobs: z.array(enqueueExecutionJobSchema)
     .min(1)
-    .max(networkProbeMaxJobsPerExecution)
+    .max(executionFollowupMaxJobs)
 });
 export type ExecutionFollowupsRequest = z.infer<typeof executionFollowupsRequestSchema>;
 
 export const executionFollowupsResponseSchema = z.object({
   jobs: z.array(executionJobSchema)
     .min(1)
-    .max(networkProbeMaxJobsPerExecution)
+    .max(executionFollowupMaxJobs)
 });
 export type ExecutionFollowupsResponse = z.infer<typeof executionFollowupsResponseSchema>;

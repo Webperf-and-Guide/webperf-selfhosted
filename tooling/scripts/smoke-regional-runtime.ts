@@ -31,12 +31,14 @@ const unsignedRequest = {
 } satisfies Omit<RegionalExecutionRequest, 'signature'>;
 const authorization = { authorization: `Bearer ${sharedSecret}` };
 
-const capabilitiesResponse = await fetch(`${baseUrl}/v1/regional-capabilities`, {
-  signal: AbortSignal.timeout(5_000)
-});
+const capabilitiesResponse = await requestStep(
+  'regional capabilities',
+  `${baseUrl}/v1/regional-capabilities`,
+  { signal: AbortSignal.timeout(5_000) }
+);
 assert(capabilitiesResponse.ok, 'regional capabilities request failed');
 const capabilities = regionalRuntimeCapabilitiesSchema.parse(
-  await capabilitiesResponse.json()
+  await parseJsonStep('regional capabilities', capabilitiesResponse)
 );
 assert(capabilities.regionId === expectedRegion, 'regional runtime reported the wrong region');
 assert(
@@ -45,31 +47,42 @@ assert(
   'regional runtime advertised an unexpected runner surface'
 );
 
-const fullSurfaceResponse = await fetch(`${baseUrl}/v1/sites`, {
-  headers: authorization,
-  signal: AbortSignal.timeout(5_000)
-});
+const fullSurfaceResponse = await requestStep(
+  'restricted surface',
+  `${baseUrl}/v1/sites`,
+  {
+    headers: authorization,
+    signal: AbortSignal.timeout(5_000)
+  }
+);
 assert(fullSurfaceResponse.status === 404, 'regional mode exposed the full self-host API');
 
-const createResponse = await fetch(`${baseUrl}/v1/regional-executions`, {
-  method: 'POST',
-  headers: {
-    ...authorization,
-    'content-type': 'application/json'
-  },
-  body: JSON.stringify({
-    ...unsignedRequest,
-    signature: await createRegionalExecutionSignature(sharedSecret, unsignedRequest)
-  }),
-  signal: AbortSignal.timeout(10_000)
-});
+const createResponse = await requestStep(
+  'regional execution creation',
+  `${baseUrl}/v1/regional-executions`,
+  {
+    method: 'POST',
+    headers: {
+      ...authorization,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      ...unsignedRequest,
+      signature: await createRegionalExecutionSignature(sharedSecret, unsignedRequest)
+    }),
+    signal: AbortSignal.timeout(10_000)
+  }
+);
 assert(createResponse.status === 202, `regional execution returned ${createResponse.status}`);
-await verifySignedResult(await createResponse.json());
+await verifySignedResult(
+  await parseJsonStep('regional execution creation', createResponse)
+);
 
 const deadline = Date.now() + 90_000;
 let status = 'queued';
 while (Date.now() < deadline) {
-  const response = await fetch(
+  const response = await requestStep(
+    'regional execution poll',
     `${baseUrl}/v1/regional-executions/${encodeURIComponent(idempotencyKey)}`,
     {
       headers: authorization,
@@ -77,7 +90,9 @@ while (Date.now() < deadline) {
     }
   );
   assert(response.ok, `regional execution poll returned ${response.status}`);
-  const result = await verifySignedResult(await response.json());
+  const result = await verifySignedResult(
+    await parseJsonStep('regional execution poll', response)
+  );
   status = result.status;
   if (status === 'succeeded') {
     const target = result.targets[0];
@@ -98,6 +113,26 @@ while (Date.now() < deadline) {
 }
 
 throw new Error(`regional execution did not finish before the smoke deadline (last status ${status})`);
+
+async function requestStep(
+  step: string,
+  url: string,
+  init: RequestInit
+) {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(`${step} request failed`);
+  }
+}
+
+async function parseJsonStep(step: string, response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error(`${step} returned invalid JSON`);
+  }
+}
 
 async function verifySignedResult(value: unknown) {
   const result = regionalExecutionResultSchema.parse(value);

@@ -502,6 +502,104 @@ describe('SQLite operations', () => {
     database.close();
   });
 
+  test('retains and deletes each regional execution as one lifecycle unit', () => {
+    const { databasePath } = createTempPaths();
+    const { database } = migrateDatabase(databasePath);
+    database.exec(`
+      INSERT INTO saved_entities (
+        kind, id, created_at, updated_at, payload_json
+      ) VALUES (
+        'regional_execution', 'regional_recent_completion',
+        '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO jobs (
+        id, url, status, requested_at, updated_at, payload_json
+      ) VALUES (
+        'job_recent_completion', 'https://example.com/', 'succeeded',
+        '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 'payload'
+      );
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      ) VALUES (
+        'exec_recent_completion', 'network_probe', 'regional_recent_completion',
+        'succeeded', NULL, NULL, 1, 3,
+        '2026-05-01T00:00:00.000Z', 'payload', NULL,
+        '2026-05-01T00:00:00.000Z', '2026-07-20T00:00:00.000Z',
+        '2026-07-20T00:00:00.000Z'
+      );
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (
+        'regional_recent_completion',
+        'exec_recent_completion',
+        'job_recent_completion'
+      );
+    `);
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-07-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 0,
+      checkRuns: 0,
+      executionJobs: 0,
+      derivedResources: 0,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM saved_entities
+      WHERE kind = 'regional_execution'
+    `).get()?.count).toBe(1);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM jobs WHERE id = 'job_recent_completion'
+    `).get()?.count).toBe(1);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM execution_jobs
+      WHERE id = 'exec_recent_completion'
+    `).get()?.count).toBe(1);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM regional_execution_targets
+      WHERE regional_execution_id = 'regional_recent_completion'
+    `).get()?.count).toBe(1);
+
+    expect(cleanupSqliteRetention(
+      database,
+      30,
+      new Date('2026-08-22T00:00:00.000Z')
+    )).toEqual({
+      jobs: 1,
+      checkRuns: 0,
+      executionJobs: 1,
+      derivedResources: 1,
+      artifactIndexes: 0
+    });
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM regional_execution_targets
+      WHERE regional_execution_id = 'regional_recent_completion'
+    `).get()?.count).toBe(0);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM saved_entities
+      WHERE kind = 'regional_execution'
+    `).get()?.count).toBe(0);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count FROM jobs WHERE id = 'job_recent_completion'
+    `).get()?.count).toBe(0);
+    expect(database.query<{ count: number }, []>(`
+      SELECT COUNT(*) AS count
+      FROM execution_jobs
+      WHERE id = 'exec_recent_completion'
+    `).get()?.count).toBe(0);
+    database.close();
+  });
+
   test('cleans derived resources from an intentionally partial schema', () => {
     const database = new Database(':memory:');
     database.exec(`

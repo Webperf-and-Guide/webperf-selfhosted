@@ -67,6 +67,117 @@ const deleteRowsInBatches = (deleteBatch: () => unknown) => {
   }
 };
 
+const cleanupRegionalExecutionGroups = (
+  database: Database,
+  cutoffIso: string
+) => {
+  if (
+    !tableExists(database, 'saved_entities')
+    || !tableExists(database, 'regional_execution_targets')
+    || !tableExists(database, 'jobs')
+    || !tableExists(database, 'execution_jobs')
+  ) {
+    return {
+      jobs: 0,
+      executionJobs: 0,
+      derivedResources: 0
+    };
+  }
+
+  const nextEligibleGroup = database.query<{ id: string }, [string, string, string]>(`
+    SELECT entity.id
+    FROM saved_entities AS entity
+    WHERE entity.kind = 'regional_execution'
+      AND entity.updated_at < ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM regional_execution_targets AS target_link
+        JOIN jobs AS job
+          ON job.id = target_link.job_id
+        WHERE target_link.regional_execution_id = entity.id
+          AND (
+            job.requested_at >= ?
+            OR job.status NOT IN ('succeeded', 'failed', 'partial')
+          )
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM execution_jobs AS execution
+        WHERE execution.resource_id = entity.id
+          AND execution.kind = 'network_probe'
+          AND (
+            execution.status NOT IN ('succeeded', 'failed', 'cancelled')
+            OR execution.completed_at IS NULL
+            OR execution.completed_at >= ?
+          )
+      )
+    ORDER BY entity.updated_at ASC, entity.id ASC
+    LIMIT 1
+  `);
+  const deleteJobs = database.query(`
+    DELETE FROM jobs
+    WHERE id IN (
+      SELECT job_id
+      FROM regional_execution_targets
+      WHERE regional_execution_id = ?
+    )
+  `);
+  const deleteExecutionJobs = database.query(`
+    DELETE FROM execution_jobs
+    WHERE (resource_id = ? AND kind = 'network_probe')
+      OR id IN (
+        SELECT execution_job_id
+        FROM regional_execution_targets
+        WHERE regional_execution_id = ?
+      )
+  `);
+  const deleteTargetLinks = database.query(`
+    DELETE FROM regional_execution_targets
+    WHERE regional_execution_id = ?
+  `);
+  const deleteRegionalExecution = database.query(`
+    DELETE FROM saved_entities
+    WHERE kind = 'regional_execution'
+      AND id = ?
+  `);
+  const deleteOneGroup = database.transaction(() => {
+    const candidate = nextEligibleGroup.get(cutoffIso, cutoffIso, cutoffIso);
+    if (!candidate) {
+      return null;
+    }
+
+    const jobs = countChanges(deleteJobs.run(candidate.id));
+    const executionJobs = countChanges(
+      deleteExecutionJobs.run(candidate.id, candidate.id)
+    );
+    deleteTargetLinks.run(candidate.id);
+    const derivedResources = countChanges(deleteRegionalExecution.run(candidate.id));
+    return { jobs, executionJobs, derivedResources };
+  });
+
+  let jobs = 0;
+  let executionJobs = 0;
+  let derivedResources = 0;
+
+  try {
+    while (true) {
+      const deleted = deleteOneGroup.immediate();
+      if (!deleted) {
+        return { jobs, executionJobs, derivedResources };
+      }
+      jobs += deleted.jobs;
+      executionJobs += deleted.executionJobs;
+      derivedResources += deleted.derivedResources;
+    }
+  } finally {
+    nextEligibleGroup.finalize();
+    deleteJobs.finalize();
+    deleteExecutionJobs.finalize();
+    deleteTargetLinks.finalize();
+    deleteRegionalExecution.finalize();
+  }
+};
+
 const tableExists = (database: Database, table: string) => Boolean(
   database
     .query<{ name: string }, [string]>(
@@ -252,10 +363,40 @@ export const cleanupSqliteRetention = (
   let derivedResources = 0;
   let artifactIndexes = 0;
 
+  const hasRegionalGroupTables = (
+    tableExists(database, 'saved_entities')
+    && tableExists(database, 'regional_execution_targets')
+    && tableExists(database, 'jobs')
+    && tableExists(database, 'execution_jobs')
+  );
+  const regionalGroups = cleanupRegionalExecutionGroups(database, cutoffIso);
+  jobs += regionalGroups.jobs;
+  executionJobs += regionalGroups.executionJobs;
+  derivedResources += regionalGroups.derivedResources;
+
+  if (!hasRegionalGroupTables && tableExists(database, 'saved_entities')) {
+    const statement = database.query<never, [string, number]>(`
+      DELETE FROM saved_entities
+      WHERE rowid IN (
+        SELECT rowid
+        FROM saved_entities
+        WHERE kind = 'regional_execution'
+          AND updated_at < ?
+        LIMIT ?
+      )
+    `);
+    try {
+      derivedResources += deleteRowsInBatches(
+        () => statement.run(cutoffIso, retentionDeleteBatchSize)
+      );
+    } finally {
+      statement.finalize();
+    }
+  }
+
   if (tableExists(database, 'jobs')) {
     const statement = (
       tableExists(database, 'regional_execution_targets')
-      && tableExists(database, 'execution_jobs')
     )
       ? database.query<never, [string, number]>(`
       DELETE FROM jobs
@@ -267,12 +408,7 @@ export const cleanupSqliteRetention = (
           AND NOT EXISTS (
             SELECT 1
             FROM regional_execution_targets AS target_link
-            JOIN execution_jobs AS active_execution
-              ON active_execution.resource_id = target_link.regional_execution_id
             WHERE target_link.job_id = job.id
-              -- Preserve every completed sibling result while any target in
-              -- the same regional request can still resume.
-              AND active_execution.status IN ('queued', 'leased', 'running')
           )
         LIMIT ?
       )
@@ -287,7 +423,7 @@ export const cleanupSqliteRetention = (
       )
     `);
     try {
-      jobs = deleteRowsInBatches(() => statement.run(cutoffIso, retentionDeleteBatchSize));
+      jobs += deleteRowsInBatches(() => statement.run(cutoffIso, retentionDeleteBatchSize));
     } finally {
       statement.finalize();
     }
@@ -319,10 +455,7 @@ export const cleanupSqliteRetention = (
           AND NOT EXISTS (
             SELECT 1
             FROM regional_execution_targets AS target_link
-            JOIN execution_jobs AS active_execution
-              ON active_execution.resource_id = target_link.regional_execution_id
             WHERE target_link.execution_job_id = execution.id
-              AND active_execution.status IN ('queued', 'leased', 'running')
           )
         LIMIT ?
       )
@@ -337,7 +470,7 @@ export const cleanupSqliteRetention = (
       )
     `);
     try {
-      executionJobs = deleteRowsInBatches(
+      executionJobs += deleteRowsInBatches(
         () => statement.run(cutoffIso, retentionDeleteBatchSize)
       );
     } finally {
@@ -356,8 +489,7 @@ export const cleanupSqliteRetention = (
           'comparison',
           'export',
           'analysis',
-          'browser_audit',
-          'regional_execution'
+          'browser_audit'
         )
           AND entity.updated_at < ?
           AND (
@@ -369,17 +501,6 @@ export const cleanupSqliteRetention = (
                 AND execution.resource_id = entity.id
                 -- Active work intentionally survives retention so a stopped
                 -- executor can resume it even after a long operator outage.
-                AND execution.status IN ('queued', 'leased', 'running')
-            )
-          )
-          AND (
-            entity.kind != 'regional_execution'
-            OR NOT EXISTS (
-              SELECT 1
-              FROM execution_jobs AS execution
-              WHERE execution.resource_id = entity.id
-                -- Regional idempotency/status records are retained while any
-                -- linked work can still resume.
                 AND execution.status IN ('queued', 'leased', 'running')
             )
           )
@@ -395,15 +516,14 @@ export const cleanupSqliteRetention = (
           'comparison',
           'export',
           'analysis',
-          'browser_audit',
-          'regional_execution'
+          'browser_audit'
         )
           AND updated_at < ?
         LIMIT ?
       )
     `);
     try {
-      derivedResources = deleteRowsInBatches(
+      derivedResources += deleteRowsInBatches(
         () => statement.run(cutoffIso, retentionDeleteBatchSize)
       );
     } finally {

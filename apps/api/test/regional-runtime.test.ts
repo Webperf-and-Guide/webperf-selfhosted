@@ -83,6 +83,13 @@ describe('regional runtime handoff', () => {
     servers.push(probe);
     let harness = await startRegionalRuntime(probe.port!);
 
+    const healthResponse = await fetch(`${harness.baseUrl}/health`);
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.json()).toEqual({
+      service: 'webperf-api',
+      ok: true
+    });
+
     const capabilitiesResponse = await fetch(`${harness.baseUrl}/v1/regional-capabilities`);
     expect(capabilitiesResponse.status).toBe(200);
     expect(capabilitiesResponse.headers.get('cache-control')).toBe('no-store');
@@ -188,7 +195,39 @@ describe('regional runtime handoff', () => {
     };
     expect((await sendRegionalExecution(harness.baseUrl, expired)).status).toBe(401);
 
-    await drainRegionalExecutions(harness.baseUrl, probe.port!);
+    const stagedClient = createExecutorApiClient({
+      baseUrl: harness.baseUrl,
+      internalSecret
+    });
+    const stagedLease = {
+      leaseOwner: 'regional-runtime-staged-executor',
+      leaseDurationMs: 60_000
+    };
+    const stagedExecution = await stagedClient.claim(stagedLease);
+    expect(stagedExecution).not.toBeNull();
+    const stagedRunning = await stagedClient.start(stagedExecution!.id, stagedLease);
+    const stagedHandler = createNetworkExecutionHandler({
+      client: stagedClient,
+      leaseOwner: stagedLease.leaseOwner,
+      probeSharedSecret: probeSecret,
+      probeBaseUrl: `http://127.0.0.1:${probe.port!}`
+    });
+    await stagedHandler(stagedRunning, new AbortController().signal);
+
+    const persistedBeforeQueueCompletion = regionalExecutionResultSchema.parse(
+      await (await fetch(
+        `${harness.baseUrl}/v1/regional-executions/${
+          encodeURIComponent(unsigned.idempotencyKey)
+        }`,
+        { headers: regionalAuthorization() }
+      )).json()
+    );
+    expect(persistedBeforeQueueCompletion.status).toBe('running');
+    expect(persistedBeforeQueueCompletion.targets[0]?.status).toBe('running');
+
+    await stagedClient.complete(stagedRunning.id, {
+      leaseOwner: stagedLease.leaseOwner
+    });
     expect(probeRequests).toHaveLength(1);
 
     const succeededResponse = await fetch(

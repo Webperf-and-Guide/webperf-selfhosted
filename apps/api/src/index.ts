@@ -275,6 +275,11 @@ const buildHealthPayload = () => ({
   }
 });
 
+const buildProcessHealthPayload = () => ({
+  service: 'webperf-api',
+  ok: true
+});
+
 const buildPublicCapabilitiesPayload = () => ({
   deploymentModel: 'selfhost' as const,
   runtimeMode: runtime.runtimeMode,
@@ -821,7 +826,7 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/health') {
-      return json({ service: 'webperf-api', ok: true });
+      return json(buildProcessHealthPayload());
     }
 
     if (
@@ -1965,9 +1970,17 @@ function buildRegionalExecutionTargetResult(
   const target = job?.targets[0] ?? null;
   const executionJob = repository.getExecutionJob(link.executionJobId);
   let status: RegionalExecutionTargetResult['status'];
-  if (target?.status === 'succeeded') {
+  if (
+    executionJob?.status === 'succeeded'
+    && target?.status === 'succeeded'
+  ) {
     status = 'succeeded';
-  } else if (target?.status === 'failed' || record.deadlineExceededAt) {
+  } else if (
+    executionJob?.status === 'succeeded'
+    && target?.status === 'failed'
+  ) {
+    status = 'failed';
+  } else if (record.deadlineExceededAt) {
     status = 'failed';
   } else if (record.cancelledAt || executionJob?.status === 'cancelled') {
     status = 'cancelled';
@@ -1976,7 +1989,13 @@ function buildRegionalExecutionTargetResult(
     || executionJob?.status === 'succeeded'
   ) {
     status = 'failed';
-  } else if (target?.status === 'measuring' || executionJob?.status === 'running') {
+  } else if (
+    target?.status === 'measuring'
+    || target?.status === 'succeeded'
+    || target?.status === 'failed'
+    || executionJob?.status === 'leased'
+    || executionJob?.status === 'running'
+  ) {
     status = 'running';
   } else {
     status = 'queued';

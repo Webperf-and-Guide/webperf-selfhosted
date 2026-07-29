@@ -442,15 +442,25 @@ export const cleanupSqliteRetention = (
     tableExists(database, 'regional_execution_targets')
     && tableExists(database, 'saved_entities')
   ) {
-    database.exec(`
+    const statement = database.query<never, [number]>(`
       DELETE FROM regional_execution_targets
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM saved_entities AS entity
-        WHERE entity.kind = 'regional_execution'
-          AND entity.id = regional_execution_targets.regional_execution_id
+      WHERE rowid IN (
+        SELECT target_link.rowid
+        FROM regional_execution_targets AS target_link
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM saved_entities AS entity
+          WHERE entity.kind = 'regional_execution'
+            AND entity.id = target_link.regional_execution_id
+        )
+        LIMIT ?
       )
     `);
+    try {
+      deleteRowsInBatches(() => statement.run(retentionDeleteBatchSize));
+    } finally {
+      statement.finalize();
+    }
   }
 
   return { jobs, checkRuns, executionJobs, derivedResources, artifactIndexes };

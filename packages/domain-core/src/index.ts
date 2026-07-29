@@ -213,13 +213,21 @@ export const createProbeSignature = async (
 export type RegionalExecutionSignatureRequest = Omit<RegionalExecutionRequest, 'signature'>;
 export type RegionalResultSignatureRequest = Omit<RegionalExecutionResult, 'signature'>;
 
+const canonicalizeRegionalTargets = (
+  targets: RegionalExecutionSignatureRequest['targets']
+) => targets.map((target) => ({
+  targetId: target.targetId,
+  url: target.url,
+  request: canonicalizeRequestConfig(target.request)
+}));
+
 export const toRegionalExecutionSignaturePayload = (
   request: RegionalExecutionSignatureRequest
 ) =>
   stableStringify({
     idempotencyKey: request.idempotencyKey,
     runnerType: request.runnerType,
-    targets: request.targets,
+    targets: canonicalizeRegionalTargets(request.targets),
     deadlineMs: request.deadlineMs,
     maxAttempts: request.maxAttempts,
     timestamp: request.timestamp,
@@ -252,11 +260,7 @@ export const createRegionalExecutionRequestDigest = async (
     stableStringify({
       idempotencyKey: request.idempotencyKey,
       runnerType: request.runnerType,
-      targets: request.targets.map((target) => ({
-        targetId: target.targetId,
-        url: target.url,
-        request: canonicalizeRequestConfig(target.request)
-      })),
+      targets: canonicalizeRegionalTargets(request.targets),
       deadlineMs: request.deadlineMs,
       maxAttempts: request.maxAttempts
     })

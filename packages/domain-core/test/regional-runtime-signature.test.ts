@@ -72,6 +72,16 @@ describe('regional runtime signatures', () => {
     expect(toRegionalExecutionSignaturePayload(unsignedRequest)).toBe(
       '{"deadlineMs":60000,"idempotencyKey":"release_123:tokyo","keyVersion":"current","maxAttempts":3,"runnerType":"network_probe","targets":[{"request":{"body":null,"headers":[{"name":"accept","value":"text/html"}],"method":"GET"},"targetId":"homepage","url":"https://example.com/"}],"timestamp":"2026-07-29T00:00:00.000Z"}'
     );
+    expect(toRegionalExecutionSignaturePayload({
+      ...unsignedRequest,
+      targets: unsignedRequest.targets.map((target) => ({
+        ...target,
+        request: {
+          ...target.request,
+          headers: [{ name: ' Accept ', value: ' text/html ' }]
+        }
+      }))
+    })).toBe(toRegionalExecutionSignaturePayload(unsignedRequest));
 
     const signature = await createRegionalExecutionSignature(
       'regional-runtime-test-secret',
@@ -132,6 +142,13 @@ describe('regional runtime signatures', () => {
         url: target.url
       }))
     })).toBe(await createRegionalExecutionRequestDigest(explicitDefaultRequest));
+    expect(toRegionalExecutionSignaturePayload({
+      ...explicitDefaultRequest,
+      targets: explicitDefaultRequest.targets.map((target) => ({
+        targetId: target.targetId,
+        url: target.url
+      }))
+    })).toBe(toRegionalExecutionSignaturePayload(explicitDefaultRequest));
     expect(await createRegionalExecutionRequestDigest({
       ...unsignedRequest,
       deadlineMs: 120_000

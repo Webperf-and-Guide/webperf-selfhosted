@@ -298,7 +298,7 @@ export function prepareRepositoryRelease({
 
   // Each replacement is atomic. Writing the changelog first is intentional:
   // its release marker lets a retry recognize and finish any partial VERSION
-  // or deployment-template update without incrementing the version twice.
+  // or environment-file update without incrementing the version twice.
   writeTextFileAtomically(changelogFile, nextChangelog);
   writeTextFileAtomically(
     composeEnvironmentFile,

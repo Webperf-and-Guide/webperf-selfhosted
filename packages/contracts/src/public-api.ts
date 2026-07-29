@@ -11,6 +11,7 @@ import {
 import { probeImplementationSchema, probeMeasurementSchema } from './probe-model';
 import { runtimeRegionIdSchema, runtimeLocationSchema } from './regions';
 import type { RuntimeLocation } from './regions';
+import { boundedJobIdSchema } from './identifiers';
 
 export {
   runtimeRegionIdSchema,
@@ -48,11 +49,9 @@ export const jobStatusValues = [...targetStatusValues, 'partial'] as const;
 export const jobStatusSchema = z.enum(jobStatusValues);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 
-export const latencyJobIdSchema = z
-  .string()
-  .min(1)
-  .max(160)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+// Domain job IDs and durable execution IDs are separate public concepts, but
+// both use the same bounded storage-safe wire format.
+export const latencyJobIdSchema = boundedJobIdSchema;
 export type LatencyJobId = z.infer<typeof latencyJobIdSchema>;
 
 export const requestMethodValues = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;

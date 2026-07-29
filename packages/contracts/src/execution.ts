@@ -1,10 +1,7 @@
 import { z } from 'zod';
+import { boundedJobIdSchema } from './identifiers';
 
-export const executionJobIdSchema = z
-  .string()
-  .min(1)
-  .max(160)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+export const executionJobIdSchema = boundedJobIdSchema;
 
 export const executionJobKindSchema = z.enum([
   'network_probe',

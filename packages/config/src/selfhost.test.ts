@@ -16,6 +16,11 @@ const executionSecrets = {
 describe('strict self-host configuration', () => {
   test('requires every production API secret and does not invent fallbacks', () => {
     expect(() => parseSelfhostApiVars({})).toThrow();
+    expect(() =>
+      parseSelfhostApiVars({
+        SELFHOST_INTERNAL_SECRET: requiredApiSecrets.SELFHOST_INTERNAL_SECRET
+      })
+    ).toThrow('administrator token');
     expect(parseSelfhostApiVars(requiredApiSecrets)).toMatchObject({
       ...requiredApiSecrets,
       SELFHOST_MIGRATION_BACKUP: false,

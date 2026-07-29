@@ -118,10 +118,10 @@ function assertPathSecurity(
     for (const operation of Object.values(methods)) {
       const shouldBePublic = isPublicPath(path);
       if (shouldBePublic && operation.security) {
-        throw new Error(`public ${label} path ${path} must remain unauthenticated in OpenAPI`);
+        throw new Error(`${label} document path ${path} must remain unauthenticated in OpenAPI`);
       }
       if (!shouldBePublic && !operation.security) {
-        throw new Error(`protected ${label} path ${path} must declare bearer authentication`);
+        throw new Error(`${label} document path ${path} must declare bearer authentication`);
       }
     }
   }

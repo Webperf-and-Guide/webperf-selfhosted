@@ -243,6 +243,12 @@ Expose regional runtime mode through self-host configuration.
       }
     })).toThrow('Release pull request preparation has an invalid changeset');
 
+    writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.2.0+build.1');
+    expect(() => renderReleasePullRequest({ root, preparation }))
+      .toThrow(
+        'Public package @webperf/contracts did not increase in SemVer precedence from 0.2.0 to 0.2.0+build.1'
+      );
+
     writePublicPackageManifest(root, 'contracts', '@webperf/contracts', '0.1.9');
     expect(() => renderReleasePullRequest({ root, preparation }))
       .toThrow('Public package @webperf/contracts was downgraded from 0.2.0 to 0.1.9');

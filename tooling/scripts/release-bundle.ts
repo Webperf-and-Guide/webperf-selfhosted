@@ -376,7 +376,13 @@ export function renderReleasePullRequest({
       if (nextVersion === undefined || nextVersion === previousVersion) {
         return [];
       }
-      if (compareSemanticVersions(previousVersion, nextVersion) >= 0) {
+      const comparison = compareSemanticVersions(previousVersion, nextVersion);
+      if (comparison === 0) {
+        throw new Error(
+          `Public package ${name} did not increase in SemVer precedence from ${previousVersion} to ${nextVersion}`
+        );
+      }
+      if (comparison > 0) {
         throw new Error(
           `Public package ${name} was downgraded from ${previousVersion} to ${nextVersion}`
         );
@@ -891,16 +897,20 @@ function compareSemanticVersions(left: string, right: string) {
     }
   }
   if (leftVersion.prerelease.length === 0 || rightVersion.prerelease.length === 0) {
-    return leftVersion.prerelease.length === rightVersion.prerelease.length
-      ? 0
-      : leftVersion.prerelease.length === 0 ? 1 : -1;
+    if (leftVersion.prerelease.length === rightVersion.prerelease.length) {
+      return 0;
+    }
+    return leftVersion.prerelease.length === 0 ? 1 : -1;
   }
   const length = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length);
   for (let index = 0; index < length; index += 1) {
     const leftIdentifier = leftVersion.prerelease[index];
     const rightIdentifier = rightVersion.prerelease[index];
     if (leftIdentifier === undefined || rightIdentifier === undefined) {
-      return leftIdentifier === rightIdentifier ? 0 : leftIdentifier === undefined ? -1 : 1;
+      if (leftIdentifier === rightIdentifier) {
+        return 0;
+      }
+      return leftIdentifier === undefined ? -1 : 1;
     }
     if (leftIdentifier === rightIdentifier) {
       continue;
@@ -908,9 +918,10 @@ function compareSemanticVersions(left: string, right: string) {
     const leftNumeric = /^\d+$/.test(leftIdentifier);
     const rightNumeric = /^\d+$/.test(rightIdentifier);
     if (leftNumeric && rightNumeric) {
-      return leftIdentifier.length === rightIdentifier.length
-        ? leftIdentifier < rightIdentifier ? -1 : 1
-        : leftIdentifier.length < rightIdentifier.length ? -1 : 1;
+      if (leftIdentifier.length === rightIdentifier.length) {
+        return leftIdentifier < rightIdentifier ? -1 : 1;
+      }
+      return leftIdentifier.length < rightIdentifier.length ? -1 : 1;
     }
     if (leftNumeric !== rightNumeric) {
       return leftNumeric ? -1 : 1;

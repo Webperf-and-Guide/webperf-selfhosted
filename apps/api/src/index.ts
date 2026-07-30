@@ -4560,6 +4560,8 @@ function toJsonError(error: unknown) {
     const status =
       error.code === 'NOT_FOUND'
         ? 404
+        : error.code === 'CONFLICT'
+          ? 409
         : error.code === 'BAD_REQUEST'
           ? 400
           : 500;
@@ -4706,8 +4708,9 @@ const toOrpcError = async (response: Response) => {
     case 404:
       return new ORPCError('NOT_FOUND', { message, data: payload });
     case 400:
-    case 409:
       return new ORPCError('BAD_REQUEST', { message, data: payload });
+    case 409:
+      return new ORPCError('CONFLICT', { message, data: payload });
     default:
       return new ORPCError('INTERNAL_SERVER_ERROR', { message, data: payload });
   }

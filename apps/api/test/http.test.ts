@@ -1165,6 +1165,7 @@ describe('api service monitoring expansion', () => {
 
       await assertSingleRegionSavedCheckMigration({
         baseUrl: harness.baseUrl,
+        appClient,
         repository: harness.repository,
         probePort: probe.port,
         propertyId: property.id,
@@ -1178,6 +1179,7 @@ describe('api service monitoring expansion', () => {
 
 const assertSingleRegionSavedCheckMigration = async ({
   baseUrl,
+  appClient,
   repository,
   probePort,
   propertyId,
@@ -1185,6 +1187,7 @@ const assertSingleRegionSavedCheckMigration = async ({
   webhookUrl
 }: {
   baseUrl: string;
+  appClient: ContractRouterClient<typeof appContract>;
   repository: JobRepository;
   probePort: number;
   propertyId: string;
@@ -1239,6 +1242,29 @@ const assertSingleRegionSavedCheckMigration = async ({
     note: 'reviewed for one runtime',
     scheduleIntervalMinutes: 60
   };
+  await expect(
+    appClient.checkProfiles.update({
+      params: { id: profile.id },
+      body: {
+        ...updatePayload,
+        acknowledgeLocationMigration: true
+      }
+    })
+  ).rejects.toMatchObject({
+    code: 'CONFLICT',
+    status: 409,
+    data: {
+      code: 'runtime_location_changed'
+    }
+  });
+  const reconciledAfterRpc = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...reconciledAfterRpc,
+    locationMigration: {
+      ...reconciledAfterRpc.locationMigration!,
+      runtimeRegionId: 'tokyo'
+    }
+  });
   const staleRuntimeApproval = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },

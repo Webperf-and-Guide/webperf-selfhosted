@@ -100,6 +100,14 @@ const jsonResponse = (payload: unknown, status = 200) =>
     }
   });
 
+const readProviderErrorCode = (data: unknown) =>
+  typeof data === 'object'
+    && data !== null
+    && 'code' in data
+    && typeof data.code === 'string'
+    ? data.code
+    : null;
+
 const normalizeError = (error: unknown) =>
   error instanceof ORPCError
     ? error
@@ -109,11 +117,12 @@ const normalizeError = (error: unknown) =>
 
 const toErrorResponse = (error: unknown) => {
   const normalized = normalizeError(error);
+  const providerCode = readProviderErrorCode(normalized.data);
 
   return jsonResponse(
     {
       error: normalized.message,
-      code: normalized.code,
+      code: providerCode ?? normalized.code,
       data: normalized.data ?? null
     },
     normalized.status

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  assertStandalonePortsDistinct,
+  parseStandalonePort,
   parseStandaloneStartupTimeoutMs,
   resolveStandaloneApiBinding,
   selectStandaloneSecrets,
@@ -60,5 +62,19 @@ describe('standalone process configuration', () => {
     expect(parseStandaloneStartupTimeoutMs('1800000')).toBe(1_800_000);
     expect(() => parseStandaloneStartupTimeoutMs('86400001')).toThrow('up to 86400000');
     expect(() => parseStandaloneStartupTimeoutMs('-1')).toThrow('up to 86400000');
+  });
+
+  test('rejects a console and API port collision in the shared network namespace', () => {
+    expect(() => assertStandalonePortsDistinct(8788, 8788))
+      .toThrow('PORT and SELFHOST_API_PORT must use different ports');
+    expect(assertStandalonePortsDistinct(3000, 8788)).toBeUndefined();
+  });
+
+  test('names the invalid standalone port in configuration diagnostics', () => {
+    expect(() => parseStandalonePort('PORT', 'invalid', 3000))
+      .toThrow('PORT must be an integer between 1 and 65535');
+    expect(() => parseStandalonePort('SELFHOST_API_PORT', '70000', 8788))
+      .toThrow('SELFHOST_API_PORT must be an integer between 1 and 65535');
+    expect(parseStandalonePort('PORT', undefined, 3000)).toBe(3000);
   });
 });

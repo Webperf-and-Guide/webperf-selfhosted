@@ -25,9 +25,6 @@ services:
     <<: [*service-defaults, *bun-read-only]
     stop_grace_period: 16m
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
-    depends_on:
-      probe:
-        condition: service_healthy
     environment:
       WEBPERF_ROLE: standalone
       SELFHOST_ADMIN_TOKEN: "${SELFHOST_ADMIN_TOKEN:?set SELFHOST_ADMIN_TOKEN in infra/docker-compose/.env}"

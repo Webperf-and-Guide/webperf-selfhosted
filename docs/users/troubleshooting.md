@@ -7,7 +7,7 @@ headers, cookies, signed payloads, or database files into an issue.
 docker compose --env-file .env -f compose.yml config --quiet
 docker compose --env-file .env --profile browser-audit -f compose.yml ps
 docker compose --env-file .env -f compose.yml logs --since=20m \
-  console api scheduler executor probe
+  webperf probe
 ```
 
 ## Console does not load

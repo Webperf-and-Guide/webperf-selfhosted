@@ -1,4 +1,6 @@
 import {
+  assertStandalonePortsDistinct,
+  parseStandalonePort,
   parseStandaloneStartupTimeoutMs,
   resolveStandaloneApiBinding,
   selectStandaloneSecrets,
@@ -18,7 +20,13 @@ type Signal = 'SIGINT' | 'SIGTERM';
 type ChildName = 'api' | 'console' | 'executor';
 type Child = ReturnType<typeof Bun.spawn>;
 
-const apiPort = parsePort(process.env.SELFHOST_API_PORT, 8788);
+const consolePort = parseStandalonePort('PORT', process.env.PORT, 3000);
+const apiPort = parseStandalonePort(
+  'SELFHOST_API_PORT',
+  process.env.SELFHOST_API_PORT,
+  8788
+);
+assertStandalonePortsDistinct(consolePort, apiPort);
 const apiBinding = resolveStandaloneApiBinding(process.env.SELFHOST_API_HOST, apiPort);
 const apiOrigin = apiBinding.origin;
 const startupTimeoutMs = parseStandaloneStartupTimeoutMs(
@@ -140,7 +148,8 @@ try {
     ['bun', './apps/console/build/index.js'],
     {
       ...selectStandaloneSecrets(standaloneSecrets, ['SELFHOST_ADMIN_TOKEN']),
-      CONTROL_BASE_URL: apiOrigin
+      CONTROL_BASE_URL: apiOrigin,
+      PORT: String(consolePort)
     }
   );
   const executor = spawnChild(
@@ -302,18 +311,6 @@ async function observeExit(name: ChildName) {
   }
 
   emit('child_stopped', { child: name, code });
-}
-
-function parsePort(raw: string | undefined, fallback: number) {
-  const value = raw?.trim() || String(fallback);
-  if (!/^\d{1,5}$/.test(value)) {
-    throw new Error('SELFHOST_API_PORT must be an integer between 1 and 65535');
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
-    throw new Error('SELFHOST_API_PORT must be an integer between 1 and 65535');
-  }
-  return parsed;
 }
 
 function normalizeUnexpectedExit(code: number) {

@@ -110,7 +110,9 @@ const retiredRegionalRuntimeTargets = [
   'packages/config/src',
   'packages/contracts/src',
   'packages/domain-core/src',
-  'tooling/scripts/webperf-role.ts'
+  'tooling/scripts/webperf-role.ts',
+  'tooling/scripts/webperf-standalone.ts',
+  'tooling/scripts/webperf-standalone-config.ts'
 ];
 const retiredRegionalRuntimeSurface = [
   {

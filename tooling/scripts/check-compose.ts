@@ -27,6 +27,7 @@ type ComposeService = {
   shm_size?: string | number;
   environment?: Record<string, string>;
   volumes?: Array<{ target?: string }>;
+  depends_on?: unknown;
 };
 
 type ComposeModel = {
@@ -162,6 +163,10 @@ const webperfHealthCommand = webperf.healthcheck?.test?.join(' ') ?? '';
 assert(
   webperf.environment?.WEBPERF_ROLE === 'standalone',
   'webperf must run the standalone supervisor'
+);
+assert(
+  webperf.depends_on === undefined,
+  'webperf control services must boot even when the measurement probe is unhealthy'
 );
 assert(
   webperf.environment?.WEBPERF_PROCESS_HEARTBEAT_PATH

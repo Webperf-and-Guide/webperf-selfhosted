@@ -106,3 +106,30 @@ export const parseStandaloneStartupTimeoutMs = (
 
   return parsed;
 };
+
+export const assertStandalonePortsDistinct = (
+  consolePort: number,
+  apiPort: number
+) => {
+  if (consolePort === apiPort) {
+    throw new Error(
+      'PORT and SELFHOST_API_PORT must use different ports in standalone mode'
+    );
+  }
+};
+
+export const parseStandalonePort = (
+  name: 'PORT' | 'SELFHOST_API_PORT',
+  raw: string | undefined,
+  fallback: number
+) => {
+  const value = raw?.trim() || String(fallback);
+  if (!/^\d{1,5}$/.test(value)) {
+    throw new Error(`${name} must be an integer between 1 and 65535`);
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new Error(`${name} must be an integer between 1 and 65535`);
+  }
+  return parsed;
+};

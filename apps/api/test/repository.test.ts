@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import {
   browserAuditResourceSchema,
+  latencyJobDetailSchema,
   type BrowserAuditResource,
   type CheckProfile,
   type CheckProfileRun,
@@ -302,6 +303,32 @@ describe('sqlite control repository', () => {
       timestamp
     );
     insertExecution.run(
+      'exec_regional_legacy',
+      'job_regional_legacy',
+      'queued',
+      null,
+      null,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp,
+      null,
+      null
+    );
+    insertExecution.run(
+      'exec_regional_corrupt',
+      'job_regional_corrupt',
+      'queued',
+      null,
+      null,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp,
+      null,
+      null
+    );
+    insertExecution.run(
       'exec_standalone_queued',
       'job_standalone_queued',
       'queued',
@@ -316,12 +343,90 @@ describe('sqlite control repository', () => {
     );
     insertExecution.finalize();
 
+    const createQueuedJob = (id: string) => {
+      const base = createJob();
+      return createJob({
+        id,
+        status: 'queued',
+        startedAt: null,
+        completedAt: null,
+        evaluation: null,
+        targets: base.targets.map((target) => ({
+          ...target,
+          jobId: id,
+          status: 'queued',
+          attemptNo: 0,
+          latencyMs: null,
+          statusCode: null,
+          success: null,
+          probeImpl: null,
+          measurement: null,
+          errorCode: null,
+          errorClass: null,
+          errorMessage: null,
+          startedAt: null,
+          finishedAt: null,
+          updatedAt: timestamp
+        })),
+        summary: {
+          total: 1,
+          succeeded: 0,
+          failed: 0,
+          inflight: 1
+        }
+      });
+    };
+    const insertJob = database.query(`
+      INSERT INTO jobs (
+        id, url, status, requested_at, updated_at, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const id of [
+      'job_regional_queued',
+      'job_regional_running',
+      'job_regional_succeeded',
+      'job_standalone_queued'
+    ]) {
+      const job = createQueuedJob(id);
+      insertJob.run(
+        job.id,
+        job.url,
+        job.status,
+        job.requestedAt,
+        timestamp,
+        storageCrypto.stringify(job)
+      );
+    }
+    insertJob.run(
+      'job_regional_legacy',
+      'https://example.com',
+      'queued',
+      timestamp,
+      timestamp,
+      storageCrypto.stringify({ version: 'legacy' })
+    );
+    insertJob.run(
+      'job_regional_corrupt',
+      'https://example.com',
+      'queued',
+      timestamp,
+      timestamp,
+      'not-an-encrypted-payload'
+    );
+    insertJob.finalize();
+
     const linkTarget = database.query(`
       INSERT INTO regional_execution_targets (
         regional_execution_id, execution_job_id, job_id
       ) VALUES (?, ?, ?)
     `);
-    for (const suffix of ['queued', 'running', 'succeeded']) {
+    for (const suffix of [
+      'corrupt',
+      'legacy',
+      'queued',
+      'running',
+      'succeeded'
+    ]) {
       linkTarget.run(
         `regional_${suffix}`,
         `exec_regional_${suffix}`,
@@ -347,6 +452,20 @@ describe('sqlite control repository', () => {
       ORDER BY id
     `).all();
     expect(rows).toEqual([
+      {
+        id: 'exec_regional_corrupt',
+        status: 'cancelled',
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: expect.any(String)
+      },
+      {
+        id: 'exec_regional_legacy',
+        status: 'cancelled',
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: expect.any(String)
+      },
       {
         id: 'exec_regional_queued',
         status: 'cancelled',
@@ -374,6 +493,83 @@ describe('sqlite control repository', () => {
         lease_owner: null,
         lease_expires_at: null,
         completed_at: null
+      }
+    ]);
+
+    const jobRows = database.query<{
+      id: string;
+      status: string;
+      payload_json: string;
+    }, []>(`
+      SELECT id, status, payload_json
+      FROM jobs
+      ORDER BY id
+    `).all();
+    const corruptJob = jobRows.find((row) => row.id === 'job_regional_corrupt');
+    expect(corruptJob).toMatchObject({
+      id: 'job_regional_corrupt',
+      status: 'failed',
+      payload_json: 'not-an-encrypted-payload'
+    });
+    const legacyJob = jobRows.find((row) => row.id === 'job_regional_legacy');
+    expect(legacyJob).toMatchObject({
+      id: 'job_regional_legacy',
+      status: 'failed'
+    });
+    expect(storageCrypto.parse(legacyJob!.payload_json)).toEqual({
+      version: 'legacy'
+    });
+    const jobs = jobRows
+      .filter((row) =>
+        row.id !== 'job_regional_corrupt'
+        && row.id !== 'job_regional_legacy'
+      )
+      .map((row) => ({
+        id: row.id,
+        status: row.status,
+        payload: latencyJobDetailSchema.parse(
+          storageCrypto.parse(row.payload_json)
+        )
+      }));
+    expect(jobs.map(({ id, status, payload }) => ({
+      id,
+      status,
+      payloadStatus: payload.status,
+      targetStatus: payload.targets[0]?.status,
+      targetErrorCode: payload.targets[0]?.errorCode,
+      completed: payload.completedAt !== null
+    }))).toEqual([
+      {
+        id: 'job_regional_queued',
+        status: 'failed',
+        payloadStatus: 'failed',
+        targetStatus: 'failed',
+        targetErrorCode: 'execution_cancelled',
+        completed: true
+      },
+      {
+        id: 'job_regional_running',
+        status: 'failed',
+        payloadStatus: 'failed',
+        targetStatus: 'failed',
+        targetErrorCode: 'execution_cancelled',
+        completed: true
+      },
+      {
+        id: 'job_regional_succeeded',
+        status: 'queued',
+        payloadStatus: 'queued',
+        targetStatus: 'queued',
+        targetErrorCode: null,
+        completed: false
+      },
+      {
+        id: 'job_standalone_queued',
+        status: 'queued',
+        payloadStatus: 'queued',
+        targetStatus: 'queued',
+        targetErrorCode: null,
+        completed: false
       }
     ]);
     database.close();

@@ -8,9 +8,10 @@ This directory contains two Compose layers:
 - `compose.dev.yml` overrides those images with builds from the current source
   checkout.
 
-The default stack runs `console`, `api`, `scheduler`, `executor`, and `probe`.
-Only the console is published, on `127.0.0.1:5173`. API, probe, scheduler, and
-executor traffic stays on segmented Compose networks.
+The default stack runs `webperf` and `probe`. The supervised `webperf`
+container owns the console, API, embedded scheduler, and durable executor.
+Only its console port is published, on `127.0.0.1:5173`; API and probe traffic
+stays on segmented Compose networks.
 
 ## Production Start
 

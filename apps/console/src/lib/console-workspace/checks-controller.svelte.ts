@@ -326,6 +326,11 @@ export class ChecksController {
       'check-profile',
       this.state.editingProfileId ? 'update' : 'create',
       async () => {
+        const editingProfile = this.state.editingProfileId
+          ? this.checkProfileById.get(this.state.editingProfileId)
+          : undefined;
+        const requiresLocationReview =
+          editingProfile?.locationMigration?.status === 'requires_review';
         const response = await fetch(
           this.state.editingProfileId
             ? `/api/control/check-profiles/${this.state.editingProfileId}`
@@ -366,12 +371,9 @@ export class ChecksController {
               scheduleIntervalMinutes: this.state.profileScheduleMinutes
                 ? Number(this.state.profileScheduleMinutes)
                 : undefined,
-              acknowledgeLocationMigration:
-                this.state.editingProfileId
-                && this.checkProfileById.get(this.state.editingProfileId)?.locationMigration?.status
-                  === 'requires_review'
-                  ? this.state.profileLocationMigrationAcknowledged
-                  : undefined
+              acknowledgeLocationMigration: requiresLocationReview
+                ? this.state.profileLocationMigrationAcknowledged
+                : undefined
             })
           }
         );

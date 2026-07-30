@@ -63,6 +63,21 @@
     onRun: (profileId: string) => void;
   }>();
 
+  const formatLocationMigrationStatus = (
+    status: NonNullable<CheckProfile['locationMigration']>['status'] | null | undefined
+  ) => {
+    switch (status) {
+      case 'applied':
+        return 'Applied automatically';
+      case 'requires_review':
+        return 'Review required';
+      case 'accepted':
+        return 'Accepted';
+      default:
+        return 'Not applicable';
+    }
+  };
+
   const primaryActions = $derived.by<OperatorActionItem[]>(() => [
     {
       id: 'run',
@@ -110,7 +125,7 @@
     {
       id: 'location-migration',
       label: 'Location migration',
-      value: profile.locationMigration?.status ?? 'not applicable',
+      value: formatLocationMigrationStatus(profile.locationMigration?.status),
       tone: profile.locationMigration?.status === 'requires_review' ? 'warning' : 'muted'
     }
   ]);

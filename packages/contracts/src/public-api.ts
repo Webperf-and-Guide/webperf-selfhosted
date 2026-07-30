@@ -374,7 +374,7 @@ export const checkProfileSchema = z.object({
   browserAuditPolicy: browserAuditPolicySchema.nullable().default(null),
   schedule: checkProfileScheduleSchema.nullable(),
   baseline: checkProfileBaselineSchema.nullable().default(null),
-  locationMigration: checkProfileLocationMigrationSchema.nullable().optional(),
+  locationMigration: checkProfileLocationMigrationSchema.nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

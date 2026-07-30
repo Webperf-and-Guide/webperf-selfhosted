@@ -185,6 +185,7 @@ const createCheckProfile = (overrides: Partial<CheckProfile> = {}): CheckProfile
   browserAuditPolicy: null,
   schedule: null,
   baseline: null,
+  locationMigration: null,
   createdAt: '2026-04-08T00:00:00.000Z',
   updatedAt: '2026-04-08T00:00:00.000Z',
   ...overrides

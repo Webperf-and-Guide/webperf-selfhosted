@@ -13,17 +13,32 @@ type JsonRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const stringArray = (value: unknown) =>
+const toStringArray = (value: unknown): string[] | null =>
   Array.isArray(value) && value.every((item) => typeof item === 'string')
     ? value
     : null;
+
+const resolveMigrationReason = (
+  sourceRegions: string[],
+  safeSingleton: boolean
+) => {
+  if (sourceRegions.length === 0) {
+    return 'legacy_region_pack_missing' as const;
+  }
+  if (sourceRegions.length > 1) {
+    return 'legacy_multi_region' as const;
+  }
+  return safeSingleton
+    ? 'singleton_matches_runtime' as const
+    : 'legacy_region_mismatch' as const;
+};
 
 const rewriteLegacyJob = (value: unknown) => {
   if (!isRecord(value) || 'region' in value) {
     return value;
   }
 
-  const selectedRegions = stringArray(value.selectedRegions);
+  const selectedRegions = toStringArray(value.selectedRegions);
   if (!selectedRegions || selectedRegions.length === 0) {
     return value;
   }
@@ -50,7 +65,7 @@ const readLegacyRegionPacks = (
       continue;
     }
 
-    const regions = stringArray(value.regions);
+    const regions = toStringArray(value.regions);
     if (regions && regions.length > 0) {
       packs.set(value.id, regions);
     }
@@ -71,13 +86,7 @@ const rewriteLegacyCheck = (
   const sourceRegionPackId = value.regionPackId;
   const sourceRegions = regionPacks.get(sourceRegionPackId) ?? [];
   const safeSingleton = sourceRegions.length === 1 && sourceRegions[0] === runtimeRegionId;
-  const reason = sourceRegions.length === 0
-    ? 'legacy_region_pack_missing'
-    : sourceRegions.length > 1
-      ? 'legacy_multi_region'
-      : safeSingleton
-        ? 'singleton_matches_runtime'
-        : 'legacy_region_mismatch';
+  const reason = resolveMigrationReason(sourceRegions, safeSingleton);
   const { regionPackId: _removed, ...rest } = value;
 
   return {
@@ -143,8 +152,11 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
         ORDER BY rowid
       `)
       .all();
-    const hasLegacyChecks = checkRows.some((row) => {
-      const value = parse(row.payload_json);
+    const parsedCheckRows = checkRows.map((row) => ({
+      row,
+      value: parse(row.payload_json)
+    }));
+    const hasLegacyChecks = parsedCheckRows.some(({ value }) => {
       return isRecord(value) && typeof value.regionPackId === 'string';
     });
     if (hasLegacyChecks && !context.runtimeRegionId) {
@@ -163,15 +175,14 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
         stringify,
         update: updateJob
       });
-      rewriteTable({
-        rows: checkRows,
-        rewrite: (value) => runtimeRegionId
+      for (const { row, value } of parsedCheckRows) {
+        const rewritten = runtimeRegionId
           ? rewriteLegacyCheck(value, runtimeRegionId, regionPacks)
-          : value,
-        parse,
-        stringify,
-        update: updateCheck
-      });
+          : value;
+        if (rewritten !== value) {
+          updateCheck.run(stringify(rewritten), row.rowid);
+        }
+      }
     } finally {
       updateJob.finalize();
       updateCheck.finalize();

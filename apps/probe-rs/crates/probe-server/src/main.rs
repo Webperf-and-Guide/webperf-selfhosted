@@ -27,6 +27,9 @@ async fn run_server() -> Result<()> {
         probe_impl = "rust",
         listen_addr = %config.listen_addr,
         region = %config.region_id,
+        max_inflight = config.max_inflight,
+        runtime_version = ?config.runtime_version,
+        image_digest = ?config.image_digest,
         "probe starting"
     );
 

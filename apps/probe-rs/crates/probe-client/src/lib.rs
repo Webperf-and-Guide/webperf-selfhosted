@@ -1,6 +1,6 @@
 use probe_core::{
-    ProbeImplementation, ProbeMeasurement, ProbeTimings, RequestConfig, utc_timestamp,
-    validate_target_url,
+    PROBE_MAX_REDIRECTS, PROBE_REQUEST_TIMEOUT_MS, ProbeImplementation, ProbeMeasurement,
+    ProbeTimings, RequestConfig, utc_timestamp, validate_target_url,
 };
 use reqwest::{
     Client, Method, Url,
@@ -13,6 +13,8 @@ use std::{
 };
 use tokio::net::lookup_host;
 use tracing::debug;
+
+pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(PROBE_REQUEST_TIMEOUT_MS);
 
 pub async fn measure_url(
     region: &str,
@@ -167,7 +169,7 @@ pub async fn measure_url(
             }
 
             redirect_count += 1;
-            if redirect_count >= 4 {
+            if u64::from(redirect_count) >= PROBE_MAX_REDIRECTS {
                 return ProbeMeasurement::failure(
                     region,
                     target,
@@ -212,7 +214,7 @@ fn build_pinned_client(url: &Url, addresses: &[SocketAddr]) -> Result<Client, St
 
     Client::builder()
         .redirect(Policy::none())
-        .timeout(Duration::from_secs(8))
+        .timeout(REQUEST_TIMEOUT)
         .use_rustls_tls()
         .resolve_to_addrs(host, addresses)
         .build()

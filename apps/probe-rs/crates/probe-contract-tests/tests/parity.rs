@@ -1,7 +1,7 @@
 use anyhow::Result;
 use probe_core::{
-    Config, MeasureRequest, ProbeMeasurementResponse, RequestBody, RequestConfig, RequestHeader,
-    sign_request,
+    Config, MeasureRequest, PROBE_PROTOCOL_VERSION, ProbeCapabilities, ProbeMeasurementResponse,
+    RequestBody, RequestConfig, RequestHeader, sign_request,
 };
 use probe_server::{AppState, serve};
 use reqwest::{Client, StatusCode};
@@ -9,6 +9,8 @@ use std::{net::TcpListener, sync::OnceLock, time::Duration};
 use tokio::{net::TcpListener as TokioTcpListener, time::sleep};
 
 const SHARED_SECRET: &str = "contract-secret";
+const TEST_IMAGE_DIGEST: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 static TEST_MUTEX: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 #[tokio::test]
@@ -19,6 +21,24 @@ async fn rejects_invalid_signatures() -> Result<()> {
         .await;
     let harness = Harness::start().await?;
     let request = MeasureRequest {
+        signature: "bad-signature".to_string(),
+        ..sample_request("https://example.com")
+    };
+
+    let response = harness.measure(&request).await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn authenticates_before_revealing_a_region_mismatch() -> Result<()> {
+    let _guard = TEST_MUTEX
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let harness = Harness::start().await?;
+    let request = MeasureRequest {
+        region: "tokyo".to_string(),
         signature: "bad-signature".to_string(),
         ..sample_request("https://example.com")
     };
@@ -41,6 +61,55 @@ async fn rejects_expired_timestamps() -> Result<()> {
 
     let response = harness.measure(&request).await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn advertises_managed_probe_capabilities() -> Result<()> {
+    let _guard = TEST_MUTEX
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let harness = Harness::start().await?;
+
+    let capabilities = harness.capabilities().await?;
+
+    assert_eq!(capabilities.protocol_version, PROBE_PROTOCOL_VERSION);
+    assert_eq!(capabilities.region, "local");
+    assert_eq!(
+        capabilities.limits.max_inflight,
+        probe_core::DEFAULT_MAX_INFLIGHT
+    );
+    assert_eq!(
+        capabilities.limits.max_payload_bytes,
+        probe_core::PROBE_TRANSPORT_MAX_PAYLOAD_BYTES
+    );
+    assert_eq!(
+        capabilities.limits.measurement_timeout_ms,
+        probe_core::PROBE_MEASUREMENT_TIMEOUT_MS
+    );
+    assert_eq!(capabilities.provenance.version.as_deref(), Some("test"));
+    assert_eq!(
+        capabilities.provenance.image_digest.as_deref(),
+        Some(TEST_IMAGE_DIGEST)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_requests_for_a_different_region() -> Result<()> {
+    let _guard = TEST_MUTEX
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let harness = Harness::start().await?;
+    let mut request = sample_request("https://example.com");
+    request.region = "tokyo".to_string();
+    request.signature = sign_request(SHARED_SECRET, &request);
+
+    let response = harness.measure(&request).await?;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     Ok(())
 }
 
@@ -173,6 +242,9 @@ impl Harness {
             region_id: "local".to_string(),
             shared_secret: SHARED_SECRET.to_string(),
             shared_secret_next: None,
+            max_inflight: probe_core::DEFAULT_MAX_INFLIGHT,
+            runtime_version: Some("test".to_string()),
+            image_digest: Some(TEST_IMAGE_DIGEST.to_string()),
         };
 
         let listener = TokioTcpListener::bind(&config.listen_addr).await?;
@@ -204,6 +276,16 @@ impl Harness {
         let response = self.measure(request).await?;
         assert_eq!(response.status(), StatusCode::OK);
         Ok(response.json::<ProbeMeasurementResponse>().await?)
+    }
+
+    async fn capabilities(&self) -> Result<ProbeCapabilities> {
+        let response = self
+            .client
+            .get(format!("{}/capabilities", self.base_url))
+            .send()
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        Ok(response.json::<ProbeCapabilities>().await?)
     }
 }
 

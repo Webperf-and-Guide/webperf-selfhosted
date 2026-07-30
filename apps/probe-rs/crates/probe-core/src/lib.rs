@@ -15,6 +15,13 @@ type HmacSha256 = Hmac<Sha256>;
 
 const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_REGION_ID: &str = "local";
+pub const PROBE_PROTOCOL_VERSION: u32 = 1;
+pub const DEFAULT_MAX_INFLIGHT: usize = 64;
+pub const MAX_CONFIGURED_INFLIGHT: usize = 4_096;
+pub const PROBE_TRANSPORT_MAX_PAYLOAD_BYTES: usize = 2 * 1_024 * 1_024;
+pub const PROBE_REQUEST_TIMEOUT_MS: u64 = 8_000;
+pub const PROBE_MAX_REDIRECTS: u64 = 4;
+pub const PROBE_MEASUREMENT_TIMEOUT_MS: u64 = PROBE_REQUEST_TIMEOUT_MS * (PROBE_MAX_REDIRECTS + 1);
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
@@ -26,6 +33,12 @@ pub enum ConfigError {
         "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
     )]
     InvalidSharedSecretNext,
+    #[error("PROBE_MAX_INFLIGHT must be an integer between 1 and {max}")]
+    InvalidMaxInflight { max: usize },
+    #[error("WEBPERF_PROBE_VERSION must contain between 1 and 120 bytes when configured")]
+    InvalidRuntimeVersion,
+    #[error("WEBPERF_PROBE_IMAGE_DIGEST must be a lowercase sha256 digest when configured")]
+    InvalidImageDigest,
 }
 
 #[derive(Clone)]
@@ -34,6 +47,9 @@ pub struct Config {
     pub region_id: String,
     pub shared_secret: String,
     pub shared_secret_next: Option<String>,
+    pub max_inflight: usize,
+    pub runtime_version: Option<String>,
+    pub image_digest: Option<String>,
 }
 
 impl fmt::Debug for Config {
@@ -47,6 +63,9 @@ impl fmt::Debug for Config {
                 "shared_secret_next",
                 &self.shared_secret_next.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("max_inflight", &self.max_inflight)
+            .field("runtime_version", &self.runtime_version)
+            .field("image_digest", &self.image_digest)
             .finish()
     }
 }
@@ -63,6 +82,39 @@ impl Config {
             Ok(value) => parse_shared_secret_next(&value)?,
             Err(_) => None,
         };
+        let max_inflight = match env::var("PROBE_MAX_INFLIGHT") {
+            Ok(value) => value
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|value| (1..=MAX_CONFIGURED_INFLIGHT).contains(value))
+                .ok_or(ConfigError::InvalidMaxInflight {
+                    max: MAX_CONFIGURED_INFLIGHT,
+                })?,
+            Err(_) => DEFAULT_MAX_INFLIGHT,
+        };
+        let runtime_version = match env::var("WEBPERF_PROBE_VERSION") {
+            Ok(value) if value.trim().is_empty() => None,
+            Ok(value) => {
+                let value = value.trim().to_string();
+                if value.len() > 120 {
+                    return Err(ConfigError::InvalidRuntimeVersion);
+                }
+                Some(value)
+            }
+            Err(_) => None,
+        };
+        let image_digest = match env::var("WEBPERF_PROBE_IMAGE_DIGEST") {
+            Ok(value) if value.trim().is_empty() => None,
+            Ok(value) => {
+                let value = value.trim().to_string();
+                if !is_sha256_digest(&value) {
+                    return Err(ConfigError::InvalidImageDigest);
+                }
+                Some(value)
+            }
+            Err(_) => None,
+        };
 
         Ok(Self {
             listen_addr: env::var("PROBE_LISTEN_ADDR")
@@ -74,8 +126,20 @@ impl Config {
             region_id: env::var("REGION_ID").unwrap_or_else(|_| DEFAULT_REGION_ID.to_string()),
             shared_secret,
             shared_secret_next,
+            max_inflight,
+            runtime_version,
+            image_digest,
         })
     }
+}
+
+fn is_sha256_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.strip_prefix("sha256:").is_some_and(|digest| {
+            digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        })
 }
 
 /// Parses the optional rotation key while preserving the Compose empty-string
@@ -169,8 +233,40 @@ pub fn utc_timestamp() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProbeMeasurementResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ProbeRuntimeProvenance>,
     pub measurement: ProbeMeasurement,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeRuntimeProvenance {
+    pub implementation: ProbeImplementation,
+    pub version: Option<String>,
+    pub image_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeLimits {
+    pub max_inflight: usize,
+    pub max_payload_bytes: usize,
+    pub measurement_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeCapabilities {
+    pub protocol_version: u32,
+    pub region: String,
+    pub provenance: ProbeRuntimeProvenance,
+    pub limits: ProbeLimits,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -484,12 +580,17 @@ mod tests {
             region_id: DEFAULT_REGION_ID.to_string(),
             shared_secret: "current-probe-secret".to_string(),
             shared_secret_next: Some("next-probe-secret".to_string()),
+            max_inflight: DEFAULT_MAX_INFLIGHT,
+            runtime_version: Some("0.3.0".to_string()),
+            image_digest: Some(format!("sha256:{}", "a".repeat(64))),
         };
 
         let debug = format!("{config:?}");
         assert!(!debug.contains("current-probe-secret"));
         assert!(!debug.contains("next-probe-secret"));
         assert_eq!(debug.matches("[REDACTED]").count(), 2);
+        assert!(debug.contains("max_inflight"));
+        assert!(debug.contains("0.3.0"));
     }
 
     #[test]
@@ -515,5 +616,17 @@ mod tests {
             ConfigError::InvalidSharedSecretNext.to_string(),
             "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
         );
+    }
+
+    #[test]
+    fn validates_sha256_image_digests() {
+        assert!(is_sha256_digest(&format!("sha256:{}", "0".repeat(64))));
+        assert!(is_sha256_digest(&format!(
+            "sha256:{}",
+            "abcdef".repeat(10) + "abcd"
+        )));
+        assert!(!is_sha256_digest(&format!("sha256:{}", "A".repeat(64))));
+        assert!(!is_sha256_digest("sha256:abc"));
+        assert!(!is_sha256_digest(&format!("sha512:{}", "0".repeat(64))));
     }
 }

@@ -204,6 +204,9 @@ services:
       REGION_ID: "${SELFHOST_REGION_ID:-local}"
       PROBE_SHARED_SECRET: "${PROBE_SHARED_SECRET:?set PROBE_SHARED_SECRET in infra/docker-compose/.env}"
       PROBE_SHARED_SECRET_NEXT: "${PROBE_SHARED_SECRET_NEXT:-}"
+      PROBE_MAX_INFLIGHT: "${PROBE_MAX_INFLIGHT:-64}"
+      WEBPERF_PROBE_VERSION: "${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
+      WEBPERF_PROBE_IMAGE_DIGEST: "${WEBPERF_PROBE_IMAGE_DIGEST:-}"
     expose:
       - "8080"
     healthcheck:

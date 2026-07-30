@@ -351,9 +351,14 @@ describe('sqlite control repository', () => {
       INSERT INTO check_profile_runs (id, profile_id, created_at, payload_json)
       VALUES (?, ?, ?, ?)
     `);
-    for (const [runId, profileId] of [
-      ['run_global_pending', multiRegionProfile.id],
-      ['run_tokyo_pending', scheduledProfile.id]
+    for (const [runId, profileId, jobId] of [
+      ['run_global_pending', multiRegionProfile.id, 'job_test'],
+      ['run_tokyo_pending', scheduledProfile.id, 'job_test'],
+      [
+        'run_singapore_pending',
+        mismatchedProfile.id,
+        'job_legacy_pending_singleton'
+      ]
     ] as const) {
       insertRun.run(
         runId,
@@ -361,7 +366,13 @@ describe('sqlite control repository', () => {
         timestamp,
         storageCrypto.stringify(createCheckProfileRun({
           id: runId,
-          profileId
+          profileId,
+          routes: [
+            {
+              ...createCheckProfileRun().routes[0]!,
+              jobId
+            }
+          ]
         }))
       );
     }
@@ -404,6 +415,19 @@ describe('sqlite control repository', () => {
       'exec_tokyo_probe_pending',
       'network_probe',
       'run_tokyo_pending',
+      'queued',
+      null,
+      null,
+      0,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp
+    );
+    insertExecution.run(
+      'exec_singapore_probe_pending',
+      'network_probe',
+      'run_singapore_pending',
       'queued',
       null,
       null,
@@ -511,6 +535,37 @@ describe('sqlite control repository', () => {
       timestamp,
       storageCrypto.stringify(pendingLegacyJob)
     );
+    const pendingSingletonTarget = {
+      ...pendingLegacyTargets[0]!,
+      jobId: 'job_legacy_pending_singleton',
+      region: 'singapore'
+    };
+    const pendingSingletonJob = {
+      ...legacyJob,
+      id: 'job_legacy_pending_singleton',
+      status: 'queued',
+      startedAt: null,
+      completedAt: null,
+      targets: [pendingSingletonTarget],
+      summary: {
+        total: 1,
+        succeeded: 0,
+        failed: 0,
+        inflight: 1
+      },
+      selectedRegions: ['singapore']
+    };
+    database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      pendingSingletonJob.id,
+      pendingSingletonJob.url,
+      pendingSingletonJob.status,
+      pendingSingletonJob.requestedAt,
+      timestamp,
+      storageCrypto.stringify(pendingSingletonJob)
+    );
     const insertLegacyJob = database.query(`
       INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -563,6 +618,24 @@ describe('sqlite control repository', () => {
           status: 'failed',
           errorCode: 'single_region_upgrade_cancelled'
         },
+        {
+          region: 'singapore',
+          status: 'failed',
+          errorCode: 'single_region_upgrade_cancelled'
+        }
+      ]
+    });
+    expect(repository.getJob(pendingSingletonJob.id)).toMatchObject({
+      region: 'singapore',
+      historicalRegions: ['singapore'],
+      status: 'failed',
+      summary: {
+        total: 1,
+        succeeded: 0,
+        failed: 1,
+        inflight: 0
+      },
+      targets: [
         {
           region: 'singapore',
           status: 'failed',
@@ -648,6 +721,7 @@ describe('sqlite control repository', () => {
           WHERE id IN (
             'exec_global_probe_pending',
             'exec_global_webhook_pending',
+            'exec_singapore_probe_pending',
             'exec_tokyo_probe_pending',
             'exec_standalone_multi_pending'
           )
@@ -657,6 +731,7 @@ describe('sqlite control repository', () => {
     ).toEqual([
       { id: 'exec_global_probe_pending', status: 'cancelled' },
       { id: 'exec_global_webhook_pending', status: 'cancelled' },
+      { id: 'exec_singapore_probe_pending', status: 'cancelled' },
       { id: 'exec_standalone_multi_pending', status: 'cancelled' },
       { id: 'exec_tokyo_probe_pending', status: 'queued' }
     ]);

@@ -1,5 +1,6 @@
 import type { SqliteMigration } from './types';
 import {
+  checkProfileRunSchema,
   latencyJobDetailSchema,
   type CheckProfileLocationMigrationReason
 } from '@webperf/contracts';
@@ -68,34 +69,22 @@ const rewriteLegacyJob = (value: unknown) => {
   };
 };
 
-const finishLegacyMultiRegionJob = (
+const terminalizeUnfinishedJob = (
   value: unknown,
-  migrationTimestamp: string
+  migrationTimestamp: string,
+  errorMessage: string
 ) => {
-  const rewritten = rewriteLegacyJob(value);
-  const selectedRegions = isRecord(value)
-    ? toStringArray(value.selectedRegions)
-    : null;
-  if (
-    !isRecord(value)
-    || !isRecord(rewritten)
-    || !selectedRegions
-    || selectedRegions.length <= 1
-    || !Array.isArray(rewritten.targets)
-  ) {
+  if (!isRecord(value) || !Array.isArray(value.targets)) {
     return {
-      value: rewritten,
-      cancelledExecutionResourceId: null,
+      value,
       terminalStatus: null
     };
   }
 
-  const parsed = latencyJobDetailSchema.safeParse(rewritten);
+  const parsed = latencyJobDetailSchema.safeParse(value);
   if (!parsed.success) {
     return {
-      value: rewritten,
-      cancelledExecutionResourceId:
-        typeof rewritten.id === 'string' ? rewritten.id : null,
+      value,
       terminalStatus: null
     };
   }
@@ -120,8 +109,7 @@ const finishLegacyMultiRegionJob = (
       slotId: null,
       errorCode: 'single_region_upgrade_cancelled',
       errorClass: 'terminal' as const,
-      errorMessage:
-        'Unfinished multi-region execution was cancelled during the single-region upgrade',
+      errorMessage,
       finishedAt: migrationTimestamp,
       updatedAt: migrationTimestamp
     };
@@ -131,17 +119,51 @@ const finishLegacyMultiRegionJob = (
   return {
     value: changed
       ? {
-          ...rewritten,
+          ...value,
           status: terminalStatus,
           completedAt: migrationTimestamp,
           targets,
           evaluation: null,
           summary: summarizeTargets(targets)
         }
-      : rewritten,
+      : value,
+    terminalStatus: changed ? terminalStatus : null
+  };
+};
+
+const finishLegacyMultiRegionJob = (
+  value: unknown,
+  migrationTimestamp: string
+) => {
+  const rewritten = rewriteLegacyJob(value);
+  const selectedRegions = isRecord(value)
+    ? toStringArray(value.selectedRegions)
+    : null;
+  if (
+    !isRecord(value)
+    || !isRecord(rewritten)
+    || !selectedRegions
+    || selectedRegions.length <= 1
+    || !Array.isArray(rewritten.targets)
+  ) {
+    return {
+      value: rewritten,
+      cancelledExecutionResourceId: null,
+      terminalStatus: null
+    };
+  }
+
+  const terminalized = terminalizeUnfinishedJob(
+    rewritten,
+    migrationTimestamp,
+    'Unfinished multi-region execution was cancelled during the single-region upgrade'
+  );
+
+  return {
+    value: terminalized.value,
     cancelledExecutionResourceId:
       typeof rewritten.id === 'string' ? rewritten.id : null,
-    terminalStatus: changed ? terminalStatus : null
+    terminalStatus: terminalized.terminalStatus
   };
 };
 
@@ -386,6 +408,69 @@ const rewriteCheckRowsInBatches = ({
         WHERE profile_id = ?
       )
   `);
+  const readFirstRunBatch = database.query<PersistedPayloadRow, [string]>(`
+    SELECT rowid, payload_json
+    FROM check_profile_runs
+    WHERE profile_id = ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextRunBatch = database.query<PersistedPayloadRow, [string, number]>(`
+    SELECT rowid, payload_json
+    FROM check_profile_runs
+    WHERE profile_id = ? AND rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readJob = database.query<PersistedPayloadRow, [string]>(`
+    SELECT rowid, payload_json
+    FROM jobs
+    WHERE id = ?
+    LIMIT 1
+  `);
+  const updateJob = database.query<never, [string, number]>(
+    'UPDATE jobs SET payload_json = ? WHERE rowid = ?'
+  );
+  const updateJobTerminalIndex = database.query<never, [string, string, number]>(
+    'UPDATE jobs SET status = ?, updated_at = ? WHERE rowid = ?'
+  );
+  const terminalizeCheckJobs = (profileId: string) => {
+    let lastRowId: number | null = null;
+    while (true) {
+      const rows: PersistedPayloadRow[] = lastRowId === null
+        ? readFirstRunBatch.all(profileId)
+        : readNextRunBatch.all(profileId, lastRowId);
+      if (rows.length === 0) {
+        return;
+      }
+
+      for (const row of rows) {
+        const run = checkProfileRunSchema.safeParse(parse(row.payload_json));
+        if (run.success) {
+          for (const route of run.data.routes) {
+            const jobRow = readJob.get(route.jobId);
+            if (!jobRow) {
+              continue;
+            }
+            const terminalized = terminalizeUnfinishedJob(
+              parse(jobRow.payload_json),
+              migrationTimestamp,
+              'Unfinished saved Check execution was cancelled because its legacy location requires review'
+            );
+            if (terminalized.terminalStatus) {
+              updateJob.run(stringify(terminalized.value), jobRow.rowid);
+              updateJobTerminalIndex.run(
+                terminalized.terminalStatus,
+                migrationTimestamp,
+                jobRow.rowid
+              );
+            }
+          }
+        }
+        lastRowId = row.rowid;
+      }
+    }
+  };
   const regionPackCache = new Map<string, string[]>();
   const resolveRegionPack = (regionPackId: string) => {
     const cached = regionPackCache.get(regionPackId);
@@ -432,6 +517,7 @@ const rewriteCheckRowsInBatches = ({
               migrationTimestamp,
               rewritten.id
             );
+            terminalizeCheckJobs(rewritten.id);
           }
         }
         return true;
@@ -441,6 +527,11 @@ const rewriteCheckRowsInBatches = ({
     readRegionPack.finalize();
     update.finalize();
     cancelActiveExecutions.finalize();
+    readFirstRunBatch.finalize();
+    readNextRunBatch.finalize();
+    readJob.finalize();
+    updateJob.finalize();
+    updateJobTerminalIndex.finalize();
   }
 };
 

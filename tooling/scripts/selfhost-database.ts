@@ -16,6 +16,7 @@ import {
 } from '../../apps/api/src/database/operations';
 import { createStorageCrypto } from '../../apps/api/src/storage-crypto';
 import { LocalBrowserAuditArtifactStore } from '../../apps/api/src/browser-audit-artifact-store';
+import { runtimeRegionIdSchema } from '@webperf/contracts';
 
 type Command = 'migrate' | 'backup' | 'restore' | 'doctor' | 'maintenance';
 
@@ -92,7 +93,7 @@ const resolveArtifactsPath = () => resolve(
 );
 
 const parsePositiveInteger = (value: string | undefined, fallback: number, label: string) => {
-  if (value == null) {
+  if (value === undefined) {
     return fallback;
   }
 
@@ -124,6 +125,14 @@ const requireStorageCrypto = () => {
   return createStorageCrypto({ currentSecret, nextSecret });
 };
 
+const resolveMigrationRuntimeRegionId = () => {
+  const configured = process.env.SELFHOST_REGION_ID;
+  if (configured === undefined || configured.trim() === '') {
+    return undefined;
+  }
+  return runtimeRegionIdSchema.parse(configured);
+};
+
 const migrate = () => {
   const databasePath = resolveDatabasePath();
   const existed = databasePath !== ':memory:'
@@ -135,7 +144,10 @@ const migrate = () => {
   try {
     const result = applySqliteMigrations(
       database,
-      () => ({ storageCrypto: requireStorageCrypto() }),
+      () => ({
+        storageCrypto: requireStorageCrypto(),
+        runtimeRegionId: resolveMigrationRuntimeRegionId()
+      }),
       {
         beforeMigrate() {
           const backupRequested = hasFlag('--backup')

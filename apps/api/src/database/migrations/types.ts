@@ -3,6 +3,7 @@ import type { StorageCrypto } from '../../storage-crypto';
 
 export type SqliteMigrationContext = {
   storageCrypto: StorageCrypto;
+  runtimeRegionId?: string;
 };
 
 export type SqliteMigration = {

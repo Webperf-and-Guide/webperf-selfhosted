@@ -35,14 +35,15 @@ A `401` usually means the caller and service do not share the same current or
 next secret. A startup validation error means a required secret is missing,
 too short, or still a placeholder. Never solve it by adding a fallback value.
 
-## Region is unavailable or a Run stalls
+## Runtime location is unavailable or a Run stalls
 
-- Confirm the code appears in all three region JSON settings.
-- Confirm the executor can reach the configured origin and that the probe uses
-  the same `PROBE_SHARED_SECRET`.
+- Confirm `SELFHOST_REGION_ID` on the API and executor matches `REGION_ID` on
+  the probe.
+- Confirm the executor can reach `SELFHOST_PROBE_BASE_URL` and that the probe
+  uses the same `PROBE_SHARED_SECRET`.
 - Remote HTTP origins are rejected unless explicitly trusted; prefer HTTPS.
-- Inspect executor logs for `missing_probe_region`, retry, or lease events and
-  probe logs for signed-request rejection.
+- Inspect executor logs for `missing_probe_origin`, `probe_region_mismatch`,
+  retry, or lease events and probe logs for signed-request rejection.
 - A queued or running job survives API restart. Wait for the lease to expire
   before expecting another executor identity to reclaim it.
 

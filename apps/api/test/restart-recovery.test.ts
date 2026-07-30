@@ -178,9 +178,9 @@ const startApi = async (databasePath: string, probePort: number): Promise<ApiPro
       SELFHOST_ADMIN_TOKEN_NEXT: '',
       SELFHOST_INTERNAL_SECRET: testInternalSecret,
       SELFHOST_INTERNAL_SECRET_NEXT: '',
-      SELFHOST_ACTIVE_REGION_CODES_JSON: '["tokyo"]',
-      SELFHOST_REGION_IDS_JSON: '{"tokyo":"JP"}',
-      SELFHOST_PROBE_BASE_URLS_JSON: `{"tokyo":"http://127.0.0.1:${probePort}"}`,
+      SELFHOST_REGION_ID: 'local',
+      SELFHOST_REGION_LABEL: 'Local recovery runtime',
+      SELFHOST_PROBE_BASE_URL: `http://127.0.0.1:${probePort}`,
       SELFHOST_BROWSER_AUDIT_BASE_URL: '',
       SELFHOST_MAX_TARGET_ATTEMPTS: '3'
     },

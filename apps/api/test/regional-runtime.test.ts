@@ -123,12 +123,39 @@ describe('regional runtime handoff', () => {
         imageDigest: `sha256:${'b'.repeat(64)}`
       }
     });
+    const unauthenticatedMetricsResponse = await fetch(
+      `${harness.baseUrl}/v1/runtime-metrics`
+    );
+    expect(unauthenticatedMetricsResponse.status).toBe(401);
+    const metricsResponse = await fetch(`${harness.baseUrl}/v1/runtime-metrics`, {
+      headers: { authorization: `Bearer ${regionalSecret}` }
+    });
+    expect(metricsResponse.status).toBe(200);
+    expect(metricsResponse.headers.get('cache-control')).toBe('no-store');
+    expect(await metricsResponse.json()).toMatchObject({
+      schemaVersion: 1,
+      runtimeMode: 'regional-runtime',
+      runtimeLocation: { regionId: 'tokyo', label: 'Tokyo' },
+      executions: {
+        ready: 0,
+        active: 0,
+        expiredLeases: 0
+      },
+      capacity: {
+        topology: 'single-replica-sqlite',
+        executorConcurrency: 1,
+        horizontalScalingSafe: false
+      }
+    });
     const openApiResponse = await fetch(`${harness.baseUrl}/openapi/regional-runtime.json`);
     expect(openApiResponse.status).toBe(200);
     expect(await openApiResponse.json()).toMatchObject({
       paths: {
         '/v1/regional-capabilities': {
           get: { summary: 'Get regional runtime capabilities' }
+        },
+        '/v1/runtime-metrics': {
+          get: { summary: 'Get provider-neutral runtime metrics' }
         },
         '/v1/regional-executions': {
           post: {

@@ -38,6 +38,7 @@ import type {
   RegionalExecutionResult,
   RegionalExecutionTargetResult,
   ReportExportFormat,
+  RuntimeMetrics,
   ExportResource,
   ExportListResponse,
   ExecutionJob,
@@ -101,6 +102,10 @@ import {
   regionalRuntimeMaxDeadlineMs,
   regionalRuntimeProtocolVersion,
   regionalRuntimeReplayWindowSeconds,
+  runtimeMetricsSchema,
+  runtimeMetricsSchemaVersion,
+  executorConcurrency,
+  runtimeTopology,
   webhookDeliveryExecutionPayloadSchema,
   jobListResponseSchema,
   listQuerySchema,
@@ -237,7 +242,8 @@ export const repository = createSqliteJobRepository({
   databasePath: runtime.databasePath,
   encryptionSecret: runtime.internalSecret,
   encryptionSecretNext: runtime.internalSecretNext,
-  backupBeforeMigrations: runtime.migrationBackup
+  backupBeforeMigrations: runtime.migrationBackup,
+  runtimeRegionId: runtime.runtimeLocation.regionId
 });
 export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
@@ -305,6 +311,31 @@ const buildProcessHealthPayload = () => ({
   service: 'webperf-api',
   ok: true
 });
+
+const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
+  const observedAt = new Date();
+  return runtimeMetricsSchema.parse({
+    schemaVersion: runtimeMetricsSchemaVersion,
+    observedAt: observedAt.toISOString(),
+    runtimeMode: runtime.runtimeMode,
+    runtimeLocation: runtime.runtimeLocation,
+    executions: repository.getExecutionQueueMetrics(
+      observedAt,
+      runtime.retentionDays,
+      runtime.runtimeMode === 'regional-runtime'
+        ? 'network_probe'
+        : undefined
+    ),
+    capacity: {
+      topology: runtimeTopology,
+      executorConcurrency,
+      horizontalScalingSafe: false
+    },
+    retention: {
+      terminalCountsBoundedDays: runtime.retentionDays
+    }
+  });
+};
 
 const buildPublicCapabilitiesPayload = () => ({
   deploymentModel: 'selfhost' as const,
@@ -422,7 +453,8 @@ const buildJobListResponse = (query?: ListQuery): JobListResponse =>
       job.status,
       job.note,
       job.requesterIp,
-      job.region
+      job.region,
+      ...(job.historicalRegions ?? [])
     ]).items,
     pageInfo: applyListQuery(repository.listJobs(), query, (job) => [
       job.id,
@@ -430,7 +462,8 @@ const buildJobListResponse = (query?: ListQuery): JobListResponse =>
       job.status,
       job.note,
       job.requesterIp,
-      job.region
+      job.region,
+      ...(job.historicalRegions ?? [])
     ]).pageInfo
   });
 
@@ -887,6 +920,10 @@ const routeRequest = async (request: Request) => {
 
     if (pathname === '/v1/health') {
       return json(buildHealthPayload());
+    }
+
+    if (pathname === '/v1/runtime-metrics' && request.method === 'GET') {
+      return json(buildRuntimeMetricsPayload());
     }
 
     if (pathname === '/v1/regions' && request.method === 'GET') {
@@ -1488,6 +1525,13 @@ const isRegionalRuntimeSurface = (pathname: string) =>
   || pathname === '/openapi/regional-runtime.json'
   || regionalExecutionPathPattern.test(pathname);
 
+const isRegionalRuntimeResponseSurface = (pathname: string) =>
+  isRegionalRuntimeSurface(pathname)
+  || (
+    runtime.runtimeMode === 'regional-runtime'
+    && pathname === '/v1/runtime-metrics'
+  );
+
 const isRegionalInternalExecutionSurface = (pathname: string, method: string) => {
   if (method !== 'POST') {
     return false;
@@ -1517,6 +1561,7 @@ const isRuntimeSurfaceAllowed = (pathname: string, method: string) => {
   if (
     pathname === '/health'
     || pathname === '/v1/regional-capabilities'
+    || pathname === '/v1/runtime-metrics'
     || pathname === '/openapi/regional-runtime.json'
   ) {
     return method === 'GET';
@@ -1552,7 +1597,7 @@ export const server = Bun.serve({
     try {
       routedResponse = await routeRequest(request);
     } catch (error) {
-      if (!isRegionalRuntimeSurface(pathname)) {
+      if (!isRegionalRuntimeResponseSurface(pathname)) {
         throw error;
       }
       const incidentId = logRegionalRuntimeResponseFailure(error);
@@ -1566,12 +1611,15 @@ export const server = Bun.serve({
     }
     const response = (
       isExecutionTransportPath(pathname)
-      || isRegionalRuntimeSurface(pathname)
+      || isRegionalRuntimeResponseSurface(pathname)
       || (request.method === 'GET' && browserAuditArtifactDownloadPathPattern.test(pathname))
     )
       ? routedResponse
       : await redactJsonResponse(routedResponse);
-    const cacheBoundedResponse = isRegionalRuntimeSurface(pathname)
+    const cacheBoundedResponse = (
+      pathname === '/v1/runtime-metrics'
+      || isRegionalRuntimeResponseSurface(pathname)
+    )
       ? withNoStore(response)
       : response;
     return addCompatibilityDeprecationHeaders(request, cacheBoundedResponse);
@@ -2476,11 +2524,22 @@ function buildExecutionResourceContext(
       throw new Error('Network execution references a missing job');
     }
 
-    const check = payload.checkId ? repository.getCheckProfile(payload.checkId) : null;
+    const storedCheck = payload.checkId
+      ? repository.getCheckProfile(payload.checkId)
+      : null;
+    const check = storedCheck
+      ? reconcileCheckProfileRuntimeLocation(storedCheck).profile
+      : null;
     const run = payload.runId ? repository.getCheckProfileRun(payload.runId) : null;
 
     if ((payload.checkId && !check) || (payload.runId && !run)) {
       throw new Error('Network execution references a missing check or run');
+    }
+    if (check?.locationMigration?.status === 'requires_review') {
+      repository.cancelExecutionJob(executionJob.id);
+      throw new Error(
+        'Network execution is disabled until the saved Check runtime location is reviewed'
+      );
     }
 
     const baselineRun = check && run ? resolveBaselineRun(check) : null;
@@ -3095,6 +3154,34 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     );
   }
 
+  const locationReconciliation = existing
+    ? reconcileCheckProfileRuntimeLocation(existing)
+    : null;
+  if (locationReconciliation?.locationChanged) {
+    return json(
+      {
+        code: 'runtime_location_changed',
+        error: 'The self-host runtime location changed after this saved check was migrated. Reload the check, review the current runtime location, and acknowledge it again.'
+      },
+      { status: 409 }
+    );
+  }
+
+  if (
+    existing?.locationMigration?.status === 'requires_review'
+    && (
+      !('acknowledgeLocationMigration' in parsed.data)
+      || parsed.data.acknowledgeLocationMigration !== true
+    )
+  ) {
+    return json(
+      {
+        error: 'This saved check was migrated from a legacy Region Set. Review its runtime location and acknowledge the migration before enabling or running it.'
+      },
+      { status: 409 }
+    );
+  }
+
   const property = repository.getProperty(parsed.data.propertyId);
   if (!property) {
     return json({ error: 'Property not found' }, { status: 404 });
@@ -3130,6 +3217,13 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
       browserAuditPolicy: existing?.browserAuditPolicy ?? null,
       schedule: buildProfileSchedule(existing, parsed.data.scheduleIntervalMinutes, now),
       baseline: resolveUpdatedProfileBaseline(existing, routeSet.id),
+      locationMigration: existing?.locationMigration?.status === 'requires_review'
+        ? {
+            ...existing.locationMigration,
+            status: 'accepted',
+            acknowledgedAt: now
+          }
+        : existing?.locationMigration ?? null,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -3147,10 +3241,26 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
 }
 
 async function handleRunCheckProfile(profileId: string, request: Request) {
-  const profile = repository.getCheckProfile(profileId);
+  const storedProfile = repository.getCheckProfile(profileId);
 
-  if (!profile) {
+  if (!storedProfile) {
     return json({ error: 'Check profile not found' }, { status: 404 });
+  }
+
+  const { profile, locationChanged } =
+    reconcileCheckProfileRuntimeLocation(storedProfile);
+  if (profile.locationMigration?.status === 'requires_review') {
+    return json(
+      {
+        code: locationChanged
+          ? 'runtime_location_changed'
+          : 'location_review_required',
+        error: locationChanged
+          ? 'The self-host runtime location changed. Review the current runtime location and acknowledge it before running this saved check.'
+          : 'This saved check is disabled until its legacy Region Set migration is reviewed and acknowledged.'
+      },
+      { status: 409 }
+    );
   }
 
   const requesterIp = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? null;
@@ -3192,12 +3302,17 @@ async function handleRunCheckProfile(profileId: string, request: Request) {
 
 async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
   const dispatchAt = parseDispatchTime(url.searchParams.get('now'));
-  const dueProfiles = repository
-    .listCheckProfiles()
-    .filter(
-      (profile) =>
-        profile.schedule?.nextRunAt != null && new Date(profile.schedule.nextRunAt).getTime() <= dispatchAt.getTime()
-    );
+  const dueProfiles: CheckProfile[] = [];
+  for (const storedProfile of repository.listCheckProfiles()) {
+    const { profile } = reconcileCheckProfileRuntimeLocation(storedProfile);
+    if (
+      profile.locationMigration?.status !== 'requires_review'
+      && profile.schedule?.nextRunAt != null
+      && new Date(profile.schedule.nextRunAt).getTime() <= dispatchAt.getTime()
+    ) {
+      dueProfiles.push(profile);
+    }
+  }
 
   const triggeredProfiles = dueProfiles.flatMap((profile) => {
     try {
@@ -3242,6 +3357,33 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
   };
 
   return json(response, { status: 200 });
+}
+
+function reconcileCheckProfileRuntimeLocation(profile: CheckProfile): {
+  profile: CheckProfile;
+  locationChanged: boolean;
+} {
+  const locationMigration = profile.locationMigration;
+  if (
+    !locationMigration
+    || locationMigration.runtimeRegionId === runtime.runtimeLocation.regionId
+  ) {
+    return { profile, locationChanged: false };
+  }
+
+  const updatedProfile: CheckProfile = {
+    ...profile,
+    schedule: null,
+    locationMigration: {
+      ...locationMigration,
+      runtimeRegionId: runtime.runtimeLocation.regionId,
+      status: 'requires_review',
+      acknowledgedAt: null
+    },
+    updatedAt: new Date().toISOString()
+  };
+  repository.saveCheckProfile(updatedProfile);
+  return { profile: updatedProfile, locationChanged: true };
 }
 
 function handleListCheckProfileRuns(profileId: string, query?: ListQuery) {
@@ -4416,14 +4558,15 @@ async function parseJsonBody<T>(request: Request, maxBytes = 1_024 * 1_024) {
   }
 }
 
+const orpcErrorStatusByCode: Readonly<Record<string, number>> = {
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  BAD_REQUEST: 400
+};
+
 function toJsonError(error: unknown) {
   if (error instanceof ORPCError) {
-    const status =
-      error.code === 'NOT_FOUND'
-        ? 404
-        : error.code === 'BAD_REQUEST'
-          ? 400
-          : 500;
+    const status = orpcErrorStatusByCode[error.code] ?? 500;
 
     return json(
       {
@@ -4567,8 +4710,9 @@ const toOrpcError = async (response: Response) => {
     case 404:
       return new ORPCError('NOT_FOUND', { message, data: payload });
     case 400:
-    case 409:
       return new ORPCError('BAD_REQUEST', { message, data: payload });
+    case 409:
+      return new ORPCError('CONFLICT', { message, data: payload });
     default:
       return new ORPCError('INTERNAL_SERVER_ERROR', { message, data: payload });
   }
@@ -4589,6 +4733,7 @@ const requesterIpFromContext = (context: OrpcContext) =>
 
 const controlRouter = control.router({
   health: control.health.handler(async () => buildHealthPayload()),
+  runtimeMetrics: control.runtimeMetrics.handler(async () => buildRuntimeMetricsPayload()),
   regions: control.regions.handler(async () => ({
     runtimeLocation: getRuntimeLocationReport()
   })),
@@ -5087,7 +5232,8 @@ const appRouter = appApi.router({
     health: appApi.system.health.handler(async () => buildHealthPayload()),
     regions: appApi.system.regions.handler(async () => ({
       runtimeLocation: getRuntimeLocationReport()
-    }))
+    })),
+    metrics: appApi.system.metrics.handler(async () => buildRuntimeMetricsPayload())
   },
   properties: {
     list: appApi.properties.list.handler(async ({ input }): Promise<PropertyListResponse> =>
@@ -5326,7 +5472,8 @@ const opsRouter = opsApi.router({
     health: opsApi.system.health.handler(async () => buildHealthPayload()),
     regions: opsApi.system.regions.handler(async () => ({
       runtimeLocation: getRuntimeLocationReport()
-    }))
+    })),
+    metrics: opsApi.system.metrics.handler(async () => buildRuntimeMetricsPayload())
   },
   scheduler: {
     dispatch: opsApi.scheduler.dispatch.handler(async ({ input }): Promise<SchedulerDispatchResponse> => {

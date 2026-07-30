@@ -134,6 +134,197 @@ afterEach(() => {
 });
 
 describe('durable execution repository', () => {
+  test('summarizes provider-neutral queue pressure without decrypting payloads', () => {
+    const repository = createRepository(createTempDatabasePath());
+    const enqueue = (
+      id: string,
+      kind: 'network_probe' | 'browser_audit' | 'webhook_delivery',
+      createdAt: string,
+      options: { maxAttempts?: number; availableAt?: string } = {}
+    ) => repository.enqueueExecutionJob({
+      id,
+      kind,
+      resourceId: `resource_${id}`,
+      maxAttempts: options.maxAttempts ?? 3,
+      availableAt: options.availableAt,
+      payload: { fixture: id }
+    }, new Date(createdAt));
+
+    enqueue('exec_metrics_active', 'network_probe', '2026-07-22T00:00:00.000Z');
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-active', leaseDurationMs: 3_600_000 },
+      new Date('2026-07-22T00:00:00.000Z')
+    );
+    repository.markExecutionJobRunning(
+      {
+        id: 'exec_metrics_active',
+        leaseOwner: 'metrics-active',
+        leaseDurationMs: 3_600_000
+      },
+      new Date('2026-07-22T00:00:01.000Z')
+    );
+    repository.renewExecutionJobLease(
+      {
+        id: 'exec_metrics_active',
+        leaseOwner: 'metrics-active',
+        leaseDurationMs: 3_600_000
+      },
+      new Date('2026-07-22T00:04:00.000Z')
+    );
+
+    enqueue('exec_metrics_expired', 'network_probe', '2026-07-22T00:01:00.000Z');
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-expired', leaseDurationMs: 60_000 },
+      new Date('2026-07-22T00:01:00.000Z')
+    );
+
+    enqueue(
+      'exec_metrics_exhausted',
+      'browser_audit',
+      '2026-07-22T00:01:10.000Z',
+      { maxAttempts: 1 }
+    );
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-exhausted', leaseDurationMs: 60_000 },
+      new Date('2026-07-22T00:01:10.000Z')
+    );
+
+    enqueue('exec_metrics_retry', 'webhook_delivery', '2026-07-22T00:01:20.000Z');
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-retry', leaseDurationMs: 60_000 },
+      new Date('2026-07-22T00:01:20.000Z')
+    );
+    repository.failExecutionJob({
+      id: 'exec_metrics_retry',
+      leaseOwner: 'metrics-retry',
+      error: {
+        code: 'retry_fixture',
+        message: 'retry fixture',
+        retryable: true
+      },
+      retryDelayMs: 0
+    }, new Date('2026-07-22T00:01:21.000Z'));
+
+    enqueue('exec_metrics_ready', 'network_probe', '2026-07-22T00:01:30.000Z');
+    enqueue(
+      'exec_metrics_delayed',
+      'browser_audit',
+      '2026-07-22T00:01:40.000Z',
+      { availableAt: '2026-07-22T00:10:00.000Z' }
+    );
+
+    expect(
+      repository.getExecutionQueueMetrics(
+        new Date('2026-07-22T00:05:00.000Z'),
+        30
+      )
+    ).toEqual({
+      ready: 3,
+      delayed: 1,
+      active: 1,
+      expiredLeases: 2,
+      retryQueued: 1,
+      exhausted: 1,
+      oldestReadyAgeMs: 219_000,
+      oldestActiveAgeMs: 300_000,
+      byStatus: {
+        queued: 3,
+        leased: 2,
+        running: 1,
+        succeeded: 0,
+        failed: 0,
+        cancelled: 0
+      },
+      byKind: {
+        network_probe: {
+          queued: 1,
+          leased: 1,
+          running: 1,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        },
+        browser_audit: {
+          queued: 1,
+          leased: 1,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        },
+        webhook_delivery: {
+          queued: 1,
+          leased: 0,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        }
+      }
+    });
+
+    expect(
+      repository.getExecutionQueueMetrics(
+        new Date('2026-07-22T00:05:00.000Z'),
+        30,
+        'network_probe'
+      )
+    ).toMatchObject({
+      ready: 2,
+      delayed: 0,
+      active: 1,
+      expiredLeases: 1,
+      retryQueued: 0,
+      exhausted: 0,
+      oldestReadyAgeMs: 210_000,
+      oldestActiveAgeMs: 300_000,
+      byStatus: {
+        queued: 3,
+        leased: 2,
+        running: 1
+      }
+    });
+
+    repository.close();
+  });
+
+  test('bounds terminal execution metric counts by the configured retention window', () => {
+    const repository = createRepository(createTempDatabasePath());
+    const complete = (id: string, at: string) => {
+      const timestamp = new Date(at);
+      repository.enqueueExecutionJob({
+        id,
+        kind: 'network_probe',
+        resourceId: `resource_${id}`,
+        maxAttempts: 3,
+        payload: { fixture: id }
+      }, timestamp);
+      repository.claimExecutionJob(
+        { leaseOwner: `owner_${id}`, leaseDurationMs: 60_000 },
+        timestamp
+      );
+      repository.completeExecutionJob(
+        { id, leaseOwner: `owner_${id}` },
+        timestamp
+      );
+    };
+
+    complete('exec_metrics_old_terminal', '2026-05-01T00:00:00.000Z');
+    complete('exec_metrics_recent_terminal', '2026-07-21T00:00:00.000Z');
+
+    const metrics = repository.getExecutionQueueMetrics(
+      new Date('2026-07-22T00:00:00.000Z'),
+      30
+    );
+
+    expect(metrics.byStatus.succeeded).toBe(1);
+    expect(metrics.byKind.network_probe.succeeded).toBe(1);
+    expect(metrics.ready).toBe(0);
+    expect(metrics.active).toBe(0);
+
+    repository.close();
+  });
+
   test('creates the domain resource and queue row in one transaction', () => {
     const databasePath = createTempDatabasePath();
     const repository = createRepository(databasePath);
@@ -604,6 +795,54 @@ describe('durable execution repository', () => {
       startedAt: null,
       completedAt: '2026-07-22T00:00:03.000Z',
       error: null
+    });
+
+    repository.close();
+  });
+
+  test('keeps network resources aligned with cancelled queue outcomes', () => {
+    const repository = createRepository(createTempDatabasePath());
+    const queuedAt = new Date('2026-07-22T00:00:00.000Z');
+    const job = createLatencyJob('job_cancelled_network');
+
+    repository.createExecutionResource({
+      executionJob: {
+        id: 'exec_cancelled_network',
+        kind: 'network_probe',
+        resourceId: job.id,
+        maxAttempts: 3,
+        payload: {
+          version: 'v1',
+          jobIds: [job.id]
+        }
+      },
+      result: {
+        kind: 'network_probe',
+        jobs: [job],
+        run: null
+      }
+    }, queuedAt);
+
+    expect(repository.cancelExecutionJob(
+      'exec_cancelled_network',
+      new Date('2026-07-22T00:00:03.000Z')
+    )?.status).toBe('cancelled');
+    expect(repository.getJob(job.id)).toMatchObject({
+      status: 'failed',
+      completedAt: '2026-07-22T00:00:03.000Z',
+      summary: {
+        total: 1,
+        succeeded: 0,
+        failed: 1,
+        inflight: 0
+      },
+      targets: [{
+        status: 'failed',
+        success: false,
+        errorCode: 'execution_cancelled',
+        errorClass: 'terminal',
+        finishedAt: '2026-07-22T00:00:03.000Z'
+      }]
     });
 
     repository.close();

@@ -19,7 +19,7 @@
       class="gap-5"
       eyebrow="Self-host operator console"
       title="Run a check now, then turn it into a reusable release gate."
-      description="This is the working surface for one self-hosted WebPerf deployment: launch a manual verification, inspect the live control-plane stream, then save repeatable checks with route groups, region sets, baselines, schedules, and exports."
+      description="This is the working surface for one self-hosted WebPerf deployment: launch a manual verification, inspect the live execution stream, then save repeatable checks with route groups, baselines, schedules, and exports."
     />
     <MetricGrid columns={3} items={heroMetrics} />
   </div>

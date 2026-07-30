@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   composeEnvironmentVersion,
+  isReleaseVersionNewerThan,
   isRepositoryReleaseSuccessor,
   releaseImages,
   renderReleaseBundle,
@@ -34,6 +35,10 @@ describe('release bundle generation', () => {
     expect(isRepositoryReleaseSuccessor('0.2.7', '0.3.0')).toBeTrue();
     expect(isRepositoryReleaseSuccessor('0.2.7', '0.4.0')).toBeFalse();
     expect(isRepositoryReleaseSuccessor('0.2.7', '0.2.9')).toBeFalse();
+    expect(isReleaseVersionNewerThan('0.3.0', '0.2.1')).toBeTrue();
+    expect(isReleaseVersionNewerThan('0.3.0-beta.1', '0.2.1')).toBeTrue();
+    expect(isReleaseVersionNewerThan('0.2.1', '0.2.1')).toBeFalse();
+    expect(isReleaseVersionNewerThan('0.2.0', '0.2.1')).toBeFalse();
     expect(composeEnvironmentVersion('WEBPERF_VERSION=0.2.0\n')).toBe('0.2.0');
     expect(() => composeEnvironmentVersion(
       'WEBPERF_VERSION=0.2.0\nWEBPERF_VERSION=0.2.1\n'

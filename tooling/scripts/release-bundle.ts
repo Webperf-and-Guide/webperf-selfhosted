@@ -931,6 +931,12 @@ function compareSemanticVersions(left: string, right: string) {
   return 0;
 }
 
+export function isReleaseVersionNewerThan(candidate: string, baseline: string) {
+  validateReleaseVersion(candidate);
+  validateReleaseVersion(baseline);
+  return compareSemanticVersions(candidate, baseline) > 0;
+}
+
 function readPendingChangesets(root: string): PendingChangeset[] {
   const changesetsDirectory = join(root, '.sampo/changesets');
   if (!existsSync(changesetsDirectory) || !lstatSync(changesetsDirectory).isDirectory()) {
@@ -1304,6 +1310,11 @@ if (import.meta.main) {
       );
     } else if (command === 'validate-version' && args.length === 1) {
       console.log(JSON.stringify({ ok: true, version: validateReleaseVersion(args[0]) }));
+    } else if (command === 'is-newer-than' && args.length === 2) {
+      console.log(JSON.stringify({
+        ok: true,
+        newer: isReleaseVersionNewerThan(args[0], args[1])
+      }));
     } else if (command === 'validate-repository-version' && args.length === 1) {
       console.log(
         JSON.stringify({ ok: true, version: validateRepositoryReleaseVersion(args[0]) })
@@ -1339,7 +1350,7 @@ if (import.meta.main) {
       }));
     } else {
       throw new Error(
-        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <amd64-digest> <arm64-digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | validate-repository-version <version> | repository-version | prepare-repository-release | prepare-release-pull-request <output-json> | render-release-pull-request <input-json> <output-markdown>'
+        'Usage: release-bundle.ts metadata <name> <image> <version> <digest> <amd64-digest> <arm64-digest> <commit> <output-dir> | bundle <version> <input-dir> <output-dir> | validate-version <version> | is-newer-than <candidate> <baseline> | validate-repository-version <version> | repository-version | prepare-repository-release | prepare-release-pull-request <output-json> | render-release-pull-request <input-json> <output-markdown>'
       );
     }
   } catch (error) {

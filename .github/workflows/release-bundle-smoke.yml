@@ -83,9 +83,9 @@ jobs:
             if ! curl -q --fail --silent --show-error --location \
               --retry 15 \
               --retry-all-errors \
-              --retry-max-time 45 \
+              --retry-max-time 300 \
               --connect-timeout 10 \
-              --max-time 20 \
+              --max-time 120 \
               -o "$destination" "$url"; then
               echo "Could not download public release asset: $url" >&2
               return 1
@@ -112,7 +112,7 @@ jobs:
             .version == $version
             and .tag == ("v" + $version)
             and .sourceCommit == $source_sha
-            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z-]+)?@sha256:[0-9a-f]{64}$")] | all)
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
           ' "${bundle_dir}/runtime-metadata.json" >/dev/null
           echo "directory=${bundle_dir}" >> "$GITHUB_OUTPUT"
       - name: Load Browser Audit AppArmor profile
@@ -157,3 +157,214 @@ jobs:
             sudo dmesg 2>/dev/null || true
             sudo tail -n 2000 /var/log/kern.log /var/log/syslog 2>/dev/null || true
           } | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 200 || true
+
+  recovery:
+    name: Published bundle backup and restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out recovery harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Check out release source for metadata verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha || format('v{0}', inputs.version) }}
+          path: release-source
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Cache Bun packages
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Download and verify public release bundle
+        id: bundle
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_SOURCE_DIRECTORY: ${{ github.workspace }}/release-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun tooling/scripts/release-bundle.ts validate-version "$VERSION" >/dev/null
+          source_sha="$(git -C "$RELEASE_SOURCE_DIRECTORY" rev-parse HEAD)"
+          test "$(tr -d '\r\n' < "$RELEASE_SOURCE_DIRECTORY/VERSION")" = "$VERSION"
+          release_root="$(mktemp -d "${RUNNER_TEMP}/webperf-recovery-bundle.XXXXXX")"
+          bundle_name="webperf-selfhosted-v${VERSION}"
+          release_base="https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/download/v${VERSION}"
+          curl -q --fail --silent --show-error --location \
+            --retry 15 --retry-all-errors --retry-max-time 300 \
+            --connect-timeout 10 --max-time 120 \
+            -o "${release_root}/SHA256SUMS" "${release_base}/SHA256SUMS"
+          curl -q --fail --silent --show-error --location \
+            --retry 15 --retry-all-errors --retry-max-time 300 \
+            --connect-timeout 10 --max-time 120 \
+            -o "${release_root}/${bundle_name}.tar.gz" "${release_base}/${bundle_name}.tar.gz"
+          (
+            cd "$release_root"
+            sha256sum --check SHA256SUMS
+            tar -xzf "${bundle_name}.tar.gz"
+          )
+          bundle_dir="${release_root}/${bundle_name}"
+          test -f "${bundle_dir}/compose.yml"
+          test -f "${bundle_dir}/.env.example"
+          test -f "${bundle_dir}/compose.apparmor.yml"
+          test -f "${bundle_dir}/browser-audit.apparmor"
+          test -f "${bundle_dir}/runtime-metadata.json"
+          (cd "$bundle_dir" && sha256sum --check SHA256SUMS)
+          jq -e --arg version "$VERSION" --arg source_sha "$source_sha" '
+            .version == $version
+            and .tag == ("v" + $version)
+            and .sourceCommit == $source_sha
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
+          ' "${bundle_dir}/runtime-metadata.json" >/dev/null
+          echo "directory=${bundle_dir}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Load Browser Audit AppArmor profile
+        env:
+          BUNDLE_DIR: ${{ steps.bundle.outputs.directory }}
+        run: sudo apparmor_parser -r -W "${BUNDLE_DIR}/browser-audit.apparmor"
+      - name: Recover the published bundle without registry credentials
+        env:
+          WEBPERF_RECOVERY_COMPOSE_FILE: ${{ steps.bundle.outputs.directory }}/compose.yml
+          WEBPERF_RECOVERY_ENV_TEMPLATE: ${{ steps.bundle.outputs.directory }}/.env.example
+          WEBPERF_RECOVERY_APPARMOR_COMPOSE_FILE: ${{ steps.bundle.outputs.directory }}/compose.apparmor.yml
+          WEBPERF_RECOVERY_USE_DEV_OVERRIDE: 'false'
+          WEBPERF_RECOVERY_DOCKER_CONFIG: ${{ runner.temp }}/webperf-release-recovery-docker-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WEBPERF_RECOVERY_DOCKER_CONFIG"
+          test ! -e "$WEBPERF_RECOVERY_DOCKER_CONFIG/config.json"
+          bash tooling/scripts/drill-compose-recovery.sh
+      - name: Report Browser Audit sandbox denials
+        if: ${{ failure() }}
+        run: |
+          set -o pipefail
+          {
+            sudo journalctl --dmesg --no-pager --since '-30 minutes' 2>/dev/null || true
+            sudo dmesg 2>/dev/null || true
+            sudo tail -n 3000 /var/log/kern.log /var/log/syslog 2>/dev/null || true
+          } | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 300 || true
+
+  upgrade-eligibility:
+    name: Published bundle upgrade eligibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      required: ${{ steps.version.outputs.required }}
+    steps:
+      - name: Check out upgrade eligibility harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Compare the published version with the migration baseline
+        id: version
+        env:
+          CURRENT_VERSION: ${{ inputs.version }}
+          LEGACY_VERSION: 0.2.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(bun tooling/scripts/release-bundle.ts \
+            is-newer-than "$CURRENT_VERSION" "$LEGACY_VERSION")"
+          required="$(jq -er '.newer | if type == "boolean" then tostring else error("invalid") end' \
+            <<<"$result")"
+          echo "required=${required}" >> "$GITHUB_OUTPUT"
+
+  upgrade:
+    name: Published bundle v0.2.1 upgrade drill
+    needs: upgrade-eligibility
+    if: ${{ needs.upgrade-eligibility.outputs.required == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out upgrade harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Check out release source for metadata verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha || format('v{0}', inputs.version) }}
+          path: release-source
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Cache Bun packages
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Download legacy and current public release bundles
+        id: bundles
+        env:
+          CURRENT_VERSION: ${{ inputs.version }}
+          LEGACY_VERSION: 0.2.1
+          RELEASE_SOURCE_DIRECTORY: ${{ github.workspace }}/release-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun tooling/scripts/release-bundle.ts validate-version "$CURRENT_VERSION" >/dev/null
+          bun tooling/scripts/release-bundle.ts validate-version "$LEGACY_VERSION" >/dev/null
+          source_sha="$(git -C "$RELEASE_SOURCE_DIRECTORY" rev-parse HEAD)"
+          test "$(tr -d '\r\n' < "$RELEASE_SOURCE_DIRECTORY/VERSION")" = "$CURRENT_VERSION"
+          release_root="$(mktemp -d "${RUNNER_TEMP}/webperf-upgrade-bundles.XXXXXX")"
+          download_bundle() {
+            local version="$1"
+            local version_root="${release_root}/${version}"
+            local bundle_name="webperf-selfhosted-v${version}"
+            local release_base="https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/download/v${version}"
+            mkdir -m 700 "$version_root"
+            curl -q --fail --silent --show-error --location \
+              --retry 15 --retry-all-errors --retry-max-time 300 \
+              --connect-timeout 10 --max-time 120 \
+              -o "${version_root}/SHA256SUMS" "${release_base}/SHA256SUMS"
+            curl -q --fail --silent --show-error --location \
+              --retry 15 --retry-all-errors --retry-max-time 300 \
+              --connect-timeout 10 --max-time 120 \
+              -o "${version_root}/${bundle_name}.tar.gz" \
+              "${release_base}/${bundle_name}.tar.gz"
+            (
+              cd "$version_root"
+              sha256sum --check SHA256SUMS >&2
+              tar -xzf "${bundle_name}.tar.gz"
+              cd "$bundle_name"
+              sha256sum --check SHA256SUMS >&2
+            )
+            test -f "${version_root}/${bundle_name}/compose.yml"
+            test -f "${version_root}/${bundle_name}/.env.example"
+            test -f "${version_root}/${bundle_name}/runtime-metadata.json"
+            printf '%s' "${version_root}/${bundle_name}"
+          }
+          legacy_bundle="$(download_bundle "$LEGACY_VERSION")"
+          current_bundle="$(download_bundle "$CURRENT_VERSION")"
+          jq -e --arg version "$CURRENT_VERSION" --arg source_sha "$source_sha" '
+            .version == $version
+            and .tag == ("v" + $version)
+            and .sourceCommit == $source_sha
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
+          ' "${current_bundle}/runtime-metadata.json" >/dev/null
+          echo "legacy_version=${LEGACY_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "legacy_directory=${legacy_bundle}" >> "$GITHUB_OUTPUT"
+          echo "current_directory=${current_bundle}" >> "$GITHUB_OUTPUT"
+      - name: Upgrade stored v0.2.1 data with published images
+        env:
+          WEBPERF_UPGRADE_LEGACY_VERSION: ${{ steps.bundles.outputs.legacy_version }}
+          WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE: ${{ steps.bundles.outputs.legacy_directory }}/compose.yml
+          WEBPERF_UPGRADE_LEGACY_ENV_TEMPLATE: ${{ steps.bundles.outputs.legacy_directory }}/.env.example
+          WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE: ${{ steps.bundles.outputs.current_directory }}/compose.yml
+          WEBPERF_UPGRADE_CURRENT_ENV_TEMPLATE: ${{ steps.bundles.outputs.current_directory }}/.env.example
+          WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE: 'false'
+          WEBPERF_UPGRADE_DOCKER_CONFIG: ${{ runner.temp }}/webperf-release-upgrade-docker-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WEBPERF_UPGRADE_DOCKER_CONFIG"
+          test ! -e "$WEBPERF_UPGRADE_DOCKER_CONFIG/config.json"
+          bash tooling/scripts/drill-compose-upgrade.sh

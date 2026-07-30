@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 Build a self-hosted product for:
 - global release verification
@@ -63,7 +63,11 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-07-26:
+Current repo state as of 2026-07-30:
+- the completed issue #14 architecture now has an operational-readiness follow-up: public `v0.2.1` multi-region data is migrated without rewriting historical target provenance, unsafe saved Checks require explicit operator review, and the release workflow proves the migration against real public bundles
+- backup, restore, database-doctor, and cross-version Compose drills are automated; the recovery drill verifies checksums and restored rows, while the release gate verifies a `v0.2.1` deployment can be replaced by the prepared digest-pinned release without losing its volume
+- full and Regional Runtime modes expose authenticated provider-neutral execution pressure at `GET /v1/runtime-metrics`, including ready/delayed/active work, retry and lease signals, oldest-work ages, status/kind counts, and retention context without exposing request payloads
+- the current Regional Runtime capacity contract is explicitly `single-replica-sqlite` with executor concurrency `1` and `horizontalScalingSafe: false`; operators and managed providers may use its metrics for warm policy, scheduling, and vertical sizing, but must not create independent replicas that split SQLite leases and idempotency state
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
@@ -210,7 +214,7 @@ Current repo state as of 2026-07-26:
 - PRs #4 through #12 closed the local Compose port-isolation, canonical baseline/deterministic analysis, multi-architecture release, release-bundle-version, and generated-secret clean-host evidence gaps; the public-beta hardening plan is complete
 - all six GHCR packages are public, and anonymous registry checks verify `0.2.1` manifests for both `linux/amd64` and `linux/arm64`; GitHub-hosted published-bundle smoke run `30197793088` verified the public archive checksums and source metadata with an empty Docker credential directory, four independently generated temporary secrets, and both runtime profiles
 - formal releases now finish with a required fresh GitHub-hosted published-bundle smoke for both default and Browser Audit profiles; its bundle-aware harness is separate from a source-pinned checkout that must match the bundle runtime metadata, and the current `v0.2.1` drill passed with independently generated secrets
-- issue #14 Phase 1 is complete: PR #15 introduced the generic runtime region identity (`runtimeRegionIdSchema`, `runtimeRegionLabelSchema`, `runtimeLocationSchema`) in `@webperf/contracts` and the single-region `SELFHOST_REGION_ID`, `SELFHOST_REGION_LABEL`, and `SELFHOST_PROBE_BASE_URL` variables in `@webperf/config`; PR #17 removed the legacy 41-city enum, `regionCodeSchema`, `regionPackSchema`, `regions[]`/`regionPackId` fields, the `SELFHOST_*_JSON` configuration trio, `/v1/region-packs` and `/v1/region-sets` endpoints (now 410 Gone), the multi-region catalog UI, and the executor's per-region probe-origin map; PR #18 finalized the user and architecture documentation. One standalone deployment now measures from one fixed runtime location stamped onto every job, target, and Browser Audit as provenance, the Rust probe reads `REGION_ID` (default `local`) instead of `REGION_CODE`/Tokyo, the Console `/regions` workspace reports a single Runtime Location card, and `docs/users/regions.md`, `configure.md`, `checks.md`, `upgrade.md`, `docs/architecture/public-api-surface.md`, and `docs/quickstart/local-compose.md` document the single-region model. Per the operator decision, the legacy 3-variable compatibility parser and stored multi-region Check migration are intentionally omitted because there is no production data to preserve.
+- issue #14 Phase 1 is complete: PR #15 introduced the generic runtime region identity (`runtimeRegionIdSchema`, `runtimeRegionLabelSchema`, `runtimeLocationSchema`) in `@webperf/contracts` and the single-region `SELFHOST_REGION_ID`, `SELFHOST_REGION_LABEL`, and `SELFHOST_PROBE_BASE_URL` variables in `@webperf/config`; PR #17 removed the legacy 41-city enum, `regionCodeSchema`, `regionPackSchema`, `regions[]`/`regionPackId` fields, the `SELFHOST_*_JSON` configuration trio, `/v1/region-packs` and `/v1/region-sets` endpoints (now 410 Gone), the multi-region catalog UI, and the executor's per-region probe-origin map; PR #18 finalized the user and architecture documentation. One standalone deployment now measures from one fixed runtime location stamped onto every job, target, and Browser Audit as provenance, the Rust probe reads `REGION_ID` (default `local`) instead of `REGION_CODE`/Tokyo, the Console `/regions` workspace reports a single Runtime Location card, and `docs/users/regions.md`, `configure.md`, `checks.md`, `upgrade.md`, `docs/architecture/public-api-surface.md`, and `docs/quickstart/local-compose.md` document the single-region model. Published beta data is migrated on upgrade: historical job provenance is retained, matching singleton schedules stay active, and ambiguous or mismatched saved Checks are unscheduled until the operator accepts the current runtime location.
 - issue #14 Phase 2+3 is complete: the four Bun runtime images (`webperf-console`, `webperf-api`, `webperf-scheduler`, `webperf-executor`) are consolidated into a single multi-role `webperf` image built from `infra/docker/Dockerfile.webperf`. The active role is selected at container start by the `WEBPERF_ROLE` environment variable (`console`, `api`, `scheduler`, or `executor`) via the `tooling/scripts/webperf-role.ts` dispatcher. The scheduler defaults to embedded mode inside the API process (`SELFHOST_SCHEDULER_MODE=embedded`); external mode remains available. The published GHCR image set changes from six images to three (`webperf`, `webperf-probe`, `webperf-browser-audit-lighthouse`); `infra/docker/README.md`, `docs/quickstart/runtime-images.md`, `infra/release/README.md`, `docs/contributors/releases.md`, `docs/users/install.md`, `docs/users/upgrade.md`, `docs/architecture/execution-model.md`, `CONTRIBUTING.md`, and this file document the three-image model. This is a breaking change for consumers pinned to the old six-image digest-pinned Compose bundle; operators must replace the four Bun image refs with the single `webperf` image plus `WEBPERF_ROLE`.
 - issue #14 Phase 4 is complete in the current working branch: Regional Runtime Protocol v1 is network-probe-only and provides oRPC-derived OpenAPI plus `GET /v1/regional-capabilities`, idempotent signed `POST /v1/regional-executions`, signed status polling, and idempotent cancellation. Regional mode strictly allowlists health, handoff, and internal executor routes; it uses isolated current/next HMAC credentials, a five-minute replay window, semantic conflict detection, atomic encrypted SQLite persistence, durable executor chunks, accepted deadlines, restart recovery, and distinct runtime/probe provenance. `infra/regional-runtime` provides a three-container reference Compose and a one-replica co-located multi-container profile; tagged release bundles publish digest-pinned regional assets and smoke them separately. Provider application IDs, region slots, deploy/undeploy, capacity policy, and global aggregation remain in `webperf.and.guide`.
 
@@ -255,10 +259,11 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. merge and release the completed issue #14 Regional Runtime Protocol and deployment profile
-2. run a documented operator backup/restore drill against the released bundle
-3. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
-4. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+1. merge and formally release the issue #14 operational-readiness follow-up, then confirm the protected release publishes the three digest-pinned runtime images and upgrade-tested bundle
+2. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+3. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+4. evaluate production dependency pruning and image-size budgets for the unified `webperf` image without weakening role parity
+5. keep Regional Runtime deployments at one replica unless a future public shared-state protocol makes horizontal scaling explicitly safe
 
 ## Update Protocol
 

@@ -28,6 +28,7 @@ import {
   updatePropertySchema,
   updateRouteSetSchema
 } from './public-api';
+import { runtimeMetricsSchema } from './runtime-metrics';
 
 const idSchema = z.object({
   id: z.string().min(1)
@@ -177,6 +178,15 @@ export const controlContract = populateContractRouterPaths(
         method: 'GET',
         path: '/v1/regions',
         summary: 'List regions',
+        tags: ['system']
+      }),
+    runtimeMetrics: oc
+      .input(orpcType<void>())
+      .output(runtimeMetricsSchema)
+      .route({
+        method: 'GET',
+        path: '/v1/runtime-metrics',
+        summary: 'Get provider-neutral runtime metrics',
         tags: ['system']
       }),
     jobs: oc.router({

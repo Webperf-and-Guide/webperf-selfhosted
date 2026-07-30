@@ -7,12 +7,14 @@ import type {
   BrowserAuditWorkerRequest,
   ComparisonResource,
   CreateAnalysisInput,
-  CreateComparisonInput
+  CreateComparisonInput,
+  LatencyJobDetail
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
   appContract,
   comparisonResourceSchema,
+  networkProbeExecutionPayloadSchema,
   opsContract,
   publicContract
 } from '@webperf/contracts';
@@ -57,9 +59,9 @@ const selfhostEnvKeys = [
   'SELFHOST_INTERNAL_SECRET_NEXT',
   'PROBE_SHARED_SECRET',
   'PROBE_SHARED_SECRET_NEXT',
-  'SELFHOST_ACTIVE_REGION_CODES_JSON',
-  'SELFHOST_REGION_IDS_JSON',
-  'SELFHOST_PROBE_BASE_URLS_JSON',
+  'SELFHOST_REGION_ID',
+  'SELFHOST_REGION_LABEL',
+  'SELFHOST_PROBE_BASE_URL',
   'SELFHOST_MAX_TARGET_ATTEMPTS',
   'BROWSER_AUDIT_SHARED_SECRET',
   'BROWSER_AUDIT_SHARED_SECRET_NEXT',
@@ -72,6 +74,33 @@ const testProbeSecret = 'test-probe-shared-secret';
 const defaultBrowserAuditSecret = 'test-browser-audit-shared-secret';
 const nativeFetch = globalThis.fetch;
 const apiCredentialsByOrigin = new Map<string, { adminToken: string; internalSecret: string }>();
+
+const createHistoricalListJob = (): LatencyJobDetail => ({
+  id: 'job_historical_filter',
+  url: 'https://example.com/historical',
+  status: 'succeeded',
+  note: 'Migrated beta job',
+  request: { method: 'GET', headers: [], body: null },
+  monitorPolicy: {
+    monitorType: 'latency',
+    successRule: 'status_2xx_3xx',
+    latencyThresholdMs: null
+  },
+  requestedAt: '2026-07-29T00:00:00.000Z',
+  startedAt: '2026-07-29T00:00:01.000Z',
+  completedAt: '2026-07-29T00:00:02.000Z',
+  requesterIp: null,
+  region: 'historical-multi-region',
+  historicalRegions: ['tokyo', 'singapore'],
+  targets: [],
+  evaluation: null,
+  summary: {
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    inflight: 0
+  }
+});
 const fetch = Object.assign((
   input: Parameters<typeof globalThis.fetch>[0],
   init?: Parameters<typeof globalThis.fetch>[1]
@@ -185,11 +214,34 @@ describe('api service monitoring expansion', () => {
         bodySampleTiming: false,
         tlsMetadata: false
       });
+      const controlMetrics = await client.runtimeMetrics();
+      expect(controlMetrics).toMatchObject({
+        schemaVersion: 1,
+        runtimeMode: 'full',
+        capacity: {
+          topology: 'single-replica-sqlite',
+          executorConcurrency: 1,
+          horizontalScalingSafe: false
+        }
+      });
+      expect((await appClient.system.metrics()).runtimeMode).toBe('full');
+      expect((await opsClient.system.metrics()).runtimeMode).toBe('full');
 
       const unauthorizedSitesResponse = await nativeFetch(`${harness.baseUrl}/v1/sites`);
       expect(unauthorizedSitesResponse.status).toBe(401);
       expect(unauthorizedSitesResponse.headers.get('www-authenticate')).toContain('Bearer');
       expect((await nativeFetch(`${harness.baseUrl}/v1/capabilities`)).status).toBe(200);
+      expect((await nativeFetch(`${harness.baseUrl}/v1/runtime-metrics`)).status).toBe(401);
+      const runtimeMetricsResponse = await fetch(`${harness.baseUrl}/v1/runtime-metrics`);
+      expect(runtimeMetricsResponse.status).toBe(200);
+      expect(runtimeMetricsResponse.headers.get('cache-control')).toBe('no-store');
+      expect(await runtimeMetricsResponse.json()).toMatchObject({
+        schemaVersion: controlMetrics.schemaVersion,
+        runtimeMode: controlMetrics.runtimeMode,
+        runtimeLocation: controlMetrics.runtimeLocation,
+        capacity: controlMetrics.capacity,
+        retention: controlMetrics.retention
+      });
       const publicHealth = await (await nativeFetch(`${harness.baseUrl}/health`)).json();
       expect(publicHealth).toEqual({ service: 'webperf-api', ok: true });
       expect((await nativeFetch(`${harness.baseUrl}/openapi/public.json`)).status).toBe(200);
@@ -367,6 +419,9 @@ describe('api service monitoring expansion', () => {
       const openApi = await openApiResponse.json();
       expect(openApi.info?.title).toBe('Webperf Control API');
       expect(openApi.paths?.['/v1/jobs']).toBeTruthy();
+      expect(openApi.paths?.['/v1/runtime-metrics']?.get?.summary).toBe(
+        'Get provider-neutral runtime metrics'
+      );
 
       const publicOpenApiResponse = await fetch(`${harness.baseUrl}/openapi/public.json`);
       expect(publicOpenApiResponse.ok).toBe(true);
@@ -374,6 +429,26 @@ describe('api service monitoring expansion', () => {
       expect(publicOpenApi.info?.title).toBe('Webperf Public API');
       expect(publicOpenApi.paths?.['/v1/sites']).toBeTruthy();
       expect(publicOpenApi.paths?.['/v1/checks']).toBeTruthy();
+
+      harness.repository.saveJob(createHistoricalListJob());
+      const historicalJobListResponse = await fetch(
+        `${harness.baseUrl}/v1/jobs?pageSize=5&filter=singapore`
+      );
+      const historicalJobList = await historicalJobListResponse.json() as {
+        jobs: Array<{ id: string; historicalRegions?: string[] }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(historicalJobListResponse.status).toBe(200);
+      expect(historicalJobList.pageInfo).toMatchObject({
+        totalCount: 1,
+        filter: 'singapore'
+      });
+      expect(historicalJobList.jobs).toEqual([
+        expect.objectContaining({
+          id: 'job_historical_filter',
+          historicalRegions: ['tokyo', 'singapore']
+        })
+      ]);
 
       const property = await createProperty(harness.baseUrl);
       const routeSet = await createRouteSet(harness.baseUrl, property.id);
@@ -1087,10 +1162,242 @@ describe('api service monitoring expansion', () => {
       expect(stabilizedPublicOpenApi.paths?.['/v1/analyses']).toBeTruthy();
       expect(stabilizedPublicOpenApi.paths?.['/v1/browser-audits']).toBeTruthy();
       expect(stabilizedPublicOpenApi.paths?.['/v1/capabilities']).toBeTruthy();
+
+      await assertSingleRegionSavedCheckMigration({
+        baseUrl: harness.baseUrl,
+        appClient,
+        repository: harness.repository,
+        probePort: probe.port,
+        propertyId: property.id,
+        routeSetId: routeSet.id,
+        webhookUrl: webhook.url
+      });
     },
     20_000
   );
 });
+
+const assertSingleRegionSavedCheckMigration = async ({
+  baseUrl,
+  appClient,
+  repository,
+  probePort,
+  propertyId,
+  routeSetId,
+  webhookUrl
+}: {
+  baseUrl: string;
+  appClient: ContractRouterClient<typeof appContract>;
+  repository: JobRepository;
+  probePort: number;
+  propertyId: string;
+  routeSetId: string;
+  webhookUrl: string;
+}) => {
+  const profile = await createCheckProfile(baseUrl, {
+    propertyId,
+    routeSetId,
+    monitorType: 'latency',
+    latencyThresholdMs: 500,
+    webhookUrl,
+    name: 'Legacy global check'
+  });
+  const persisted = repository.getCheckProfile(profile.id);
+  expect(persisted).not.toBeNull();
+  repository.saveCheckProfile({
+    ...persisted!,
+    schedule: null,
+    locationMigration: {
+      sourceRegionPackId: 'pack_global',
+      sourceRegions: ['tokyo', 'singapore'],
+      runtimeRegionId: 'local',
+      status: 'requires_review',
+      reason: 'legacy_multi_region',
+      acknowledgedAt: null
+    }
+  });
+
+  const blockedRun = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}'
+  });
+  expect(blockedRun.status).toBe(409);
+  expect(await blockedRun.json()).toMatchObject({
+    error: expect.stringContaining('disabled')
+  });
+  const staleRuntimeProfile = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...staleRuntimeProfile,
+    locationMigration: {
+      ...staleRuntimeProfile.locationMigration!,
+      runtimeRegionId: 'tokyo'
+    }
+  });
+
+  const updatePayload = {
+    propertyId,
+    routeSetId,
+    name: 'Legacy global check',
+    note: 'reviewed for one runtime',
+    scheduleIntervalMinutes: 60
+  };
+  await expect(
+    appClient.checkProfiles.update({
+      params: { id: profile.id },
+      body: {
+        ...updatePayload,
+        acknowledgeLocationMigration: true
+      }
+    })
+  ).rejects.toMatchObject({
+    code: 'CONFLICT',
+    status: 409,
+    data: {
+      code: 'runtime_location_changed'
+    }
+  });
+  const reconciledAfterRpc = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...reconciledAfterRpc,
+    locationMigration: {
+      ...reconciledAfterRpc.locationMigration!,
+      runtimeRegionId: 'tokyo'
+    }
+  });
+  const staleRuntimeApproval = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...updatePayload,
+      acknowledgeLocationMigration: true
+    })
+  });
+  expect(staleRuntimeApproval.status).toBe(409);
+  expect(await staleRuntimeApproval.json()).toMatchObject({
+    code: 'runtime_location_changed',
+    error: expect.stringContaining('runtime location changed')
+  });
+  expect(repository.getCheckProfile(profile.id)?.locationMigration).toMatchObject({
+    runtimeRegionId: 'local',
+    status: 'requires_review',
+    acknowledgedAt: null
+  });
+
+  const blockedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(updatePayload)
+  });
+  expect(blockedUpdate.status).toBe(409);
+
+  const acceptedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...updatePayload,
+      acknowledgeLocationMigration: true
+    })
+  });
+  expect(acceptedUpdate.status).toBe(200);
+  expect(await acceptedUpdate.json()).toMatchObject({
+    profile: {
+      schedule: {
+        intervalMinutes: 60
+      },
+      locationMigration: {
+        status: 'accepted',
+        acknowledgedAt: expect.any(String)
+      }
+    }
+  });
+
+  const acceptedRun = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}'
+  });
+  expect(acceptedRun.status).toBe(201);
+
+  const appliedProfile = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...appliedProfile,
+    locationMigration: {
+      ...appliedProfile.locationMigration!,
+      runtimeRegionId: 'tokyo',
+      status: 'applied',
+      acknowledgedAt: null
+    }
+  });
+  const changedRuntimeRun = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}'
+  });
+  expect(changedRuntimeRun.status).toBe(409);
+  expect(await changedRuntimeRun.json()).toMatchObject({
+    code: 'runtime_location_changed'
+  });
+  expect(repository.getCheckProfile(profile.id)).toMatchObject({
+    schedule: null,
+    locationMigration: {
+      runtimeRegionId: 'local',
+      status: 'requires_review',
+      acknowledgedAt: null
+    }
+  });
+  const blockedQueuedExecution = repository.listExecutionJobs().find((executionJob) => {
+    const payload = networkProbeExecutionPayloadSchema.safeParse(executionJob.payload);
+    return executionJob.kind === 'network_probe'
+      && executionJob.status === 'queued'
+      && payload.success
+      && payload.data.checkId === profile.id;
+  });
+  expect(blockedQueuedExecution).toBeDefined();
+  await drainExecutions(baseUrl, probePort);
+  expect(repository.getExecutionJob(blockedQueuedExecution!.id)?.status).toBe('cancelled');
+
+  const reacceptedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...updatePayload,
+      acknowledgeLocationMigration: true
+    })
+  });
+  expect(reacceptedUpdate.status).toBe(200);
+  const acceptedScheduledProfile = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...acceptedScheduledProfile,
+    schedule: {
+      intervalMinutes: 60,
+      nextRunAt: '2026-07-29T00:00:00.000Z',
+      lastRunAt: null,
+      lastRunJobCount: null
+    },
+    locationMigration: {
+      ...acceptedScheduledProfile.locationMigration!,
+      runtimeRegionId: 'tokyo',
+      status: 'accepted'
+    }
+  });
+  const changedRuntimeDispatch = await fetch(
+    `${baseUrl}/v1/scheduler/dispatch?now=2026-07-30T00:00:00.000Z`,
+    { method: 'POST' }
+  );
+  expect(changedRuntimeDispatch.status).toBe(200);
+  expect(await changedRuntimeDispatch.json()).toMatchObject({
+    triggeredCount: 0
+  });
+  expect(repository.getCheckProfile(profile.id)).toMatchObject({
+    schedule: null,
+    locationMigration: {
+      runtimeRegionId: 'local',
+      status: 'requires_review',
+      acknowledgedAt: null
+    }
+  });
+};
 
 const createTempDirectory = () => {
   const directory = mkdtempSync(join(tmpdir(), 'webperf-api-http-'));
@@ -1417,9 +1724,9 @@ const startSelfhostHarness = async (
   process.env.SELFHOST_ADMIN_TOKEN_NEXT = '';
   process.env.SELFHOST_INTERNAL_SECRET = testInternalSecret;
   process.env.SELFHOST_INTERNAL_SECRET_NEXT = '';
-  process.env.SELFHOST_ACTIVE_REGION_CODES_JSON = '["tokyo"]';
-  process.env.SELFHOST_REGION_IDS_JSON = '{"tokyo":"JP"}';
-  process.env.SELFHOST_PROBE_BASE_URLS_JSON = `{"tokyo":"http://127.0.0.1:${probePort}"}`;
+  process.env.SELFHOST_REGION_ID = 'local';
+  process.env.SELFHOST_REGION_LABEL = 'Local test runtime';
+  process.env.SELFHOST_PROBE_BASE_URL = `http://127.0.0.1:${probePort}`;
   process.env.SELFHOST_MAX_TARGET_ATTEMPTS = '1';
 
   if (options?.browserAuditBaseUrl) {

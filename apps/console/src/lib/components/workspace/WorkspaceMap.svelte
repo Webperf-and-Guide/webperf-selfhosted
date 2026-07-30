@@ -6,7 +6,7 @@
   </a>
   <a class="map-card" href="/resources">
     <span>Resources</span>
-    <strong>Define sites, route groups, and region sets</strong>
+    <strong>Define sites and route groups</strong>
     <small>Keep shared inputs reusable instead of rebuilding them inside every check.</small>
   </a>
   <a class="map-card" href="/checks">

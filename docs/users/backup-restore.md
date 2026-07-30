@@ -10,6 +10,22 @@ A complete recovery record contains three things:
 Store these outside the live Docker volume with restricted permissions. Test
 restores on a separate host or Compose project.
 
+The repository continuously exercises this boundary with
+`bun run drill:compose:recovery`. The drill creates real Fast Check and Browser
+Audit records, copies SQLite plus artifact bytes outside an isolated Compose
+volume, deletes that test volume, restores both halves, runs `migrate` and
+`doctor`, and verifies the original records and artifact digest. Formal release
+smoke also runs the same drill against the downloaded digest-pinned bundle.
+The release gate separately starts the public `v0.2.1` bundle, creates its
+legacy multi-region records, replaces the runtime with the candidate published
+bundle on the same named volume, and verifies the stored-data migration. That
+cross-version drill proves the earliest supported public beta can reach the
+current single-region model without silently reassigning historical locations
+or scheduled Checks.
+This is destructive only to its uniquely named `webperf-recovery-*` test
+project; operators must follow the stopped-writer procedure below and must
+never reuse the drill as a production backup command.
+
 ## Create a consistent Compose backup
 
 Create a private destination, stop new work, and ask SQLite for a compact,
@@ -127,7 +143,9 @@ docker compose --env-file .env --profile browser-audit -f compose.yml up -d
 ```
 
 Never run `docker compose down -v` as part of backup, upgrade, or restore. The
-`-v` flag deletes the named data volume.
+`-v` flag deletes the named data volume. The automated recovery drill uses it
+only after checking its process-owned test project prefix, specifically to
+prove that the external recovery record can reconstruct an empty volume.
 
 For command details and older-schema recovery, see
 [SQLite operations](../self-hosting/database-operations.md).

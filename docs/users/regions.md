@@ -38,7 +38,11 @@ SELFHOST_PROBE_BASE_URL=http://probe:8080
 The previous multi-region configuration unit
 (`SELFHOST_ACTIVE_REGION_CODES_JSON`, `SELFHOST_REGION_IDS_JSON`,
 `SELFHOST_PROBE_BASE_URLS_JSON`) and the 41-city catalog were removed in
-Phase 1 of issue #14. There is no production data to migrate.
+Phase 1 of issue #14. Upgrades from the published multi-region beta preserve
+historical job target regions. Saved Checks that used one matching region keep
+their schedules; multi-region, missing, or mismatched region-pack references
+are unscheduled and marked for explicit operator review before they can run at
+the current runtime location. See [Upgrade](upgrade.md) for the review flow.
 
 ## Add a remote probe
 

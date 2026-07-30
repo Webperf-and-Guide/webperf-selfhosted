@@ -33,6 +33,8 @@
     "smoke:web": "bun run smoke:console",
     "smoke:compose": "bash tooling/scripts/smoke-compose.sh",
     "smoke:compose:browser-audit": "COMPOSE_PROFILE=browser-audit bash tooling/scripts/smoke-compose.sh",
+    "drill:compose:recovery": "bash tooling/scripts/drill-compose-recovery.sh",
+    "drill:compose:upgrade": "bash tooling/scripts/drill-compose-upgrade.sh",
     "capture:console:baselines": "bash tooling/scripts/capture-console-baselines.sh",
     "capture:console:baselines:parallel": "BASE_URL=${SELFHOST_PARALLEL_CONSOLE_BASE_URL:-http://localhost:4174} bash tooling/scripts/capture-console-baselines.sh",
     "selfhost:init": "bun tooling/scripts/selfhost-init.ts",

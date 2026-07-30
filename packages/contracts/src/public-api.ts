@@ -340,6 +340,30 @@ export type CheckProfileBaseline = z.infer<typeof checkProfileBaselineSchema>;
 export const checkProfileRunTriggerSchema = z.enum(['manual', 'schedule']);
 export type CheckProfileRunTrigger = z.infer<typeof checkProfileRunTriggerSchema>;
 
+export const checkProfileLocationMigrationReasonSchema = z.enum([
+  'singleton_matches_runtime',
+  'legacy_multi_region',
+  'legacy_region_mismatch',
+  'legacy_region_pack_missing'
+]);
+export type CheckProfileLocationMigrationReason = z.infer<
+  typeof checkProfileLocationMigrationReasonSchema
+>;
+
+export const checkProfileLocationMigrationSchema = z.object({
+  sourceRegionPackId: z.string().min(1),
+  // Empty is intentional when a published-beta Check references a region
+  // pack that is no longer present in the restored database.
+  sourceRegions: z.array(runtimeRegionIdSchema).max(4),
+  runtimeRegionId: runtimeRegionIdSchema,
+  status: z.enum(['applied', 'requires_review', 'accepted']),
+  reason: checkProfileLocationMigrationReasonSchema,
+  acknowledgedAt: z.string().datetime().nullable().default(null)
+});
+export type CheckProfileLocationMigration = z.infer<
+  typeof checkProfileLocationMigrationSchema
+>;
+
 export const checkProfileSchema = z.object({
   id: z.string().min(1),
   propertyId: z.string().min(1),
@@ -352,6 +376,7 @@ export const checkProfileSchema = z.object({
   browserAuditPolicy: browserAuditPolicySchema.nullable().default(null),
   schedule: checkProfileScheduleSchema.nullable(),
   baseline: checkProfileBaselineSchema.nullable().default(null),
+  locationMigration: checkProfileLocationMigrationSchema.nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
@@ -370,7 +395,9 @@ export const createCheckProfileSchema = z.strictObject({
 });
 export type CreateCheckProfileInput = z.infer<typeof createCheckProfileSchema>;
 
-export const updateCheckProfileSchema = createCheckProfileSchema;
+export const updateCheckProfileSchema = createCheckProfileSchema.extend({
+  acknowledgeLocationMigration: z.boolean().optional()
+});
 export type UpdateCheckProfileInput = z.infer<typeof updateCheckProfileSchema>;
 
 export const setCheckProfileBaselineSchema = z.object({
@@ -512,10 +539,12 @@ export const latencyJobSchema = z.object({
   startedAt: z.string().datetime().nullable(),
   completedAt: z.string().datetime().nullable(),
   requesterIp: z.string().min(1).nullable(),
-  // Phase 1 of issue #14 removed the multi-region `selectedRegions` field.
-  // One standalone deployment measures from one runtime location; the
-  // resolved region id is stamped onto each target as provenance.
-  region: runtimeRegionIdSchema
+  // Phase 1 of issue #14 removed the multi-region `selectedRegions` field for
+  // new jobs. Migrated beta jobs keep their original target regions and use
+  // the explicit `historical-multi-region` aggregate id when more than one
+  // location participated.
+  region: runtimeRegionIdSchema,
+  historicalRegions: z.array(runtimeRegionIdSchema).min(1).max(4).optional()
 });
 export type LatencyJob = z.infer<typeof latencyJobSchema>;
 

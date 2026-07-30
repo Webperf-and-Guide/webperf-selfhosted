@@ -148,6 +148,7 @@ cannot be restored without the internal secret that encrypted them.
 
 - [Backup and restore](docs/users/backup-restore.md)
 - [Upgrade a digest-pinned release](docs/users/upgrade.md)
+- [Runtime metrics](docs/users/runtime-metrics.md)
 - [Troubleshooting](docs/users/troubleshooting.md)
 - [Release images, SBOMs, and provenance](docs/quickstart/runtime-images.md)
 

@@ -37,12 +37,14 @@ Treat this document as the current freeze line:
 - `GET /v1/browser-audits/:id/artifacts/:artifactId`
 - `GET /v1/regions`
 - `GET /v1/capabilities`
+- `GET /v1/runtime-metrics` — protected provider-neutral queue/lease snapshot
 
 ### Regional runtime handoff (v1 boundary decision)
 
 When `SELFHOST_RUNTIME_MODE=regional-runtime`, the API additionally exposes:
 
 - `GET /v1/regional-capabilities` — runtime capabilities for Cloud dispatch
+- `GET /v1/runtime-metrics` — protected queue pressure and topology snapshot
 - `POST /v1/regional-executions` — idempotent execution request (HMAC-signed)
 - `GET /v1/regional-executions/:idempotencyKey` — status poll
 - `DELETE /v1/regional-executions/:idempotencyKey` — cancellation
@@ -59,6 +61,8 @@ Authentication boundary:
   `GET /openapi/regional-runtime.json` unauthenticated for discovery.
 - `GET /v1/health`, artifact downloads, and every data or execution endpoint
   require the appropriate administrator or internal-service bearer token.
+- `GET /v1/runtime-metrics` accepts the administrator token in full mode and
+  the regional-runtime token in regional mode.
 
 Request boundary:
 
@@ -82,6 +86,12 @@ resource to migrate to.
 
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
 Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
+
+Published beta stored-data compatibility is separate from the retired Region
+Set HTTP surface. Historical Jobs retain their original target regions.
+Migrated saved Checks expose `locationMigration`: unsafe multi-region,
+mismatched, or missing Region Set definitions are unscheduled and cannot run
+until an update explicitly sets `acknowledgeLocationMigration: true`.
 
 Every response below a compatibility prefix includes:
 

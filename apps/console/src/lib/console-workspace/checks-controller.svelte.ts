@@ -34,6 +34,13 @@ import {
 
 type SavedProfileMeta = SavedChecksData['profileMeta'][number];
 
+type ProfileActionResult =
+  | string
+  | {
+      message: string;
+      controlDataAlreadyRefreshed: true;
+    };
+
 type ChecksAccessors = {
   getSavedChecksEnabled: () => boolean;
   getProperties: () => Property[];
@@ -61,6 +68,7 @@ export class ChecksController {
     profileAlertOnThreshold: false,
     profileAlertOnRegression: false,
     profileWebhookTargetsText: '',
+    profileLocationMigrationAcknowledged: false,
     editingProfileId: '',
     checkProfileFilterDraft: '',
     checkProfileFilter: '',
@@ -283,6 +291,7 @@ export class ChecksController {
     this.state.profileAlertOnThreshold = false;
     this.state.profileAlertOnRegression = false;
     this.state.profileWebhookTargetsText = '';
+    this.state.profileLocationMigrationAcknowledged = false;
   };
 
   loadProfileEditor = (profileId: string) => {
@@ -314,6 +323,8 @@ export class ChecksController {
     this.state.profileAlertOnThreshold = profile.alerts?.triggers.onLatencyThresholdBreach ?? false;
     this.state.profileAlertOnRegression = profile.alerts?.triggers.onRegression ?? false;
     this.state.profileWebhookTargetsText = stringifyWebhookTargets(profile.alerts?.webhookTargets ?? []);
+    this.state.profileLocationMigrationAcknowledged =
+      profile.locationMigration?.status !== 'requires_review';
   };
 
   submitCheckProfile = async (event: SubmitEvent) => {
@@ -322,6 +333,11 @@ export class ChecksController {
       'check-profile',
       this.state.editingProfileId ? 'update' : 'create',
       async () => {
+        const editingProfile = this.state.editingProfileId
+          ? this.checkProfileById.get(this.state.editingProfileId)
+          : undefined;
+        const requiresLocationReview =
+          editingProfile?.locationMigration?.status === 'requires_review';
         const response = await fetch(
           this.state.editingProfileId
             ? `/api/control/check-profiles/${this.state.editingProfileId}`
@@ -361,14 +377,36 @@ export class ChecksController {
               },
               scheduleIntervalMinutes: this.state.profileScheduleMinutes
                 ? Number(this.state.profileScheduleMinutes)
+                : undefined,
+              acknowledgeLocationMigration: requiresLocationReview
+                ? this.state.profileLocationMigrationAcknowledged
                 : undefined
             })
           }
         );
 
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as { code?: string; error?: string };
 
         if (!response.ok) {
+          if (
+            response.status === 409
+            && payload.code === 'runtime_location_changed'
+            && this.state.editingProfileId
+          ) {
+            const profileId = this.state.editingProfileId;
+            this.state.profileLocationMigrationAcknowledged = false;
+            await this.accessors.refreshControlData();
+            if (this.checkProfileById.has(profileId)) {
+              this.loadProfileEditor(profileId);
+            } else {
+              this.resetProfileForm();
+            }
+            return {
+              message:
+                'The runtime location changed, so the saved check was reloaded. Review the current location and acknowledge it again.',
+              controlDataAlreadyRefreshed: true
+            };
+          }
           throw new Error(
             payload.error ?? `Failed to ${this.state.editingProfileId ? 'update' : 'create'} saved check.`
           );
@@ -600,16 +638,18 @@ export class ChecksController {
   private submitProfileAction = async (
     kind: string,
     actionName: 'create' | 'update' | 'delete',
-    action: () => Promise<string>
+    action: () => Promise<ProfileActionResult>
   ) => {
     this.state.savingProfileKind = `${kind}:${actionName}`;
     this.state.profileActionError = null;
     this.state.profileActionMessage = null;
 
     try {
-      const message = await action();
-      this.state.profileActionMessage = message;
-      await this.accessors.refreshControlData();
+      const result = await action();
+      this.state.profileActionMessage = typeof result === 'string' ? result : result.message;
+      if (typeof result === 'string') {
+        await this.accessors.refreshControlData();
+      }
     } catch (error) {
       this.state.profileActionError =
         error instanceof Error ? error.message : `Failed to ${actionName} ${kind.replace('-', ' ')}.`;

@@ -119,7 +119,15 @@ The exact diff will stay small within each phase, but the expected surface is:
 - Existing stored JSON payloads and the legacy control contract remain readable
   while cloud consumers move to canonical public contracts.
 - `/v1/region-packs` and `/v1/region-sets` are intentionally retired with
-  `410 Gone`; no production migration was required before their removal.
+  `410 Gone`. Their encrypted rows remain in SQLite as compatibility evidence
+  until restore and upgrade coverage proves they can be retired safely.
+- Published beta Jobs are migrated without rewriting target provenance:
+  singleton history keeps its original region, while multi-region history uses
+  an explicit aggregate id and retains the original region list and targets.
+- Published beta Checks record their source Region Set. A singleton set that
+  matches the configured runtime is applied explicitly; every multi-region,
+  missing, or mismatched definition loses its schedule and requires an
+  operator-visible acknowledgement before it can run again.
 - Browser Audit normalized contracts will receive a new public package version;
   a sitespeed.io-shaped fixture will prove engine neutrality without shipping a
   sitespeed.io runner.
@@ -185,6 +193,8 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Keep scheduler limited to authenticated due-check dispatch.
 - [x] Add init/migrate/backup/restore/doctor/maintenance commands.
 - [x] Add restart-recovery and scheduler-dispatch integration tests.
+- [x] Add a destructive isolated-volume backup/restore drill and a published
+  `v0.2.1`-to-current cross-version upgrade drill to formal release smoke.
 - [x] Add a Sampo changeset for durable execution; extend it with database
   operations before this phase closes.
 
@@ -250,6 +260,9 @@ The exact diff will stay small within each phase, but the expected surface is:
 ## Completion gates
 
 - [x] A clean host can install a tagged, digest-pinned Compose bundle.
+- [x] A checksum-verified `v0.2.1` bundle can retain its named volume and
+  migrate stored multi-region records into the single-region model without
+  losing historical provenance or silently retaining an unsafe schedule.
 - [x] Default host exposure is console-only on loopback.
 - [x] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.

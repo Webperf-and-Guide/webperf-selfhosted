@@ -46,7 +46,7 @@
     <ResourceInventoryStrip items={inventoryItems} />
   {:else}
     <OperatorEmptyState
-      detail="Persistent sites, route groups, and region sets require the full self-host API service."
+      detail="Persistent sites, route groups, and saved checks require the full self-host API service."
       title="This control endpoint is running in live-check mode only."
     />
   {/if}

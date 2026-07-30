@@ -6,6 +6,7 @@ import {
   regionalExecutionResultSchema,
   regionalRuntimeCapabilitiesSchema
 } from './regional-runtime';
+import { runtimeMetricsSchema } from './runtime-metrics';
 
 const regionalExecutionParamsSchema = z.object({
   idempotencyKey: regionalExecutionIdempotencyKeySchema
@@ -28,6 +29,17 @@ export const regionalRuntimeContract = populateContractRouterPaths(oc.router({
         method: 'GET',
         path: '/v1/regional-capabilities',
         summary: 'Get regional runtime capabilities',
+        tags: ['regionalRuntime']
+      })
+  },
+  metrics: {
+    get: oc
+      .input(orpcType<void>())
+      .output(runtimeMetricsSchema)
+      .route({
+        method: 'GET',
+        path: '/v1/runtime-metrics',
+        summary: 'Get provider-neutral runtime metrics',
         tags: ['regionalRuntime']
       })
   },

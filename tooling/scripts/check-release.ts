@@ -54,22 +54,27 @@ function readWorkflow(file: string): string | undefined {
   }
 }
 
+function readScript(relativePath: string): string | undefined {
+  try {
+    return readFileSync(join(root, relativePath), 'utf8');
+  } catch {
+    violations.push(`${relativePath}: script is missing or unreadable`);
+    return undefined;
+  }
+}
+
 const releaseWorkflow = readWorkflow('release.yml');
 const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
 const releaseBundleSmokeWorkflow = readWorkflow('release-bundle-smoke.yml');
-let composeSmokeScript: string | undefined;
-try {
-  composeSmokeScript = readFileSync(join(root, 'tooling/scripts/smoke-compose.sh'), 'utf8');
-} catch {
-  violations.push('tooling/scripts/smoke-compose.sh: script is missing or unreadable');
-}
-let releaseTagScript: string | undefined;
-try {
-  releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
-} catch {
-  violations.push('tooling/scripts/release-tag.sh: script is missing or unreadable');
-}
+const composeSmokeScript = readScript('tooling/scripts/smoke-compose.sh');
+const composeUpgradeDrillScript = readScript(
+  'tooling/scripts/drill-compose-upgrade.sh'
+);
+const composeUpgradeFixtureScript = readScript(
+  'tooling/scripts/compose-upgrade-fixture.ts'
+);
+const releaseTagScript = readScript('tooling/scripts/release-tag.sh');
 const releaseImageMatrix = parseImageMatrix(releaseWorkflow, 'release.yml', 'images');
 const developmentImageMatrix = parseImageMatrix(
   ciWorkflow,
@@ -260,9 +265,9 @@ for (const requiredFragment of [
   'curl -q --fail --silent --show-error --location',
   '--retry 15',
   '--retry-all-errors',
-  '--retry-max-time 45',
+  '--retry-max-time 300',
   '--connect-timeout 10',
-  '--max-time 20',
+  '--max-time 120',
   'sha256sum --check SHA256SUMS',
   'WEBPERF_SMOKE_USE_DEV_OVERRIDE: \'false\'',
   'WEBPERF_SMOKE_DOCKER_CONFIG:',
@@ -273,6 +278,56 @@ for (const requiredFragment of [
 ]) {
   if (releaseBundleSmokeWorkflow !== undefined && !releaseBundleSmokeWorkflow.includes(requiredFragment)) {
     violations.push(`release-bundle-smoke.yml: missing published-bundle smoke invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'Published bundle upgrade eligibility',
+  'Published bundle v0.2.1 upgrade drill',
+  'is-newer-than "$CURRENT_VERSION" "$LEGACY_VERSION"',
+  'needs: upgrade-eligibility',
+  "if: ${{ needs.upgrade-eligibility.outputs.required == 'true' }}",
+  'LEGACY_VERSION: 0.2.1',
+  'WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:',
+  'WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:',
+  'WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE: \'false\'',
+  'bash tooling/scripts/drill-compose-upgrade.sh'
+]) {
+  if (
+    releaseBundleSmokeWorkflow !== undefined
+    && !releaseBundleSmokeWorkflow.includes(requiredFragment)
+  ) {
+    violations.push(
+      `release-bundle-smoke.yml: missing cross-version upgrade invariant ${requiredFragment}`
+    );
+  }
+}
+
+for (const requiredFragment of [
+  'SELFHOST_MIGRATION_BACKUP',
+  'compose-version-upgrade',
+  'Legacy data volume disappeared during the non-destructive upgrade'
+]) {
+  if (
+    composeUpgradeDrillScript !== undefined
+    && !composeUpgradeDrillScript.includes(requiredFragment)
+  ) {
+    violations.push(
+      `tooling/scripts/drill-compose-upgrade.sh: missing stored-data invariant ${requiredFragment}`
+    );
+  }
+}
+for (const requiredFragment of [
+  'historical-multi-region',
+  'locationMigration'
+]) {
+  if (
+    composeUpgradeFixtureScript !== undefined
+    && !composeUpgradeFixtureScript.includes(requiredFragment)
+  ) {
+    violations.push(
+      `tooling/scripts/compose-upgrade-fixture.ts: missing stored-data invariant ${requiredFragment}`
+    );
   }
 }
 

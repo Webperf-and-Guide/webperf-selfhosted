@@ -2,6 +2,7 @@ import type { SqliteMigration } from './types';
 import {
   browserAuditResourceSchema,
   checkProfileRunSchema,
+  isBrowserAuditTerminalExecutionStatus,
   latencyJobDetailSchema,
   type CheckProfileLocationMigrationReason
 } from '@webperf/contracts';
@@ -249,18 +250,14 @@ const visitPayloadRowsInBatches = ({
   }
 };
 
-const rewriteJobRowsInBatches = ({
+const visitJobRowsInBatches = ({
   database,
-  runtimeRegionId,
-  migrationTimestamp,
   parse,
-  stringify
+  visit
 }: {
   database: Parameters<SqliteMigration['up']>[0];
-  runtimeRegionId: string | undefined;
-  migrationTimestamp: string;
   parse: (payload: string) => unknown;
-  stringify: (value: unknown) => string;
+  visit: (row: PersistedPayloadRow, value: unknown) => boolean;
 }) => {
   // Keep the first read separate instead of assuming a lower rowid bound for legacy databases.
   const readFirstBatch = database.query<PersistedPayloadRow, []>(`
@@ -276,6 +273,58 @@ const rewriteJobRowsInBatches = ({
     ORDER BY rowid
     LIMIT ${migrationBatchSize}
   `);
+  visitPayloadRowsInBatches({
+    readFirstBatch,
+    readNextBatch,
+    parse,
+    visit
+  });
+};
+
+const visitBrowserAuditRowsInBatches = ({
+  database,
+  parse,
+  visit
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  parse: (payload: string) => unknown;
+  visit: (row: PersistedPayloadRow, value: unknown) => boolean;
+}) => {
+  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'browser_audit'
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'browser_audit' AND rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  visitPayloadRowsInBatches({
+    readFirstBatch,
+    readNextBatch,
+    parse,
+    visit
+  });
+};
+
+const rewriteJobRowsInBatches = ({
+  database,
+  runtimeRegionId,
+  migrationTimestamp,
+  parse,
+  stringify
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  runtimeRegionId: string | undefined;
+  migrationTimestamp: string;
+  parse: (payload: string) => unknown;
+  stringify: (value: unknown) => string;
+}) => {
   const update = database.query<never, [string, number]>(
     'UPDATE jobs SET payload_json = ? WHERE rowid = ?'
   );
@@ -295,9 +344,8 @@ const rewriteJobRowsInBatches = ({
   `);
 
   try {
-    visitPayloadRowsInBatches({
-      readFirstBatch,
-      readNextBatch,
+    visitJobRowsInBatches({
+      database,
       parse,
       visit(row, value) {
         const rewritten = finishLegacyJobForRuntime(
@@ -393,23 +441,9 @@ const hasLegacyJobsInBatches = ({
   database: Parameters<SqliteMigration['up']>[0];
   parse: (payload: string) => unknown;
 }) => {
-  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
-    SELECT rowid, payload_json
-    FROM jobs
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
-  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
-    SELECT rowid, payload_json
-    FROM jobs
-    WHERE rowid > ?
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
   let found = false;
-  visitPayloadRowsInBatches({
-    readFirstBatch,
-    readNextBatch,
+  visitJobRowsInBatches({
+    database,
     parse,
     visit(_row, value) {
       const selectedRegions = isRecord(value)
@@ -432,30 +466,15 @@ const hasUnfinishedLegacyBrowserAuditsInBatches = ({
   database: Parameters<SqliteMigration['up']>[0];
   parse: (payload: string) => unknown;
 }) => {
-  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
-    SELECT rowid, payload_json
-    FROM saved_entities
-    WHERE kind = 'browser_audit'
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
-  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
-    SELECT rowid, payload_json
-    FROM saved_entities
-    WHERE kind = 'browser_audit' AND rowid > ?
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
   let found = false;
-  visitPayloadRowsInBatches({
-    readFirstBatch,
-    readNextBatch,
+  visitBrowserAuditRowsInBatches({
+    database,
     parse,
     visit(_row, value) {
       const audit = browserAuditResourceSchema.safeParse(value);
       if (
         audit.success
-        && !['succeeded', 'failed', 'cancelled'].includes(audit.data.status)
+        && !isBrowserAuditTerminalExecutionStatus(audit.data.status)
       ) {
         found = true;
         return false;
@@ -712,20 +731,6 @@ const reconcileLegacyBrowserAuditsInBatches = ({
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
 }) => {
-  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
-    SELECT rowid, payload_json
-    FROM saved_entities
-    WHERE kind = 'browser_audit'
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
-  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
-    SELECT rowid, payload_json
-    FROM saved_entities
-    WHERE kind = 'browser_audit' AND rowid > ?
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
   const updateAudit = database.query<never, [string, string, number]>(`
     UPDATE saved_entities
     SET payload_json = ?, updated_at = ?
@@ -744,16 +749,15 @@ const reconcileLegacyBrowserAuditsInBatches = ({
   `);
 
   try {
-    visitPayloadRowsInBatches({
-      readFirstBatch,
-      readNextBatch,
+    visitBrowserAuditRowsInBatches({
+      database,
       parse,
       visit(row, value) {
         const parsed = browserAuditResourceSchema.safeParse(value);
         if (
           !parsed.success
           || !isRecord(value)
-          || ['succeeded', 'failed', 'cancelled'].includes(parsed.data.status)
+          || isBrowserAuditTerminalExecutionStatus(parsed.data.status)
           || parsed.data.region === runtimeRegionId
         ) {
           return true;

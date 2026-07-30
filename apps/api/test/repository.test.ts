@@ -333,6 +333,19 @@ describe('sqlite control repository', () => {
       timestamp,
       storageCrypto.stringify(missingPackProfile)
     );
+    for (let index = 0; index < 205; index += 1) {
+      const profileId = `profile_legacy_batch_${index}`;
+      saveEntity.run(
+        'check_profile',
+        profileId,
+        timestamp,
+        timestamp,
+        storageCrypto.stringify({
+          ...createCheckProfile({ id: profileId }),
+          regionPackId: 'pack_global'
+        })
+      );
+    }
 
     const currentJob = createJob({
       id: 'job_legacy_multi',
@@ -457,6 +470,18 @@ describe('sqlite control repository', () => {
         reason: 'legacy_region_pack_missing'
       }
     });
+    for (const index of [0, 99, 100, 199, 204]) {
+      expect(repository.getCheckProfile(`profile_legacy_batch_${index}`)).toMatchObject({
+        schedule: null,
+        locationMigration: {
+          sourceRegionPackId: 'pack_global',
+          sourceRegions: ['tokyo', 'singapore'],
+          runtimeRegionId: 'tokyo',
+          status: 'requires_review',
+          reason: 'legacy_multi_region'
+        }
+      });
+    }
     repository.close();
 
     const verifyDatabase = new Database(databasePath, { readonly: true });

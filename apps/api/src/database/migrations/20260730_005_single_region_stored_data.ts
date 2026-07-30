@@ -160,6 +160,109 @@ const rewriteJobRowsInBatches = ({
   }
 };
 
+const visitCheckRowsInBatches = ({
+  database,
+  parse,
+  visit
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  parse: (payload: string) => unknown;
+  visit: (row: PersistedPayloadRow, value: unknown) => boolean;
+}) => {
+  // Keep the first read separate instead of assuming a lower rowid bound for legacy databases.
+  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'check_profile'
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'check_profile' AND rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  let lastRowId: number | null = null;
+
+  try {
+    while (true) {
+      const rows: PersistedPayloadRow[] = lastRowId === null
+        ? readFirstBatch.all()
+        : readNextBatch.all(lastRowId);
+      if (rows.length === 0) {
+        return;
+      }
+
+      for (const row of rows) {
+        if (!visit(row, parse(row.payload_json))) {
+          return;
+        }
+        lastRowId = row.rowid;
+      }
+    }
+  } finally {
+    readFirstBatch.finalize();
+    readNextBatch.finalize();
+  }
+};
+
+const hasLegacyChecksInBatches = ({
+  database,
+  parse
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  parse: (payload: string) => unknown;
+}) => {
+  let found = false;
+  visitCheckRowsInBatches({
+    database,
+    parse,
+    visit(_row, value) {
+      if (isRecord(value) && typeof value.regionPackId === 'string') {
+        found = true;
+        return false;
+      }
+      return true;
+    }
+  });
+  return found;
+};
+
+const rewriteCheckRowsInBatches = ({
+  database,
+  runtimeRegionId,
+  regionPacks,
+  parse,
+  stringify
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  runtimeRegionId: string;
+  regionPacks: Map<string, string[]>;
+  parse: (payload: string) => unknown;
+  stringify: (value: unknown) => string;
+}) => {
+  const update = database.query<never, [string, number]>(
+    'UPDATE saved_entities SET payload_json = ? WHERE rowid = ?'
+  );
+  try {
+    visitCheckRowsInBatches({
+      database,
+      parse,
+      visit(row, value) {
+        const rewritten = rewriteLegacyCheck(value, runtimeRegionId, regionPacks);
+        if (rewritten !== value) {
+          update.run(stringify(rewritten), row.rowid);
+        }
+        return true;
+      }
+    });
+  } finally {
+    update.finalize();
+  }
+};
+
 export const singleRegionStoredDataMigration: SqliteMigration = {
   id: '20260730_005_single_region_stored_data',
   up(database, context) {
@@ -175,46 +278,27 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
       .all();
     const regionPacks = readLegacyRegionPacks(regionPackRows, parse);
 
-    const checkRows = database
-      .query<PersistedPayloadRow, []>(`
-        SELECT rowid, payload_json
-        FROM saved_entities
-        WHERE kind = 'check_profile'
-        ORDER BY rowid
-      `)
-      .all();
-    const parsedCheckRows = checkRows.map((row) => ({
-      row,
-      value: parse(row.payload_json)
-    }));
-    const hasLegacyChecks = parsedCheckRows.some(({ value }) => {
-      return isRecord(value) && typeof value.regionPackId === 'string';
-    });
-    if (hasLegacyChecks && !context.runtimeRegionId) {
+    const runtimeRegionId = context.runtimeRegionId;
+    if (!runtimeRegionId && hasLegacyChecksInBatches({ database, parse })) {
       throw new Error(
         'SELFHOST_REGION_ID is required to migrate saved Checks from legacy Region Sets'
       );
     }
-    const runtimeRegionId = context.runtimeRegionId;
-    const updateCheck = database.query('UPDATE saved_entities SET payload_json = ? WHERE rowid = ?');
 
-    try {
-      rewriteJobRowsInBatches({
+    rewriteJobRowsInBatches({
+      database,
+      rewrite: rewriteLegacyJob,
+      parse,
+      stringify
+    });
+    if (runtimeRegionId) {
+      rewriteCheckRowsInBatches({
         database,
-        rewrite: rewriteLegacyJob,
+        runtimeRegionId,
+        regionPacks,
         parse,
         stringify
       });
-      for (const { row, value } of parsedCheckRows) {
-        const rewritten = runtimeRegionId
-          ? rewriteLegacyCheck(value, runtimeRegionId, regionPacks)
-          : value;
-        if (rewritten !== value) {
-          updateCheck.run(stringify(rewritten), row.rowid);
-        }
-      }
-    } finally {
-      updateCheck.finalize();
     }
   }
 };

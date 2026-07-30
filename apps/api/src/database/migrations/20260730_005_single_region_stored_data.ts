@@ -116,6 +116,7 @@ const rewriteJobRowsInBatches = ({
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
 }) => {
+  // Keep the first read separate instead of assuming a lower rowid bound for legacy databases.
   const readFirstBatch = database.query<PersistedPayloadRow, []>(`
     SELECT rowid, payload_json
     FROM jobs
@@ -129,7 +130,9 @@ const rewriteJobRowsInBatches = ({
     ORDER BY rowid
     LIMIT ${migrationBatchSize}
   `);
-  const update = database.query('UPDATE jobs SET payload_json = ? WHERE rowid = ?');
+  const update = database.query<never, [string, number]>(
+    'UPDATE jobs SET payload_json = ? WHERE rowid = ?'
+  );
   let lastRowId: number | null = null;
 
   try {

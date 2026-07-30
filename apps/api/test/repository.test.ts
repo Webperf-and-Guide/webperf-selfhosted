@@ -438,6 +438,19 @@ describe('sqlite control repository', () => {
       timestamp
     );
     insertExecution.run(
+      'exec_singapore_job_pending',
+      'network_probe',
+      'job_legacy_pending_singleton',
+      'queued',
+      null,
+      null,
+      0,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp
+    );
+    insertExecution.run(
       'exec_standalone_multi_pending',
       'network_probe',
       'job_legacy_pending_multi',
@@ -721,6 +734,7 @@ describe('sqlite control repository', () => {
           WHERE id IN (
             'exec_global_probe_pending',
             'exec_global_webhook_pending',
+            'exec_singapore_job_pending',
             'exec_singapore_probe_pending',
             'exec_tokyo_probe_pending',
             'exec_standalone_multi_pending'
@@ -731,6 +745,7 @@ describe('sqlite control repository', () => {
     ).toEqual([
       { id: 'exec_global_probe_pending', status: 'cancelled' },
       { id: 'exec_global_webhook_pending', status: 'cancelled' },
+      { id: 'exec_singapore_job_pending', status: 'cancelled' },
       { id: 'exec_singapore_probe_pending', status: 'cancelled' },
       { id: 'exec_standalone_multi_pending', status: 'cancelled' },
       { id: 'exec_tokyo_probe_pending', status: 'queued' }

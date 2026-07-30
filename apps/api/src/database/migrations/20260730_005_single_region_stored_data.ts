@@ -434,8 +434,20 @@ const rewriteCheckRowsInBatches = ({
   const updateJobTerminalIndex = database.query<never, [string, string, number]>(
     'UPDATE jobs SET status = ?, updated_at = ? WHERE rowid = ?'
   );
+  const cancelActiveJobExecution = database.query<never, [string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'cancelled',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE kind = 'network_probe'
+      AND resource_id = ?
+      AND status NOT IN ('succeeded', 'failed', 'cancelled')
+  `);
   const terminalizeCheckJobs = (profileId: string) => {
     let lastRowId: number | null = null;
+    const recentlyProcessedJobIds = new Map<string, true>();
     while (true) {
       const rows: PersistedPayloadRow[] = lastRowId === null
         ? readFirstRunBatch.all(profileId)
@@ -448,6 +460,18 @@ const rewriteCheckRowsInBatches = ({
         const run = checkProfileRunSchema.safeParse(parse(row.payload_json));
         if (run.success) {
           for (const route of run.data.routes) {
+            if (recentlyProcessedJobIds.has(route.jobId)) {
+              recentlyProcessedJobIds.delete(route.jobId);
+              recentlyProcessedJobIds.set(route.jobId, true);
+              continue;
+            }
+            recentlyProcessedJobIds.set(route.jobId, true);
+            if (recentlyProcessedJobIds.size > migrationBatchSize) {
+              const oldestJobId = recentlyProcessedJobIds.keys().next().value;
+              if (oldestJobId !== undefined) {
+                recentlyProcessedJobIds.delete(oldestJobId);
+              }
+            }
             const jobRow = readJob.get(route.jobId);
             if (!jobRow) {
               continue;
@@ -458,6 +482,11 @@ const rewriteCheckRowsInBatches = ({
               'Unfinished saved Check execution was cancelled because its legacy location requires review'
             );
             if (terminalized.terminalStatus) {
+              cancelActiveJobExecution.run(
+                migrationTimestamp,
+                migrationTimestamp,
+                route.jobId
+              );
               updateJob.run(stringify(terminalized.value), jobRow.rowid);
               updateJobTerminalIndex.run(
                 terminalized.terminalStatus,
@@ -532,6 +561,7 @@ const rewriteCheckRowsInBatches = ({
     readJob.finalize();
     updateJob.finalize();
     updateJobTerminalIndex.finalize();
+    cancelActiveJobExecution.finalize();
   }
 };
 

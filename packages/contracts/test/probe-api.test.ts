@@ -53,6 +53,18 @@ describe('stateless probe protocol', () => {
     }).success).toBe(false);
   });
 
+  test('rejects non-http target URLs', () => {
+    expect(signedProbeMeasurementRequestSchema.safeParse({
+      jobId: 'job_123',
+      targetId: 'job_123:tokyo',
+      region: 'tokyo',
+      url: 'file:///etc/passwd',
+      timestamp: '2026-07-30T00:00:00.000Z',
+      signature: '0'.repeat(64),
+      keyVersion: 'current'
+    }).success).toBe(false);
+  });
+
   test('accepts provenance while retaining compatibility with older probe responses', () => {
     const measurement = {
       region: 'tokyo',

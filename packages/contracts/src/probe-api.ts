@@ -4,6 +4,19 @@ import { runtimeRegionIdSchema } from './regions';
 import { customRequestConfigSchema } from './public-api';
 import { boundedJobIdSchema, boundedTargetIdSchema } from './identifiers';
 
+const probeTargetUrlSchema = z
+  .string()
+  .max(8_192)
+  .url()
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'Probe targets must use http or https');
+
 export const probeProtocolVersion = 1 as const;
 export const probeTransportMaxPayloadBytes = 2 * 1_024 * 1_024;
 export const probeDefaultMaxInflight = 64;
@@ -16,7 +29,7 @@ export const signedProbeMeasurementRequestSchema = z.object({
   jobId: boundedJobIdSchema,
   targetId: boundedTargetIdSchema,
   region: runtimeRegionIdSchema,
-  url: z.string().max(8_192).url(),
+  url: probeTargetUrlSchema,
   request: customRequestConfigSchema.optional(),
   timestamp: z.string().datetime(),
   signature: z.string().regex(/^[a-f0-9]{64}$/),

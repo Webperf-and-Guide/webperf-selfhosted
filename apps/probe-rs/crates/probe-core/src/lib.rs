@@ -22,14 +22,14 @@ pub const PROBE_TRANSPORT_MAX_PAYLOAD_BYTES: usize = 2 * 1_024 * 1_024;
 pub const PROBE_REQUEST_TIMEOUT_MS: u64 = 8_000;
 pub const PROBE_MAX_REDIRECTS: u64 = 4;
 pub const PROBE_MEASUREMENT_TIMEOUT_MS: u64 = PROBE_REQUEST_TIMEOUT_MS * (PROBE_MAX_REDIRECTS + 1);
-const MAX_JOB_ID_CHARS: usize = 160;
-const MAX_TARGET_ID_CHARS: usize = 256;
-const MAX_REGION_ID_CHARS: usize = 64;
+const MAX_JOB_ID_BYTES: usize = 160;
+const MAX_TARGET_ID_BYTES: usize = 256;
+const MAX_REGION_ID_BYTES: usize = 64;
 const MAX_URL_CHARS: usize = 8_192;
 const MAX_REQUEST_HEADERS: usize = 20;
-const MAX_HEADER_NAME_CHARS: usize = 120;
-const MAX_HEADER_VALUE_CHARS: usize = 4_000;
-const MAX_BODY_CONTENT_TYPE_CHARS: usize = 120;
+const MAX_HEADER_NAME_BYTES: usize = 120;
+const MAX_HEADER_VALUE_BYTES: usize = 4_000;
+const MAX_BODY_CONTENT_TYPE_BYTES: usize = 120;
 const MAX_BODY_VALUE_CHARS: usize = 10_000;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -167,7 +167,7 @@ fn is_sha256_digest(value: &str) -> bool {
 
 fn is_runtime_region_id(value: &str) -> bool {
     let bytes = value.as_bytes();
-    (1..=MAX_REGION_ID_CHARS).contains(&bytes.len())
+    (1..=MAX_REGION_ID_BYTES).contains(&bytes.len())
         && bytes
             .first()
             .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
@@ -323,11 +323,11 @@ pub struct MeasureRequest {
 
 impl MeasureRequest {
     pub fn is_contract_valid(&self) -> bool {
-        is_bounded_identifier(&self.job_id, MAX_JOB_ID_CHARS)
-            && is_bounded_identifier(&self.target_id, MAX_TARGET_ID_CHARS)
+        is_bounded_identifier(&self.job_id, MAX_JOB_ID_BYTES)
+            && is_bounded_identifier(&self.target_id, MAX_TARGET_ID_BYTES)
             && is_runtime_region_id(&self.region)
             && (1..=MAX_URL_CHARS).contains(&self.url.chars().count())
-            && Url::parse(&self.url).is_ok()
+            && Url::parse(&self.url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
             && !self.timestamp.is_empty()
             && !self.signature.is_empty()
             && matches!(self.key_version.as_str(), "current" | "next")
@@ -356,16 +356,16 @@ fn is_request_config_contract_valid(request: &RequestConfig) -> bool {
     );
     let headers_valid = request.headers.len() <= MAX_REQUEST_HEADERS
         && request.headers.iter().all(|header| {
-            (1..=MAX_HEADER_NAME_CHARS).contains(&header.name.len())
+            (1..=MAX_HEADER_NAME_BYTES).contains(&header.name.len())
                 && header.name.bytes().all(is_http_token_byte)
-                && header.value.len() <= MAX_HEADER_VALUE_CHARS
+                && header.value.len() <= MAX_HEADER_VALUE_BYTES
                 && header.value.bytes().all(is_header_value_byte)
         });
     let body_valid = request.body.as_ref().is_none_or(|body| {
         body.mode == "text"
             && body.value.chars().count() <= MAX_BODY_VALUE_CHARS
             && body.content_type.as_ref().is_none_or(|content_type| {
-                (1..=MAX_BODY_CONTENT_TYPE_CHARS).contains(&content_type.len())
+                (1..=MAX_BODY_CONTENT_TYPE_BYTES).contains(&content_type.len())
                     && content_type.bytes().all(is_header_value_byte)
             })
     });
@@ -753,15 +753,19 @@ mod tests {
         request.signature = "0".repeat(64);
         assert!(request.is_contract_valid());
 
-        request.job_id = format!("job_{}", "a".repeat(MAX_JOB_ID_CHARS));
+        request.job_id = format!("job_{}", "a".repeat(MAX_JOB_ID_BYTES));
         assert!(!request.is_contract_valid());
         request = sample_request();
         request.signature = "0".repeat(64);
-        request.target_id = format!("target_{}", "a".repeat(MAX_TARGET_ID_CHARS));
+        request.target_id = format!("target_{}", "a".repeat(MAX_TARGET_ID_BYTES));
         assert!(!request.is_contract_valid());
         request = sample_request();
         request.signature = "0".repeat(64);
         request.url = format!("https://example.com/{}", "a".repeat(MAX_URL_CHARS));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.url = "file:///etc/passwd".to_string();
         assert!(!request.is_contract_valid());
     }
 }

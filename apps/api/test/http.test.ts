@@ -1203,7 +1203,7 @@ const assertSingleRegionSavedCheckMigration = async ({
     locationMigration: {
       sourceRegionPackId: 'pack_global',
       sourceRegions: ['tokyo', 'singapore'],
-      runtimeRegionId: 'local',
+      runtimeRegionId: 'tokyo',
       status: 'requires_review',
       reason: 'legacy_multi_region',
       acknowledgedAt: null
@@ -1227,6 +1227,24 @@ const assertSingleRegionSavedCheckMigration = async ({
     note: 'reviewed for one runtime',
     scheduleIntervalMinutes: 60
   };
+  const staleRuntimeApproval = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...updatePayload,
+      acknowledgeLocationMigration: true
+    })
+  });
+  expect(staleRuntimeApproval.status).toBe(409);
+  expect(await staleRuntimeApproval.json()).toMatchObject({
+    error: expect.stringContaining('runtime location changed')
+  });
+  expect(repository.getCheckProfile(profile.id)?.locationMigration).toMatchObject({
+    runtimeRegionId: 'local',
+    status: 'requires_review',
+    acknowledgedAt: null
+  });
+
   const blockedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },

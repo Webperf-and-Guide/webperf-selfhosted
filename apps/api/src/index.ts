@@ -3142,6 +3142,28 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
 
   if (
     existing?.locationMigration?.status === 'requires_review'
+    && existing.locationMigration.runtimeRegionId !== runtime.runtimeLocation.regionId
+  ) {
+    repository.saveCheckProfile({
+      ...existing,
+      schedule: null,
+      locationMigration: {
+        ...existing.locationMigration,
+        runtimeRegionId: runtime.runtimeLocation.regionId,
+        acknowledgedAt: null
+      },
+      updatedAt: new Date().toISOString()
+    });
+    return json(
+      {
+        error: 'The self-host runtime location changed after this saved check was migrated. Reload the check, review the current runtime location, and acknowledge it again.'
+      },
+      { status: 409 }
+    );
+  }
+
+  if (
+    existing?.locationMigration?.status === 'requires_review'
     && (
       !('acknowledgeLocationMigration' in parsed.data)
       || parsed.data.acknowledgeLocationMigration !== true

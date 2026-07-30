@@ -253,6 +253,7 @@ jobs:
   upgrade-eligibility:
     name: Published bundle upgrade eligibility
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       required: ${{ steps.version.outputs.required }}
     steps:

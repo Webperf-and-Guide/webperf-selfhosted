@@ -171,7 +171,8 @@ assert(
 assert(
   webperfHealthCommand.includes('/health')
     && webperfHealthCommand.includes('/tmp/webperf-executor-heartbeat')
-    && webperfHealthCommand.includes('mtimeMs'),
+    && webperfHealthCommand.includes('mtimeMs')
+    && webperfHealthCommand.includes("PORT ?? '3000'"),
   'webperf healthcheck must cover API, console, and executor liveness'
 );
 
@@ -182,7 +183,7 @@ assertStringArrayEqual(
   ['webperf'],
   'default published services'
 );
-assertLoopbackPort(webperf, 3000, 'console');
+assertLoopbackPort(webperf, 3000, 'webperf console');
 assert(
   webperf.volumes?.some((volume) => volume.target === '/data'),
   'webperf must retain the writable /data volume'

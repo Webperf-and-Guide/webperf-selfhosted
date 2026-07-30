@@ -79,7 +79,7 @@ services:
         - CMD
         - bun
         - -e
-        - "const { mtimeMs } = await (await import('node:fs/promises')).stat(process.env.WEBPERF_PROCESS_HEARTBEAT_PATH ?? '/tmp/webperf-executor-heartbeat'); const api = await fetch('http://127.0.0.1:' + (process.env.SELFHOST_API_PORT ?? '8788') + '/health'); const consoleResponse = await fetch('http://127.0.0.1:' + (process.env.PORT ?? '3000') + '/'); if (!api.ok || !consoleResponse.ok || !Number.isFinite(mtimeMs) || Date.now() - mtimeMs > 45000) process.exit(1);"
+        - "const { mtimeMs } = await (await import('node:fs/promises')).stat(process.env.WEBPERF_PROCESS_HEARTBEAT_PATH?.trim() || '/tmp/webperf-executor-heartbeat'); const api = await fetch('http://127.0.0.1:' + (process.env.SELFHOST_API_PORT ?? '8788') + '/health'); const consoleResponse = await fetch('http://127.0.0.1:' + (process.env.PORT ?? '3000') + '/'); if (!api.ok || !consoleResponse.ok || !Number.isFinite(mtimeMs) || Date.now() - mtimeMs > 45000) process.exit(1);"
       interval: 15s
       timeout: 5s
       retries: 5

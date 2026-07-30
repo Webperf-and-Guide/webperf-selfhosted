@@ -148,7 +148,7 @@ if (readme !== null) {
     '## Core features',
     '## Optional Browser Audit',
     '## Security warning',
-    '## WebPerf Self-hosted and WebPerf & Guide',
+    '## WebPerf Self-hosted vs WebPerf & Guide',
     '## Upgrade and backup',
     '## Contributor setup'
   ];

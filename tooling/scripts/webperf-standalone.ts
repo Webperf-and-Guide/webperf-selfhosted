@@ -17,10 +17,13 @@ const apiPort = parsePort(process.env.SELFHOST_API_PORT, 8788);
 const apiOrigin = `http://127.0.0.1:${apiPort}`;
 const startupTimeoutMs = 300_000;
 const startupPollMs = 250;
+const childShutdownGraceMs = 60_000;
+const forcedExitObservationMs = 5_000;
 
 const children = new Map<ChildName, Child>();
 let shutdownSignal: Signal | null = null;
 let shutdownResolve: ((signal: Signal) => void) | undefined;
+let stopPromise: Promise<void> | undefined;
 const shutdownRequested = new Promise<Signal>((resolve) => {
   shutdownResolve = resolve;
 });
@@ -53,19 +56,26 @@ const spawnChild = (
 const signalChild = (name: ChildName, signal: Signal | 'SIGKILL') => {
   const child = children.get(name);
   if (!child || child.exitCode !== null) {
-    return;
+    return true;
   }
   try {
     process.kill(child.pid, signal);
+    return true;
   } catch (error) {
     if (
       error instanceof Error
       && 'code' in error
       && error.code === 'ESRCH'
     ) {
-      return;
+      return true;
     }
-    throw error;
+    emit('child_signal_failed', {
+      child: name,
+      signal,
+      errorType: error instanceof Error ? error.name : typeof error,
+      errorCode: safeErrorCode(error)
+    });
+    return false;
   }
 };
 
@@ -149,8 +159,10 @@ try {
 
 async function waitForApi(apiChild: Child, healthUrl: string) {
   const deadline = Date.now() + startupTimeoutMs;
+  let attempt = 0;
 
   while (Date.now() < deadline) {
+    attempt += 1;
     if (shutdownSignal) {
       throw new Error('shutdown requested during startup');
     }
@@ -167,8 +179,17 @@ async function waitForApi(apiChild: Child, healthUrl: string) {
         return;
       }
       await response.body?.cancel();
-    } catch {
-      // The API may not have bound its socket yet.
+    } catch (error) {
+      // Connection refusal is expected while the API binds. Emit a bounded,
+      // secret-safe diagnostic periodically so persistent startup failures are
+      // still distinguishable from a slow first migration.
+      if (attempt === 1 || attempt % 80 === 0) {
+        emit('api_health_waiting', {
+          attempt,
+          errorType: error instanceof Error ? error.name : typeof error,
+          errorCode: safeErrorCode(error)
+        });
+      }
     }
 
     await Bun.sleep(startupPollMs);
@@ -177,7 +198,12 @@ async function waitForApi(apiChild: Child, healthUrl: string) {
   throw new Error(`API did not become ready within ${startupTimeoutMs}ms`);
 }
 
-async function stopStandalone() {
+function stopStandalone() {
+  stopPromise ??= performStop();
+  return stopPromise;
+}
+
+async function performStop() {
   // Stop ingress and claiming first. The API remains available while the
   // executor aborts or records its active lease outcome.
   signalChild('console', 'SIGTERM');
@@ -197,8 +223,27 @@ async function observeExit(name: ChildName) {
   if (!child) {
     return;
   }
-  const code = await child.exited;
-  emit('child_stopped', { child: name, code });
+
+  let code = await Promise.race([
+    child.exited,
+    Bun.sleep(childShutdownGraceMs).then(() => null)
+  ]);
+  if (code === null) {
+    emit('child_force_kill_requested', {
+      child: name,
+      graceMs: childShutdownGraceMs
+    });
+    signalChild(name, 'SIGKILL');
+    code = await Promise.race([
+      child.exited,
+      Bun.sleep(forcedExitObservationMs).then(() => null)
+    ]);
+  }
+
+  emit(code === null ? 'child_exit_unobserved' : 'child_stopped', {
+    child: name,
+    code
+  });
 }
 
 function parsePort(raw: string | undefined, fallback: number) {
@@ -218,4 +263,26 @@ function normalizeUnexpectedExit(code: number) {
     return 1;
   }
   return code < 0 ? 128 + Math.abs(code) : code;
+}
+
+function safeErrorCode(error: unknown) {
+  if (
+    error instanceof Error
+    && 'code' in error
+    && typeof error.code === 'string'
+    && /^[A-Z0-9_]{1,40}$/.test(error.code)
+  ) {
+    return error.code;
+  }
+  if (
+    error instanceof Error
+    && 'cause' in error
+    && error.cause instanceof Error
+    && 'code' in error.cause
+    && typeof error.cause.code === 'string'
+    && /^[A-Z0-9_]{1,40}$/.test(error.cause.code)
+  ) {
+    return error.cause.code;
+  }
+  return null;
 }

@@ -122,7 +122,7 @@ Read [Security](docs/users/security.md),
 [self-host authentication](docs/security/auth-and-secrets.md) before external
 access.
 
-## WebPerf Self-hosted and WebPerf & Guide
+## WebPerf Self-hosted vs WebPerf & Guide
 
 | | `webperf-selfhosted` | `webperf.and.guide` |
 | --- | --- | --- |

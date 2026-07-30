@@ -61,6 +61,7 @@ export class ChecksController {
     profileAlertOnThreshold: false,
     profileAlertOnRegression: false,
     profileWebhookTargetsText: '',
+    profileLocationMigrationAcknowledged: false,
     editingProfileId: '',
     checkProfileFilterDraft: '',
     checkProfileFilter: '',
@@ -283,6 +284,7 @@ export class ChecksController {
     this.state.profileAlertOnThreshold = false;
     this.state.profileAlertOnRegression = false;
     this.state.profileWebhookTargetsText = '';
+    this.state.profileLocationMigrationAcknowledged = false;
   };
 
   loadProfileEditor = (profileId: string) => {
@@ -314,6 +316,8 @@ export class ChecksController {
     this.state.profileAlertOnThreshold = profile.alerts?.triggers.onLatencyThresholdBreach ?? false;
     this.state.profileAlertOnRegression = profile.alerts?.triggers.onRegression ?? false;
     this.state.profileWebhookTargetsText = stringifyWebhookTargets(profile.alerts?.webhookTargets ?? []);
+    this.state.profileLocationMigrationAcknowledged =
+      profile.locationMigration?.status !== 'requires_review';
   };
 
   submitCheckProfile = async (event: SubmitEvent) => {
@@ -361,7 +365,13 @@ export class ChecksController {
               },
               scheduleIntervalMinutes: this.state.profileScheduleMinutes
                 ? Number(this.state.profileScheduleMinutes)
-                : undefined
+                : undefined,
+              acknowledgeLocationMigration:
+                this.state.editingProfileId
+                && this.checkProfileById.get(this.state.editingProfileId)?.locationMigration?.status
+                  === 'requires_review'
+                  ? this.state.profileLocationMigrationAcknowledged
+                  : undefined
             })
           }
         );

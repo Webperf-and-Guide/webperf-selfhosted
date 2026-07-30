@@ -6,6 +6,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSqliteJobRepository } from '../src/repository';
+import { applySqliteMigrations, openSqliteDatabase } from '../src/database/sqlite';
+import { sqliteMigrations } from '../src/database/migrations';
+import { createStorageCrypto } from '../src/storage-crypto';
 
 const tempDirs: string[] = [];
 const testEncryptionSecret = 'repository-test-encryption-secret';
@@ -13,7 +16,8 @@ const testEncryptionSecret = 'repository-test-encryption-secret';
 const createRepository = (databasePath: string) =>
   createSqliteJobRepository({
     databasePath,
-    encryptionSecret: testEncryptionSecret
+    encryptionSecret: testEncryptionSecret,
+    runtimeRegionId: 'local'
   });
 
 afterEach(() => {
@@ -208,6 +212,261 @@ const createCheckProfileRun = (overrides: Partial<CheckProfileRun> = {}): CheckP
 });
 
 describe('sqlite control repository', () => {
+  test('migrates published beta multi-region data without rewriting historical target provenance', () => {
+    const databasePath = createTempDatabasePath();
+    const storageCrypto = createStorageCrypto({ currentSecret: testEncryptionSecret });
+    const database = openSqliteDatabase(databasePath);
+    const historicalMigrations = sqliteMigrations.slice(0, -1);
+
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `);
+    for (const migration of historicalMigrations) {
+      migration.up(database, { storageCrypto, runtimeRegionId: 'tokyo' });
+      database
+        .query('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .run(migration.id, '2026-07-29T00:00:00.000Z');
+    }
+
+    const saveEntity = database.query(`
+      INSERT INTO saved_entities (kind, id, created_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const timestamp = '2026-07-29T00:00:00.000Z';
+    saveEntity.run(
+      'region_pack',
+      'pack_tokyo',
+      timestamp,
+      timestamp,
+      storageCrypto.stringify({
+        id: 'pack_tokyo',
+        name: 'Tokyo',
+        regions: ['tokyo'],
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    );
+    saveEntity.run(
+      'region_pack',
+      'pack_global',
+      timestamp,
+      timestamp,
+      storageCrypto.stringify({
+        id: 'pack_global',
+        name: 'Tokyo and Singapore',
+        regions: ['tokyo', 'singapore'],
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    );
+    saveEntity.run(
+      'region_pack',
+      'pack_singapore',
+      timestamp,
+      timestamp,
+      storageCrypto.stringify({
+        id: 'pack_singapore',
+        name: 'Singapore',
+        regions: ['singapore'],
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    );
+
+    const scheduledProfile = {
+      ...createCheckProfile({
+        id: 'profile_tokyo',
+        schedule: {
+          intervalMinutes: 60,
+          nextRunAt: '2026-07-29T01:00:00.000Z',
+          lastRunAt: null,
+          lastRunJobCount: null
+        }
+      }),
+      regionPackId: 'pack_tokyo'
+    };
+    const multiRegionProfile = {
+      ...createCheckProfile({ id: 'profile_global' }),
+      regionPackId: 'pack_global'
+    };
+    const mismatchedProfile = {
+      ...createCheckProfile({ id: 'profile_singapore' }),
+      regionPackId: 'pack_singapore'
+    };
+    const missingPackProfile = {
+      ...createCheckProfile({ id: 'profile_missing' }),
+      regionPackId: 'pack_removed'
+    };
+    saveEntity.run(
+      'check_profile',
+      scheduledProfile.id,
+      timestamp,
+      timestamp,
+      storageCrypto.stringify(scheduledProfile)
+    );
+    saveEntity.run(
+      'check_profile',
+      multiRegionProfile.id,
+      timestamp,
+      timestamp,
+      storageCrypto.stringify(multiRegionProfile)
+    );
+    saveEntity.run(
+      'check_profile',
+      mismatchedProfile.id,
+      timestamp,
+      timestamp,
+      storageCrypto.stringify(mismatchedProfile)
+    );
+    saveEntity.run(
+      'check_profile',
+      missingPackProfile.id,
+      timestamp,
+      timestamp,
+      storageCrypto.stringify(missingPackProfile)
+    );
+
+    const currentJob = createJob({
+      id: 'job_legacy_multi',
+      targets: [
+        createJob().targets[0]!,
+        {
+          ...createJob().targets[0]!,
+          region: 'singapore',
+          measurement: {
+            ...createJob().targets[0]!.measurement!,
+            region: 'singapore'
+          }
+        }
+      ],
+      summary: {
+        total: 2,
+        succeeded: 2,
+        failed: 0,
+        inflight: 0
+      }
+    });
+    const {
+      region: _removedRegion,
+      historicalRegions: _removedHistoricalRegions,
+      ...legacyJob
+    } = currentJob;
+    database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      currentJob.id,
+      currentJob.url,
+      currentJob.status,
+      currentJob.requestedAt,
+      currentJob.completedAt,
+      storageCrypto.stringify({
+        ...legacyJob,
+        selectedRegions: ['tokyo', 'singapore']
+      })
+    );
+    database.close();
+
+    const repository = createSqliteJobRepository({
+      databasePath,
+      encryptionSecret: testEncryptionSecret,
+      runtimeRegionId: 'tokyo'
+    });
+
+    expect(repository.getJob(currentJob.id)).toMatchObject({
+      region: 'historical-multi-region',
+      historicalRegions: ['tokyo', 'singapore'],
+      targets: [
+        { region: 'tokyo' },
+        { region: 'singapore' }
+      ]
+    });
+    expect(repository.getCheckProfile('profile_tokyo')).toMatchObject({
+      schedule: {
+        intervalMinutes: 60
+      },
+      locationMigration: {
+        sourceRegionPackId: 'pack_tokyo',
+        sourceRegions: ['tokyo'],
+        runtimeRegionId: 'tokyo',
+        status: 'applied',
+        reason: 'singleton_matches_runtime'
+      }
+    });
+    expect(repository.getCheckProfile('profile_global')).toMatchObject({
+      schedule: null,
+      locationMigration: {
+        sourceRegionPackId: 'pack_global',
+        sourceRegions: ['tokyo', 'singapore'],
+        runtimeRegionId: 'tokyo',
+        status: 'requires_review',
+        reason: 'legacy_multi_region'
+      }
+    });
+    expect(repository.getCheckProfile('profile_singapore')).toMatchObject({
+      schedule: null,
+      locationMigration: {
+        sourceRegionPackId: 'pack_singapore',
+        sourceRegions: ['singapore'],
+        runtimeRegionId: 'tokyo',
+        status: 'requires_review',
+        reason: 'legacy_region_mismatch'
+      }
+    });
+    expect(repository.getCheckProfile('profile_missing')).toMatchObject({
+      schedule: null,
+      locationMigration: {
+        sourceRegionPackId: 'pack_removed',
+        sourceRegions: [],
+        runtimeRegionId: 'tokyo',
+        status: 'requires_review',
+        reason: 'legacy_region_pack_missing'
+      }
+    });
+    repository.close();
+
+    const verifyDatabase = new Database(databasePath, { readonly: true });
+    expect(
+      verifyDatabase
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM saved_entities WHERE kind = 'region_pack'"
+        )
+        .get()?.count
+    ).toBe(3);
+    verifyDatabase.close();
+  });
+
+  test('requires an explicit runtime region before migrating legacy saved Checks', () => {
+    const storageCrypto = createStorageCrypto({ currentSecret: testEncryptionSecret });
+    const database = openSqliteDatabase(':memory:');
+    const historicalMigrations = sqliteMigrations.slice(0, -1);
+    for (const migration of historicalMigrations) {
+      migration.up(database, { storageCrypto });
+    }
+    const timestamp = '2026-07-29T00:00:00.000Z';
+    database.query(`
+      INSERT INTO saved_entities (kind, id, created_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      'check_profile',
+      'profile_legacy',
+      timestamp,
+      timestamp,
+      storageCrypto.stringify({
+        ...createCheckProfile({ id: 'profile_legacy' }),
+        regionPackId: 'pack_legacy'
+      })
+    );
+
+    expect(() => {
+      sqliteMigrations.at(-1)!.up(database, { storageCrypto });
+    }).toThrow('SELFHOST_REGION_ID is required');
+    database.close();
+  });
+
   test('encrypts persisted payloads and supports key rotation', () => {
     const databasePath = createTempDatabasePath();
     const secretValue = 'Bearer must-not-appear-in-sqlite';

@@ -66,9 +66,14 @@
   const primaryActions = $derived.by<OperatorActionItem[]>(() => [
     {
       id: 'run',
-      label: running ? 'Running...' : 'Run check',
+      label:
+        profile.locationMigration?.status === 'requires_review'
+          ? 'Review location first'
+          : running
+            ? 'Running...'
+            : 'Run check',
       variant: 'secondary',
-      disabled: running,
+      disabled: running || profile.locationMigration?.status === 'requires_review',
       onclick: () => onRun(profile.id)
     }
   ]);
@@ -101,6 +106,12 @@
       id: 'baseline',
       label: 'Baseline',
       value: profile.baseline ? formatDateTime(profile.baseline.pinnedAt) : 'not pinned'
+    },
+    {
+      id: 'location-migration',
+      label: 'Location migration',
+      value: profile.locationMigration?.status ?? 'not applicable',
+      tone: profile.locationMigration?.status === 'requires_review' ? 'warning' : 'muted'
     }
   ]);
 

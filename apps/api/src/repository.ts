@@ -338,12 +338,14 @@ export const createSqliteJobRepository = ({
   databasePath,
   encryptionSecret,
   encryptionSecretNext,
-  backupBeforeMigrations = false
+  backupBeforeMigrations = false,
+  runtimeRegionId
 }: {
   databasePath: string;
   encryptionSecret: string;
   encryptionSecretNext?: string;
   backupBeforeMigrations?: boolean;
+  runtimeRegionId?: string;
 }): JobRepository => {
   const shouldBackupBeforeMigrations = backupBeforeMigrations
     && databasePath !== ':memory:'
@@ -359,7 +361,7 @@ export const createSqliteJobRepository = ({
   try {
     migrationResult = applySqliteMigrations(
       db,
-      { storageCrypto },
+      { storageCrypto, runtimeRegionId },
       shouldBackupBeforeMigrations
         ? {
             beforeMigrate() {
@@ -1059,7 +1061,8 @@ export const createSqliteJobRepository = ({
           startedAt: job.startedAt,
           completedAt: job.completedAt,
           requesterIp: job.requesterIp,
-          region: job.region
+          region: job.region,
+          historicalRegions: job.historicalRegions
         }));
     },
     saveJob(job) {

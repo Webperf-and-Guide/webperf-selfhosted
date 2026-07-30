@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ResourceEditorPanel } from '@webperf/ui/components/operator/resource-editor-panel';
+  import { InlineStatusNotice } from '@webperf/ui/components/operator/inline-status-notice';
   import Button from '@webperf/ui/components/ui/button';
   import { Checkbox } from '@webperf/ui/components/ui/checkbox';
   import {
@@ -32,6 +33,7 @@
     profileAlertOnThreshold: boolean;
     profileAlertOnRegression: boolean;
     profileWebhookTargetsText: string;
+    profileLocationMigrationAcknowledged: boolean;
   };
 
   let {
@@ -55,6 +57,15 @@
     onReset: () => void;
     onDelete: (profileId: string) => void;
   }>();
+
+  const editingProfile = $derived(
+    checkProfiles.find((profile: CheckProfile) => profile.id === state.editingProfileId) ?? null
+  );
+  const pendingLocationMigration = $derived(
+    editingProfile?.locationMigration?.status === 'requires_review'
+      ? editingProfile.locationMigration
+      : null
+  );
 </script>
 
 <div class="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.9fr)]">
@@ -104,6 +115,18 @@
             <span>Note</span>
             <Input bind:value={state.profileNote} placeholder="critical pages" />
           </label>
+          {#if pendingLocationMigration}
+            <div class="grid gap-3 md:col-span-2">
+              <InlineStatusNotice
+                message={`This check previously used Region Set "${pendingLocationMigration.sourceRegionPackId}" (${pendingLocationMigration.sourceRegions.join(', ') || 'definition unavailable'}). Its schedule is disabled until you confirm that it should now run only from ${pendingLocationMigration.runtimeRegionId}.`}
+                tone="warning"
+              />
+              <label class="checkbox-field rounded-[var(--wp-radius-md)] border border-warning/35 bg-warning/10 px-4 py-3">
+                <Checkbox bind:checked={state.profileLocationMigrationAcknowledged} />
+                <span>I reviewed the location change and want this check to use this deployment only.</span>
+              </label>
+            </div>
+          {/if}
         </FieldSetContent>
       </FieldSet>
 
@@ -194,7 +217,11 @@
           </label>
         </FieldSetContent>
         <FieldSetFooter class="builder-actions">
-          <Button type="submit" variant="secondary" disabled={busy}>
+          <Button
+            type="submit"
+            variant="secondary"
+            disabled={busy || Boolean(pendingLocationMigration && !state.profileLocationMigrationAcknowledged)}
+          >
             {#if busy}{state.editingProfileId ? 'Updating...' : 'Saving...'}{:else}{state.editingProfileId ? 'Update saved check' : 'Save saved check'}{/if}
           </Button>
           {#if state.editingProfileId}

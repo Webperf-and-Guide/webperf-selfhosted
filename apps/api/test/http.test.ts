@@ -1087,10 +1087,107 @@ describe('api service monitoring expansion', () => {
       expect(stabilizedPublicOpenApi.paths?.['/v1/analyses']).toBeTruthy();
       expect(stabilizedPublicOpenApi.paths?.['/v1/browser-audits']).toBeTruthy();
       expect(stabilizedPublicOpenApi.paths?.['/v1/capabilities']).toBeTruthy();
+
+      await assertSingleRegionSavedCheckMigration({
+        baseUrl: harness.baseUrl,
+        repository: harness.repository,
+        propertyId: property.id,
+        routeSetId: routeSet.id,
+        webhookUrl: webhook.url
+      });
     },
     20_000
   );
 });
+
+const assertSingleRegionSavedCheckMigration = async ({
+  baseUrl,
+  repository,
+  propertyId,
+  routeSetId,
+  webhookUrl
+}: {
+  baseUrl: string;
+  repository: JobRepository;
+  propertyId: string;
+  routeSetId: string;
+  webhookUrl: string;
+}) => {
+  const profile = await createCheckProfile(baseUrl, {
+    propertyId,
+    routeSetId,
+    monitorType: 'latency',
+    latencyThresholdMs: 500,
+    webhookUrl,
+    name: 'Legacy global check'
+  });
+  const persisted = repository.getCheckProfile(profile.id);
+  expect(persisted).not.toBeNull();
+  repository.saveCheckProfile({
+    ...persisted!,
+    schedule: null,
+    locationMigration: {
+      sourceRegionPackId: 'pack_global',
+      sourceRegions: ['tokyo', 'singapore'],
+      runtimeRegionId: 'local',
+      status: 'requires_review',
+      reason: 'legacy_multi_region',
+      acknowledgedAt: null
+    }
+  });
+
+  const blockedRun = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}'
+  });
+  expect(blockedRun.status).toBe(409);
+  expect(await blockedRun.json()).toMatchObject({
+    error: expect.stringContaining('disabled')
+  });
+
+  const updatePayload = {
+    propertyId,
+    routeSetId,
+    name: 'Legacy global check',
+    note: 'reviewed for one runtime',
+    scheduleIntervalMinutes: 60
+  };
+  const blockedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(updatePayload)
+  });
+  expect(blockedUpdate.status).toBe(409);
+
+  const acceptedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...updatePayload,
+      acknowledgeLocationMigration: true
+    })
+  });
+  expect(acceptedUpdate.status).toBe(200);
+  expect(await acceptedUpdate.json()).toMatchObject({
+    profile: {
+      schedule: {
+        intervalMinutes: 60
+      },
+      locationMigration: {
+        status: 'accepted',
+        acknowledgedAt: expect.any(String)
+      }
+    }
+  });
+
+  const acceptedRun = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}'
+  });
+  expect(acceptedRun.status).toBe(201);
+};
 
 const createTempDirectory = () => {
   const directory = mkdtempSync(join(tmpdir(), 'webperf-api-http-'));

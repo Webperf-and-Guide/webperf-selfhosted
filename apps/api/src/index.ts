@@ -237,7 +237,8 @@ export const repository = createSqliteJobRepository({
   databasePath: runtime.databasePath,
   encryptionSecret: runtime.internalSecret,
   encryptionSecretNext: runtime.internalSecretNext,
-  backupBeforeMigrations: runtime.migrationBackup
+  backupBeforeMigrations: runtime.migrationBackup,
+  runtimeRegionId: runtime.runtimeLocation.regionId
 });
 export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
@@ -3095,6 +3096,21 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     );
   }
 
+  if (
+    existing?.locationMigration?.status === 'requires_review'
+    && (
+      !('acknowledgeLocationMigration' in parsed.data)
+      || parsed.data.acknowledgeLocationMigration !== true
+    )
+  ) {
+    return json(
+      {
+        error: 'This saved check was migrated from a legacy Region Set. Review its runtime location and acknowledge the migration before enabling or running it.'
+      },
+      { status: 409 }
+    );
+  }
+
   const property = repository.getProperty(parsed.data.propertyId);
   if (!property) {
     return json({ error: 'Property not found' }, { status: 404 });
@@ -3130,6 +3146,13 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
       browserAuditPolicy: existing?.browserAuditPolicy ?? null,
       schedule: buildProfileSchedule(existing, parsed.data.scheduleIntervalMinutes, now),
       baseline: resolveUpdatedProfileBaseline(existing, routeSet.id),
+      locationMigration: existing?.locationMigration?.status === 'requires_review'
+        ? {
+            ...existing.locationMigration,
+            status: 'accepted',
+            acknowledgedAt: now
+          }
+        : existing?.locationMigration ?? null,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -3151,6 +3174,15 @@ async function handleRunCheckProfile(profileId: string, request: Request) {
 
   if (!profile) {
     return json({ error: 'Check profile not found' }, { status: 404 });
+  }
+
+  if (profile.locationMigration?.status === 'requires_review') {
+    return json(
+      {
+        error: 'This saved check is disabled until its legacy Region Set migration is reviewed and acknowledged.'
+      },
+      { status: 409 }
+    );
   }
 
   const requesterIp = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? null;
@@ -3196,7 +3228,9 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
     .listCheckProfiles()
     .filter(
       (profile) =>
-        profile.schedule?.nextRunAt != null && new Date(profile.schedule.nextRunAt).getTime() <= dispatchAt.getTime()
+        profile.locationMigration?.status !== 'requires_review'
+        && profile.schedule?.nextRunAt != null
+        && new Date(profile.schedule.nextRunAt).getTime() <= dispatchAt.getTime()
     );
 
   const triggeredProfiles = dueProfiles.flatMap((profile) => {

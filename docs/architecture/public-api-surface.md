@@ -83,6 +83,12 @@ resource to migrate to.
 New work should prefer the resource-oriented surface first and keep compatibility aliases as migration-friendly adapters.
 Those compatibility list endpoints keep the same shared list query contract as the primary resource-oriented list routes.
 
+Published beta stored-data compatibility is separate from the retired Region
+Set HTTP surface. Historical Jobs retain their original target regions.
+Migrated saved Checks expose `locationMigration`: unsafe multi-region,
+mismatched, or missing Region Set definitions are unscheduled and cannot run
+until an update explicitly sets `acknowledgeLocationMigration: true`.
+
 Every response below a compatibility prefix includes:
 
 - `Deprecation: true`

@@ -22,8 +22,7 @@ Phase 1 replaced the 41-city catalog and Region Pack resources with one fixed
 runtime location per deployment. The legacy configuration variables
 (`SELFHOST_ACTIVE_REGION_CODES_JSON`, `SELFHOST_REGION_IDS_JSON`,
 `SELFHOST_PROBE_BASE_URLS_JSON`) and the probe's `REGION_CODE`/Tokyo default
-were removed without a compatibility parser because there is no production
-data to preserve.
+were removed from the canonical runtime configuration.
 
 **Before starting the upgraded stack**, replace the three legacy JSON
 variables in `.env` with the single-region trio:
@@ -34,11 +33,36 @@ SELFHOST_REGION_LABEL=
 SELFHOST_PROBE_BASE_URL=http://probe:8080
 ```
 
+Set `SELFHOST_REGION_ID` before running `selfhost:migrate`. The migration
+refuses to rewrite a legacy saved Check when that identity is unavailable,
+because it cannot safely decide whether the old Region Set matches the new
+single deployment.
+
 Set `SELFHOST_REGION_ID` to a stable identifier for this deployment's actual
 location (for example `kr-seoul-office` or `aws-ap-northeast-2`). The probe
 reads the same value from `REGION_ID`. The `/v1/region-packs` and
 `/v1/region-sets` routes now return `410 Gone`, and the Console `/regions`
 page reports the single runtime location instead of a city catalog.
+
+The upgrade migration preserves published beta data rather than assigning old
+measurements to the new deployment location:
+
+- a historical Job with one selected region keeps that original region;
+- a historical Job with several selected regions keeps every target and the
+  original region list, and uses `historical-multi-region` only as its
+  top-level aggregate identifier;
+- a saved Check whose old Region Set contains exactly the configured
+  `SELFHOST_REGION_ID` is migrated and records that decision;
+- a saved Check whose Region Set is multi-region, missing, or different from
+  the configured runtime has its schedule disabled and reports
+  `locationMigration.status = requires_review`.
+
+For a Check that requires review, open **Checks**, edit the saved Check, confirm
+that it should now run only from this deployment, and save it. The API requires
+the explicit `acknowledgeLocationMigration` update flag, so old scheduled or
+manual behavior cannot silently collapse from several regions to one. Legacy
+Region Set rows remain encrypted in SQLite for recovery compatibility, but
+they are not exposed as a current operator workflow.
 
 ### Phase 2+3 of issue #14: migrate to the three-image runtime set
 

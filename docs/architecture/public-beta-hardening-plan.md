@@ -119,7 +119,15 @@ The exact diff will stay small within each phase, but the expected surface is:
 - Existing stored JSON payloads and the legacy control contract remain readable
   while cloud consumers move to canonical public contracts.
 - `/v1/region-packs` and `/v1/region-sets` are intentionally retired with
-  `410 Gone`; no production migration was required before their removal.
+  `410 Gone`. Their encrypted rows remain in SQLite as compatibility evidence
+  until restore and upgrade coverage proves they can be retired safely.
+- Published beta Jobs are migrated without rewriting target provenance:
+  singleton history keeps its original region, while multi-region history uses
+  an explicit aggregate id and retains the original region list and targets.
+- Published beta Checks record their source Region Set. A singleton set that
+  matches the configured runtime is applied explicitly; every multi-region,
+  missing, or mismatched definition loses its schedule and requires an
+  operator-visible acknowledgement before it can run again.
 - Browser Audit normalized contracts will receive a new public package version;
   a sitespeed.io-shaped fixture will prove engine neutrality without shipping a
   sitespeed.io runner.

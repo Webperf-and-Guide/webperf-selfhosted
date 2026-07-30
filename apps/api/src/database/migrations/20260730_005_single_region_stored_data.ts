@@ -2,6 +2,7 @@ import type { SqliteMigration } from './types';
 import type { CheckProfileLocationMigrationReason } from '@webperf/contracts';
 
 const historicalMultiRegionId = 'historical-multi-region';
+const migrationBatchSize = 100;
 
 type PersistedPayloadRow = {
   rowid: number;
@@ -104,25 +105,55 @@ const rewriteLegacyCheck = (
   };
 };
 
-const rewriteTable = ({
-  rows,
+const rewriteJobRowsInBatches = ({
+  database,
   rewrite,
   parse,
-  stringify,
-  update
+  stringify
 }: {
-  rows: PersistedPayloadRow[];
+  database: Parameters<SqliteMigration['up']>[0];
   rewrite: (value: unknown) => unknown;
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
-  update: { run(payload: string, rowId: number): unknown };
 }) => {
-  for (const row of rows) {
-    const value = parse(row.payload_json);
-    const rewritten = rewrite(value);
-    if (rewritten !== value) {
-      update.run(stringify(rewritten), row.rowid);
+  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
+    SELECT rowid, payload_json
+    FROM jobs
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
+    SELECT rowid, payload_json
+    FROM jobs
+    WHERE rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const update = database.query('UPDATE jobs SET payload_json = ? WHERE rowid = ?');
+  let lastRowId: number | null = null;
+
+  try {
+    while (true) {
+      const rows: PersistedPayloadRow[] = lastRowId === null
+        ? readFirstBatch.all()
+        : readNextBatch.all(lastRowId);
+      if (rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        const value = parse(row.payload_json);
+        const rewritten = rewrite(value);
+        if (rewritten !== value) {
+          update.run(stringify(rewritten), row.rowid);
+        }
+        lastRowId = row.rowid;
+      }
     }
+  } finally {
+    readFirstBatch.finalize();
+    readNextBatch.finalize();
+    update.finalize();
   }
 };
 
@@ -141,10 +172,6 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
       .all();
     const regionPacks = readLegacyRegionPacks(regionPackRows, parse);
 
-    const jobRows = database
-      .query<PersistedPayloadRow, []>('SELECT rowid, payload_json FROM jobs ORDER BY rowid')
-      .all();
-    const updateJob = database.query('UPDATE jobs SET payload_json = ? WHERE rowid = ?');
     const checkRows = database
       .query<PersistedPayloadRow, []>(`
         SELECT rowid, payload_json
@@ -169,12 +196,11 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
     const updateCheck = database.query('UPDATE saved_entities SET payload_json = ? WHERE rowid = ?');
 
     try {
-      rewriteTable({
-        rows: jobRows,
+      rewriteJobRowsInBatches({
+        database,
         rewrite: rewriteLegacyJob,
         parse,
-        stringify,
-        update: updateJob
+        stringify
       });
       for (const { row, value } of parsedCheckRows) {
         const rewritten = runtimeRegionId
@@ -185,7 +211,6 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
         }
       }
     } finally {
-      updateJob.finalize();
       updateCheck.finalize();
     }
   }

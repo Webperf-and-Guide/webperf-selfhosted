@@ -373,6 +373,26 @@ describe('sqlite control repository', () => {
         selectedRegions: ['tokyo', 'singapore']
       })
     );
+    const insertLegacyJob = database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (let index = 0; index < 205; index += 1) {
+      const jobId = `job_legacy_batch_${index}`;
+      insertLegacyJob.run(
+        jobId,
+        currentJob.url,
+        currentJob.status,
+        currentJob.requestedAt,
+        currentJob.completedAt,
+        storageCrypto.stringify({
+          ...legacyJob,
+          id: jobId,
+          selectedRegions: ['tokyo', 'singapore']
+        })
+      );
+    }
+    insertLegacyJob.finalize();
     database.close();
 
     const repository = createSqliteJobRepository({
@@ -389,6 +409,12 @@ describe('sqlite control repository', () => {
         { region: 'singapore' }
       ]
     });
+    for (const index of [0, 99, 100, 199, 204]) {
+      expect(repository.getJob(`job_legacy_batch_${index}`)).toMatchObject({
+        region: 'historical-multi-region',
+        historicalRegions: ['tokyo', 'singapore']
+      });
+    }
     expect(repository.getCheckProfile('profile_tokyo')).toMatchObject({
       schedule: {
         intervalMinutes: 60

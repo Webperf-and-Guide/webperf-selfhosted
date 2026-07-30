@@ -4555,16 +4555,15 @@ async function parseJsonBody<T>(request: Request, maxBytes = 1_024 * 1_024) {
   }
 }
 
+const orpcErrorStatusByCode: Readonly<Record<string, number>> = {
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  BAD_REQUEST: 400
+};
+
 function toJsonError(error: unknown) {
   if (error instanceof ORPCError) {
-    const status =
-      error.code === 'NOT_FOUND'
-        ? 404
-        : error.code === 'CONFLICT'
-          ? 409
-        : error.code === 'BAD_REQUEST'
-          ? 400
-          : 500;
+    const status = orpcErrorStatusByCode[error.code] ?? 500;
 
     return json(
       {

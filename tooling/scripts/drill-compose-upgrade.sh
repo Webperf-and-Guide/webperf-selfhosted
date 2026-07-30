@@ -269,8 +269,11 @@ bun -e '
   let payload;
   try {
     payload = JSON.parse(await Bun.file(process.argv[1]).text());
-  } catch {
-    fail("doctor output was not valid JSON");
+  } catch (error) {
+    const detail = error instanceof Error
+      ? error.message.slice(0, 256)
+      : "non-Error parse failure";
+    fail(`doctor output was not valid JSON: ${detail}`);
   }
   if (payload?.ok !== true) fail("ok is not true");
   if (payload?.command !== "doctor") fail("command is not doctor");

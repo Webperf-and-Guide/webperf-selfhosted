@@ -189,6 +189,7 @@ const downloadArtifactSha256 = async (
   if (!localArtifactPathPattern.test(artifactUrl)) {
     throw new Error('Recovery fixture artifact URL must be a canonical local Browser Audit API path');
   }
+  let lastFailure = 'unknown transient failure';
   for (let attempt = 0; attempt < 5; attempt += 1) {
     let response: Response;
     try {
@@ -196,7 +197,10 @@ const downloadArtifactSha256 = async (
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(30_000)
       });
-    } catch {
+    } catch (error) {
+      lastFailure = error instanceof Error
+        ? error.message.slice(0, 512)
+        : 'non-Error transport failure';
       if (attempt < 4) {
         await Bun.sleep(Math.min(1_000 * 2 ** attempt, 8_000));
         continue;
@@ -210,6 +214,7 @@ const downloadArtifactSha256 = async (
         continue;
       }
       if (response.status >= 500) {
+        lastFailure = `HTTP ${response.status}`;
         break;
       }
       throw new Error(`Artifact download failed with ${response.status}`);
@@ -218,7 +223,9 @@ const downloadArtifactSha256 = async (
       .update(new Uint8Array(await response.arrayBuffer()))
       .digest('hex');
   }
-  throw new Error('Artifact download exhausted its retry budget after transient failures');
+  throw new Error(
+    `Artifact download exhausted its retry budget after transient failures: ${lastFailure}`
+  );
 };
 
 const parseArtifact = (audit: Record<string, unknown>) => {

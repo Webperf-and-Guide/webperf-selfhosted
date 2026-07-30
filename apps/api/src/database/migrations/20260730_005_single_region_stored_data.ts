@@ -115,6 +115,12 @@ const rewriteLegacyCheck = (
   };
 };
 
+/**
+ * Visits encrypted payload rows through bounded keyset batches.
+ *
+ * This helper owns and finalizes both read statements. The visitor returns
+ * `true` to continue or `false` to stop after the current row.
+ */
 const visitPayloadRowsInBatches = ({
   readFirstBatch,
   readNextBatch,

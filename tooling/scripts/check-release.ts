@@ -54,44 +54,27 @@ function readWorkflow(file: string): string | undefined {
   }
 }
 
+function readScript(relativePath: string): string | undefined {
+  try {
+    return readFileSync(join(root, relativePath), 'utf8');
+  } catch {
+    violations.push(`${relativePath}: script is missing or unreadable`);
+    return undefined;
+  }
+}
+
 const releaseWorkflow = readWorkflow('release.yml');
 const releasePrWorkflow = readWorkflow('release-pr.yml');
 const ciWorkflow = readWorkflow('ci.yml');
 const releaseBundleSmokeWorkflow = readWorkflow('release-bundle-smoke.yml');
-let composeSmokeScript: string | undefined;
-try {
-  composeSmokeScript = readFileSync(join(root, 'tooling/scripts/smoke-compose.sh'), 'utf8');
-} catch {
-  violations.push('tooling/scripts/smoke-compose.sh: script is missing or unreadable');
-}
-let composeUpgradeDrillScript: string | undefined;
-let composeUpgradeFixtureScript: string | undefined;
-try {
-  composeUpgradeDrillScript = readFileSync(
-    join(root, 'tooling/scripts/drill-compose-upgrade.sh'),
-    'utf8'
-  );
-} catch {
-  violations.push(
-    'tooling/scripts/drill-compose-upgrade.sh: script is missing or unreadable'
-  );
-}
-try {
-  composeUpgradeFixtureScript = readFileSync(
-    join(root, 'tooling/scripts/compose-upgrade-fixture.ts'),
-    'utf8'
-  );
-} catch {
-  violations.push(
-    'tooling/scripts/compose-upgrade-fixture.ts: script is missing or unreadable'
-  );
-}
-let releaseTagScript: string | undefined;
-try {
-  releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
-} catch {
-  violations.push('tooling/scripts/release-tag.sh: script is missing or unreadable');
-}
+const composeSmokeScript = readScript('tooling/scripts/smoke-compose.sh');
+const composeUpgradeDrillScript = readScript(
+  'tooling/scripts/drill-compose-upgrade.sh'
+);
+const composeUpgradeFixtureScript = readScript(
+  'tooling/scripts/compose-upgrade-fixture.ts'
+);
+const releaseTagScript = readScript('tooling/scripts/release-tag.sh');
 const releaseImageMatrix = parseImageMatrix(releaseWorkflow, 'release.yml', 'images');
 const developmentImageMatrix = parseImageMatrix(
   ciWorkflow,
@@ -316,20 +299,30 @@ for (const requiredFragment of [
   }
 }
 
-const composeUpgradeSurface = [
-  composeUpgradeDrillScript ?? '',
-  composeUpgradeFixtureScript ?? ''
-].join('\n');
 for (const requiredFragment of [
   'SELFHOST_MIGRATION_BACKUP',
-  'historical-multi-region',
   'compose-version-upgrade',
-  'Legacy data volume disappeared during the non-destructive upgrade',
+  'Legacy data volume disappeared during the non-destructive upgrade'
+]) {
+  if (
+    composeUpgradeDrillScript !== undefined
+    && !composeUpgradeDrillScript.includes(requiredFragment)
+  ) {
+    violations.push(
+      `tooling/scripts/drill-compose-upgrade.sh: missing stored-data invariant ${requiredFragment}`
+    );
+  }
+}
+for (const requiredFragment of [
+  'historical-multi-region',
   'locationMigration'
 ]) {
-  if (!composeUpgradeSurface.includes(requiredFragment)) {
+  if (
+    composeUpgradeFixtureScript !== undefined
+    && !composeUpgradeFixtureScript.includes(requiredFragment)
+  ) {
     violations.push(
-      `compose upgrade drill: missing stored-data invariant ${requiredFragment}`
+      `tooling/scripts/compose-upgrade-fixture.ts: missing stored-data invariant ${requiredFragment}`
     );
   }
 }

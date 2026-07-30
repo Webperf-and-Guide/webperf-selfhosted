@@ -1,4 +1,5 @@
 import type { SqliteMigration } from './types';
+import type { CheckProfileLocationMigrationReason } from '@webperf/contracts';
 
 const historicalMultiRegionId = 'historical-multi-region';
 
@@ -21,7 +22,7 @@ const toStringArray = (value: unknown): string[] | null =>
 const resolveMigrationReason = (
   sourceRegions: string[],
   safeSingleton: boolean
-) => {
+): CheckProfileLocationMigrationReason => {
   if (sourceRegions.length === 0) {
     return 'legacy_region_pack_missing' as const;
   }

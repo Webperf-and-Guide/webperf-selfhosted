@@ -118,7 +118,7 @@
           {#if pendingLocationMigration}
             <div class="grid gap-3 md:col-span-2">
               <InlineStatusNotice
-                message={`This check previously used Region Set "${pendingLocationMigration.sourceRegionPackId}" (${pendingLocationMigration.sourceRegions.join(', ') || 'definition unavailable'}). Its schedule is disabled until you confirm that it should now run only from ${pendingLocationMigration.runtimeRegionId}.`}
+                message={`This check was imported from the previous multi-location configuration "${pendingLocationMigration.sourceRegionPackId}" (${pendingLocationMigration.sourceRegions.join(', ') || 'definition unavailable'}). Its schedule is disabled until you confirm that it should now run only from ${pendingLocationMigration.runtimeRegionId}.`}
                 tone="warning"
               />
               <label class="checkbox-field rounded-[var(--wp-radius-md)] border border-warning/35 bg-warning/10 px-4 py-3">

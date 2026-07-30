@@ -4,6 +4,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 legacy_compose_file="${WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:?set WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE}"
 legacy_env_template="${WEBPERF_UPGRADE_LEGACY_ENV_TEMPLATE:?set WEBPERF_UPGRADE_LEGACY_ENV_TEMPLATE}"
+legacy_version="${WEBPERF_UPGRADE_LEGACY_VERSION:?set WEBPERF_UPGRADE_LEGACY_VERSION}"
 current_compose_file="${WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.yml}"
 current_dev_compose_file="${WEBPERF_UPGRADE_CURRENT_DEV_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.dev.yml}"
 current_env_template="${WEBPERF_UPGRADE_CURRENT_ENV_TEMPLATE:-$root_dir/infra/docker-compose/.env.example}"
@@ -11,6 +12,13 @@ use_current_dev_override="${WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE:-true}"
 docker_config="${WEBPERF_UPGRADE_DOCKER_CONFIG:-}"
 compose_project="webperf-upgrade-$$"
 temp_root="$(mktemp -d)"
+cleanup_temp_root() {
+  rm -rf "$temp_root"
+}
+trap cleanup_temp_root EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 legacy_env="$temp_root/legacy.env"
 current_env="$temp_root/current.env"
 manifest_path="$temp_root/upgrade-manifest.json"
@@ -259,21 +267,31 @@ current run --rm --no-deps --entrypoint bun api \
   --database /data/webperf.sqlite > "$doctor_output_path"
 bun -e '
   const payload = JSON.parse(await Bun.file(process.argv[1]).text());
-  if (
-    payload?.ok !== true
-    || payload?.command !== "doctor"
-    || payload?.integrity?.ok !== true
-    || payload?.integrity?.foreignKeyViolations !== 0
-    || !Array.isArray(payload?.migrations?.pending)
-    || payload.migrations.pending.length !== 0
-    || !Array.isArray(payload?.migrations?.unknown)
-    || payload.migrations.unknown.length !== 0
-  ) {
-    throw new Error("Upgraded database doctor verification failed");
+  const fail = (message) => {
+    throw new Error(`Upgraded database doctor verification failed: ${message}`);
+  };
+  if (payload?.ok !== true) fail("ok is not true");
+  if (payload?.command !== "doctor") fail("command is not doctor");
+  if (payload?.integrity?.ok !== true) fail("integrity.ok is not true");
+  if (payload?.integrity?.foreignKeyViolations !== 0) {
+    fail(`foreign key violations: ${payload?.integrity?.foreignKeyViolations ?? "missing"}`);
+  }
+  if (!Array.isArray(payload?.migrations?.pending)) {
+    fail("migrations.pending is not an array");
+  }
+  if (payload.migrations.pending.length !== 0) {
+    fail(`pending migrations: ${payload.migrations.pending.length}`);
+  }
+  if (!Array.isArray(payload?.migrations?.unknown)) {
+    fail("migrations.unknown is not an array");
+  }
+  if (payload.migrations.unknown.length !== 0) {
+    fail(`unknown migrations: ${payload.migrations.unknown.length}`);
   }
 ' "$doctor_output_path"
 WEBPERF_UPGRADE_ADMIN_TOKEN="$admin_token" \
   bun "$root_dir/tooling/scripts/compose-upgrade-fixture.ts" \
     verify-current "$current_base_url" "$manifest_path"
 
-echo '{"ok":true,"drill":"compose-version-upgrade","from":"0.2.1","storedData":"verified"}'
+printf '{"ok":true,"drill":"compose-version-upgrade","from":"%s","storedData":"verified"}\n' \
+  "$legacy_version"

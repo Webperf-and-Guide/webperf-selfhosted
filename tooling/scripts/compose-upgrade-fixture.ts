@@ -1,4 +1,4 @@
-import { chmod, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 type UpgradeManifest = {
@@ -91,10 +91,12 @@ const request = async (
         authorization: `Bearer ${token}`,
         ...init.headers
       },
-      signal: AbortSignal.timeout(20_000)
+      signal: init.signal ?? AbortSignal.timeout(20_000)
     });
-  } catch {
-    throw new Error(`${init.method ?? 'GET'} ${path} transport failed`);
+  } catch (error) {
+    throw new Error(`${init.method ?? 'GET'} ${path} transport failed`, {
+      cause: error instanceof Error ? error : undefined
+    });
   }
 };
 
@@ -184,7 +186,6 @@ const seedLegacy = async (
     mode: 0o600,
     flag: 'wx'
   });
-  await chmod(destination, 0o600);
   console.log(JSON.stringify({ ok: true, command: 'seed-legacy', manifest }));
 };
 

@@ -455,11 +455,10 @@ pub fn validate_target_url(url: &Url) -> Result<(), TargetValidationError> {
         return Err(TargetValidationError::EmbeddedCredentials);
     }
 
-    if let Some(port) = url.port()
-        && port != 80
-        && port != 443
-    {
-        return Err(TargetValidationError::InvalidPort);
+    if let Some(port) = url.port() {
+        if port != 80 && port != 443 {
+            return Err(TargetValidationError::InvalidPort);
+        }
     }
 
     let hostname = url
@@ -475,10 +474,10 @@ pub fn validate_target_url(url: &Url) -> Result<(), TargetValidationError> {
         return Err(TargetValidationError::PrivateHostname);
     }
 
-    if let Ok(ip) = hostname.parse::<IpAddr>()
-        && is_private_ip(ip)
-    {
-        return Err(TargetValidationError::PrivateIpLiteral);
+    if let Ok(ip) = hostname.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(TargetValidationError::PrivateIpLiteral);
+        }
     }
 
     Ok(())

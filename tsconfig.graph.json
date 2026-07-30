@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "composite": false,
+    "noEmit": true,
+    "paths": {
+      "@webperf/config": ["./packages/config/src/index.ts"],
+      "@webperf/config/*": ["./packages/config/src/*"],
+      "@webperf/contracts": ["./packages/contracts/src/index.ts"],
+      "@webperf/contracts/*": ["./packages/contracts/src/*"],
+      "@webperf/domain-core": ["./packages/domain-core/src/index.ts"],
+      "@webperf/report-core": ["./packages/report-core/src/index.ts"],
+      "@webperf/ui": ["./packages/ui/src/index.ts"],
+      "@webperf/ui/*": ["./packages/ui/src/*"]
+    }
+  },
+  "include": [
+    "apps/api/src/**/*.ts",
+    "apps/api/test/**/*.ts",
+    "apps/browser-audit-lighthouse/src/**/*.ts",
+    "apps/executor/src/**/*.ts",
+    "apps/scheduler/src/**/*.ts",
+    "packages/config/src/**/*.ts",
+    "packages/contracts/src/**/*.ts",
+    "packages/domain-core/src/**/*.ts",
+    "packages/report-core/src/**/*.ts"
+  ]
+}

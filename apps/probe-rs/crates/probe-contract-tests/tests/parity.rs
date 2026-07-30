@@ -316,10 +316,10 @@ fn signed_request(target: &str) -> MeasureRequest {
 
 async fn wait_for_health(client: &Client, base_url: &str) -> Result<()> {
     for _ in 0..120 {
-        if let Ok(response) = client.get(format!("{base_url}/healthz")).send().await
-            && response.status().is_success()
-        {
-            return Ok(());
+        if let Ok(response) = client.get(format!("{base_url}/healthz")).send().await {
+            if response.status().is_success() {
+                return Ok(());
+            }
         }
 
         sleep(Duration::from_millis(250)).await;

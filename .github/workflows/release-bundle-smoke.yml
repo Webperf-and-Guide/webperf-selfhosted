@@ -112,7 +112,7 @@ jobs:
             .version == $version
             and .tag == ("v" + $version)
             and .sourceCommit == $source_sha
-            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z-]+)?@sha256:[0-9a-f]{64}$")] | all)
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
           ' "${bundle_dir}/runtime-metadata.json" >/dev/null
           echo "directory=${bundle_dir}" >> "$GITHUB_OUTPUT"
       - name: Load Browser Audit AppArmor profile
@@ -211,7 +211,7 @@ jobs:
             .version == $version
             and .tag == ("v" + $version)
             and .sourceCommit == $source_sha
-            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z-]+)?@sha256:[0-9a-f]{64}$")] | all)
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
           ' "${bundle_dir}/runtime-metadata.json" >/dev/null
           echo "directory=${bundle_dir}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0

@@ -70,12 +70,19 @@ compose() {
 bounded_compose_down() {
   local down_pid
   local watchdog_pid
+  local watchdog_stop
   local status
 
   compose "${recovery_profiles[@]}" down -v --remove-orphans --timeout 30 &
   down_pid=$!
+  watchdog_stop="$temp_root/compose-down-${down_pid}.stop"
   (
-    sleep 60
+    for _ in {1..60}; do
+      if [[ -e "$watchdog_stop" ]]; then
+        exit 0
+      fi
+      sleep 1
+    done
     if kill -0 "$down_pid" >/dev/null 2>&1; then
       kill -TERM "$down_pid" >/dev/null 2>&1 || true
       sleep 5
@@ -89,8 +96,9 @@ bounded_compose_down() {
   else
     status=$?
   fi
-  kill "$watchdog_pid" >/dev/null 2>&1 || true
+  : > "$watchdog_stop"
   wait "$watchdog_pid" >/dev/null 2>&1 || true
+  rm -f "$watchdog_stop"
   return "$status"
 }
 
@@ -210,10 +218,15 @@ if [[ "$compose_project" != webperf-recovery-* ]]; then
   echo "Refusing to delete a non-recovery Compose project: $compose_project" >&2
   exit 1
 fi
-bounded_compose_down
+compose_down_status=0
+bounded_compose_down || compose_down_status=$?
 if docker volume inspect "$volume_name" >/dev/null 2>&1; then
   echo "Expected isolated recovery volume to be deleted: $volume_name" >&2
   exit 1
+fi
+if (( compose_down_status != 0 )); then
+  echo "Compose recovery teardown failed with status $compose_down_status" >&2
+  exit "$compose_down_status"
 fi
 expected_database_sha256="$(awk 'NR == 1 { print $1 }' "$backup_dir/webperf.sqlite.sha256")"
 actual_database_sha256="$(openssl dgst -sha256 -r "$backup_database_path" | awk 'NR == 1 { print $1 }')"

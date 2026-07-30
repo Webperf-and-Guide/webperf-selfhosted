@@ -112,7 +112,7 @@ const requestJson = async (
   } catch {
     throw new RecoveryRequestError(
       `${init.method ?? 'GET'} ${path} returned invalid JSON (${response.status})`,
-      response.status >= 500
+      true
     );
   }
   if (!response.ok) {
@@ -155,17 +155,21 @@ const waitForResource = async ({
 }) => {
   const deadline = Date.now() + timeoutMs;
   let lastStatus = '';
+  let retryCount = 0;
   while (Date.now() < deadline) {
     let rawPayload: unknown;
     try {
       rawPayload = await requestJson(baseUrl, token, path);
     } catch (error) {
       if (error instanceof RecoveryRequestError && error.retryable) {
-        await Bun.sleep(2_000);
+        const backoffMs = Math.min(2_000 * 2 ** retryCount, 16_000);
+        retryCount += 1;
+        await Bun.sleep(Math.min(backoffMs, Math.max(0, deadline - Date.now())));
         continue;
       }
       throw error;
     }
+    retryCount = 0;
     const payload = requireObject(rawPayload, label);
     const status = requireString(payload.status, `${label}.status`);
     lastStatus = status;
@@ -185,17 +189,37 @@ const downloadArtifactSha256 = async (
   if (!localArtifactPathPattern.test(artifactUrl)) {
     throw new Error('Recovery fixture artifact URL must be a canonical local Browser Audit API path');
   }
-  const response = await fetch(`${baseUrl}${artifactUrl}`, {
-    headers: { authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(30_000)
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(`Artifact download failed with ${response.status}`);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}${artifactUrl}`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(30_000)
+      });
+    } catch (error) {
+      if (attempt < 4) {
+        await Bun.sleep(Math.min(1_000 * 2 ** attempt, 8_000));
+        continue;
+      }
+      throw new Error(
+        `Artifact download failed before receiving a response: ${
+          error instanceof Error ? error.message : 'unknown transport error'
+        }`
+      );
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      if (response.status >= 500 && attempt < 4) {
+        await Bun.sleep(Math.min(1_000 * 2 ** attempt, 8_000));
+        continue;
+      }
+      throw new Error(`Artifact download failed with ${response.status}`);
+    }
+    return createHash('sha256')
+      .update(new Uint8Array(await response.arrayBuffer()))
+      .digest('hex');
   }
-  return createHash('sha256')
-    .update(new Uint8Array(await response.arrayBuffer()))
-    .digest('hex');
+  throw new Error('Artifact download exhausted its retry budget');
 };
 
 const parseArtifact = (audit: Record<string, unknown>) => {

@@ -47,9 +47,6 @@ const resolveExpectedTokens = (
   if (isInternalPath(pathname)) {
     return [secrets.internalSecret, secrets.internalSecretNext];
   }
-  if (pathname === '/v1/runtime-metrics') {
-    return [secrets.adminToken, secrets.adminTokenNext];
-  }
   return [secrets.adminToken, secrets.adminTokenNext];
 };
 

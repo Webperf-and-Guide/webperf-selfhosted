@@ -134,8 +134,11 @@ impl Config {
 }
 
 fn is_sha256_digest(value: &str) -> bool {
-    value.len() == 71
-        && value.strip_prefix("sha256:").is_some_and(|digest| {
+    const SHA256_PREFIX: &str = "sha256:";
+    const SHA256_HEX_LENGTH: usize = 64;
+
+    value.len() == SHA256_PREFIX.len() + SHA256_HEX_LENGTH
+        && value.strip_prefix(SHA256_PREFIX).is_some_and(|digest| {
             digest
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())

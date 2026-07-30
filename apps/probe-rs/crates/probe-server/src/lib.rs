@@ -164,11 +164,8 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
         Err(_) => return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body"),
     };
 
-    if !body.has_required_fields() {
-        return plain_text_response(
-            StatusCode::BAD_REQUEST,
-            "jobId, targetId, region, url, timestamp, and signature are required",
-        );
+    if !body.is_contract_valid() {
+        return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body");
     }
 
     let timestamp_valid = match timestamp_is_valid(&body.timestamp, chrono::Utc::now()) {

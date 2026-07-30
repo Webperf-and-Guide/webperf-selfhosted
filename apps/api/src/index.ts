@@ -288,6 +288,7 @@ const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
   return runtimeMetricsSchema.parse({
     schemaVersion: runtimeMetricsSchemaVersion,
     observedAt: observedAt.toISOString(),
+    runtimeMode: 'full',
     runtimeLocation: runtime.runtimeLocation,
     executions: repository.getExecutionQueueMetrics(observedAt, runtime.retentionDays),
     capacity: {

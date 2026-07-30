@@ -22,6 +22,15 @@ pub const PROBE_TRANSPORT_MAX_PAYLOAD_BYTES: usize = 2 * 1_024 * 1_024;
 pub const PROBE_REQUEST_TIMEOUT_MS: u64 = 8_000;
 pub const PROBE_MAX_REDIRECTS: u64 = 4;
 pub const PROBE_MEASUREMENT_TIMEOUT_MS: u64 = PROBE_REQUEST_TIMEOUT_MS * (PROBE_MAX_REDIRECTS + 1);
+const MAX_JOB_ID_CHARS: usize = 160;
+const MAX_TARGET_ID_CHARS: usize = 256;
+const MAX_REGION_ID_CHARS: usize = 64;
+const MAX_URL_CHARS: usize = 8_192;
+const MAX_REQUEST_HEADERS: usize = 20;
+const MAX_HEADER_NAME_CHARS: usize = 120;
+const MAX_HEADER_VALUE_CHARS: usize = 4_000;
+const MAX_BODY_CONTENT_TYPE_CHARS: usize = 120;
+const MAX_BODY_VALUE_CHARS: usize = 10_000;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
@@ -35,6 +44,10 @@ pub enum ConfigError {
     InvalidSharedSecretNext,
     #[error("PROBE_MAX_INFLIGHT must be an integer between 1 and {max}")]
     InvalidMaxInflight { max: usize },
+    #[error(
+        "REGION_ID must contain 1-64 lowercase ASCII letters, digits, or hyphens and start and end with a letter or digit"
+    )]
+    InvalidRegionId,
     #[error("WEBPERF_PROBE_VERSION must contain between 1 and 120 bytes when configured")]
     InvalidRuntimeVersion,
     #[error("WEBPERF_PROBE_IMAGE_DIGEST must be a lowercase sha256 digest when configured")]
@@ -93,6 +106,13 @@ impl Config {
                 })?,
             Err(_) => DEFAULT_MAX_INFLIGHT,
         };
+        let region_id = env::var("REGION_ID")
+            .unwrap_or_else(|_| DEFAULT_REGION_ID.to_string())
+            .trim()
+            .to_string();
+        if !is_runtime_region_id(&region_id) {
+            return Err(ConfigError::InvalidRegionId);
+        }
         let runtime_version = match env::var("WEBPERF_PROBE_VERSION") {
             Ok(value) if value.trim().is_empty() => None,
             Ok(value) => {
@@ -123,7 +143,7 @@ impl Config {
             // defaults to `local` instead of claiming a specific city. The
             // previous REGION_CODE/region_code naming was renamed to match
             // the runtime region id model used across the deployment.
-            region_id: env::var("REGION_ID").unwrap_or_else(|_| DEFAULT_REGION_ID.to_string()),
+            region_id,
             shared_secret,
             shared_secret_next,
             max_inflight,
@@ -143,6 +163,20 @@ fn is_sha256_digest(value: &str) -> bool {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         })
+}
+
+fn is_runtime_region_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=MAX_REGION_ID_CHARS).contains(&bytes.len())
+        && bytes
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && bytes
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
 }
 
 /// Parses the optional rotation key while preserving the Compose empty-string
@@ -288,14 +322,83 @@ pub struct MeasureRequest {
 }
 
 impl MeasureRequest {
-    pub fn has_required_fields(&self) -> bool {
-        !self.job_id.is_empty()
-            && !self.target_id.is_empty()
-            && !self.region.is_empty()
-            && !self.url.is_empty()
+    pub fn is_contract_valid(&self) -> bool {
+        is_bounded_identifier(&self.job_id, MAX_JOB_ID_CHARS)
+            && is_bounded_identifier(&self.target_id, MAX_TARGET_ID_CHARS)
+            && is_runtime_region_id(&self.region)
+            && (1..=MAX_URL_CHARS).contains(&self.url.chars().count())
+            && Url::parse(&self.url).is_ok()
             && !self.timestamp.is_empty()
             && !self.signature.is_empty()
+            && matches!(self.key_version.as_str(), "current" | "next")
+            && self
+                .request
+                .as_ref()
+                .is_none_or(is_request_config_contract_valid)
     }
+}
+
+fn is_bounded_identifier(value: &str, maximum_chars: usize) -> bool {
+    let bytes = value.as_bytes();
+    (1..=maximum_chars).contains(&bytes.len())
+        && bytes
+            .first()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'.' | b'_' | b':' | b'-'))
+}
+
+fn is_request_config_contract_valid(request: &RequestConfig) -> bool {
+    let method_valid = matches!(
+        request.method.as_str(),
+        "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS"
+    );
+    let headers_valid = request.headers.len() <= MAX_REQUEST_HEADERS
+        && request.headers.iter().all(|header| {
+            (1..=MAX_HEADER_NAME_CHARS).contains(&header.name.len())
+                && header.name.bytes().all(is_http_token_byte)
+                && header.value.len() <= MAX_HEADER_VALUE_CHARS
+                && header.value.bytes().all(is_header_value_byte)
+        });
+    let body_valid = request.body.as_ref().is_none_or(|body| {
+        body.mode == "text"
+            && body.value.chars().count() <= MAX_BODY_VALUE_CHARS
+            && body.content_type.as_ref().is_none_or(|content_type| {
+                (1..=MAX_BODY_CONTENT_TYPE_CHARS).contains(&content_type.len())
+                    && content_type.bytes().all(is_header_value_byte)
+            })
+    });
+
+    method_valid
+        && headers_valid
+        && body_valid
+        && !(matches!(request.method.as_str(), "GET" | "HEAD") && request.body.is_some())
+}
+
+fn is_http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+fn is_header_value_byte(byte: u8) -> bool {
+    byte == b'\t' || (b' '..=b'~').contains(&byte)
 }
 
 fn default_key_version() -> String {
@@ -630,5 +733,35 @@ mod tests {
         assert!(!is_sha256_digest(&format!("sha256:{}", "A".repeat(64))));
         assert!(!is_sha256_digest("sha256:abc"));
         assert!(!is_sha256_digest(&format!("sha512:{}", "0".repeat(64))));
+    }
+
+    #[test]
+    fn validates_runtime_region_ids() {
+        assert!(is_runtime_region_id("local"));
+        assert!(is_runtime_region_id("kr-seoul-office"));
+        assert!(is_runtime_region_id(&"a".repeat(64)));
+        assert!(!is_runtime_region_id(""));
+        assert!(!is_runtime_region_id("Tokyo"));
+        assert!(!is_runtime_region_id(" leading-space"));
+        assert!(!is_runtime_region_id("trailing-"));
+        assert!(!is_runtime_region_id(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn validates_measure_request_contract_bounds() {
+        let mut request = sample_request();
+        request.signature = "0".repeat(64);
+        assert!(request.is_contract_valid());
+
+        request.job_id = format!("job_{}", "a".repeat(MAX_JOB_ID_CHARS));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.target_id = format!("target_{}", "a".repeat(MAX_TARGET_ID_CHARS));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.url = format!("https://example.com/{}", "a".repeat(MAX_URL_CHARS));
+        assert!(!request.is_contract_valid());
     }
 }

@@ -49,6 +49,10 @@ export type RuntimeExecutionQueueMetrics = z.infer<
 export const runtimeMetricsSchema = z.object({
   schemaVersion: z.literal(runtimeMetricsSchemaVersion),
   observedAt: z.string().datetime(),
+  // Keep the v1 discriminator for existing consumers. Regional Runtime was
+  // removed, so every current self-host snapshot reports the only supported
+  // mode instead of changing the published v1 wire shape.
+  runtimeMode: z.literal('full'),
   runtimeLocation: runtimeLocationSchema,
   executions: runtimeExecutionQueueMetricsSchema,
   capacity: z.object({

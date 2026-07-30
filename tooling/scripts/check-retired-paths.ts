@@ -122,7 +122,7 @@ const retiredRegionalRuntimeSurface = [
     message: 'managed orchestration must authenticate directly to the stateless probe'
   },
   {
-    pattern: /WEBPERF_ROLE\s*=\s*regional-runtime/,
+    pattern: /WEBPERF_ROLE\s*(?::|=)\s*["']?regional-runtime\b/,
     message: 'the unified image no longer exposes a regional-runtime role'
   }
 ];

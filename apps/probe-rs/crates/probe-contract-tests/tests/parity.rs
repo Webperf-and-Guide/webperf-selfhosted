@@ -114,6 +114,23 @@ async fn rejects_requests_for_a_different_region() -> Result<()> {
 }
 
 #[tokio::test]
+async fn rejects_signed_requests_outside_public_contract_bounds() -> Result<()> {
+    let _guard = TEST_MUTEX
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let harness = Harness::start().await?;
+    let mut request = sample_request("https://example.com");
+    request.job_id = format!("job_{}", "a".repeat(160));
+    request.signature = sign_request(SHARED_SECRET, &request);
+
+    let response = harness.measure(&request).await?;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
 async fn returns_failure_measurements_for_blocked_private_targets() -> Result<()> {
     let _guard = TEST_MUTEX
         .get_or_init(|| tokio::sync::Mutex::new(()))

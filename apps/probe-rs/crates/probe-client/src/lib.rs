@@ -1,6 +1,7 @@
 use probe_core::{
-    PROBE_MAX_REDIRECTS, PROBE_REQUEST_TIMEOUT_MS, ProbeImplementation, ProbeMeasurement,
-    ProbeTimings, RequestConfig, utc_timestamp, validate_target_url,
+    PROBE_MAX_REDIRECTS, PROBE_MEASUREMENT_TIMEOUT_MS, PROBE_REQUEST_TIMEOUT_MS,
+    ProbeImplementation, ProbeMeasurement, ProbeTimings, RequestConfig, utc_timestamp,
+    validate_target_url,
 };
 use reqwest::{
     Client, Method, Url,
@@ -11,12 +12,37 @@ use std::{
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
-use tokio::net::lookup_host;
+use tokio::{net::lookup_host, time::timeout};
 use tracing::debug;
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(PROBE_REQUEST_TIMEOUT_MS);
+pub const MEASUREMENT_TIMEOUT: Duration = Duration::from_millis(PROBE_MEASUREMENT_TIMEOUT_MS);
 
 pub async fn measure_url(
+    region: &str,
+    target: &str,
+    request_config: Option<&RequestConfig>,
+) -> ProbeMeasurement {
+    let started_at = Instant::now();
+    match timeout(
+        MEASUREMENT_TIMEOUT,
+        measure_url_inner(region, target, request_config),
+    )
+    .await
+    {
+        Ok(measurement) => measurement,
+        Err(_) => ProbeMeasurement::failure(
+            region,
+            target,
+            None,
+            0,
+            base_timings(started_at.elapsed(), None, None),
+            "measurement timeout",
+        ),
+    }
+}
+
+async fn measure_url_inner(
     region: &str,
     target: &str,
     request_config: Option<&RequestConfig>,

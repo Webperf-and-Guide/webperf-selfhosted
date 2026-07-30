@@ -15,7 +15,8 @@ monitoring URL.
 
 The v1 response contains:
 
-- `observedAt` and the fixed `runtimeLocation`;
+- `observedAt`, the v1-compatible `runtimeMode: "full"` discriminator, and the
+  fixed `runtimeLocation`;
 - `executions.ready`: work an executor can claim now, including reclaimable
   expired leases that still have attempts left;
 - `executions.delayed`: queued retries or work whose `availableAt` is in the
@@ -39,6 +40,7 @@ Example:
 {
   "schemaVersion": 1,
   "observedAt": "2026-07-30T06:00:00.000Z",
+  "runtimeMode": "full",
   "runtimeLocation": {
     "regionId": "tokyo",
     "label": "Tokyo"

@@ -167,6 +167,23 @@ const collectFiles = (target: string): string[] => {
 };
 
 const violations: string[] = [];
+const checkRegexSurface = (
+  surfaceTargets: string[],
+  rules: Array<{ pattern: RegExp; message: string }>
+) => {
+  for (const target of surfaceTargets) {
+    for (const filePath of collectFiles(target)) {
+      const rel = relative(root, filePath);
+      const content = readFileSync(filePath, 'utf8');
+
+      for (const rule of rules) {
+        if (rule.pattern.test(content)) {
+          violations.push(`${rel}: ${rule.message}`);
+        }
+      }
+    }
+  }
+};
 
 for (const target of targets) {
   for (const filePath of collectFiles(target)) {
@@ -181,44 +198,9 @@ for (const target of targets) {
   }
 }
 
-for (const target of singleRegionCopyTargets) {
-  for (const filePath of collectFiles(target)) {
-    const rel = relative(root, filePath);
-    const content = readFileSync(filePath, 'utf8');
-
-    for (const rule of retiredSingleRegionCopy) {
-      if (rule.pattern.test(content)) {
-        violations.push(`${rel}: ${rule.message}`);
-      }
-    }
-  }
-}
-
-for (const target of singleRegionEnvTargets) {
-  for (const filePath of collectFiles(target)) {
-    const rel = relative(root, filePath);
-    const content = readFileSync(filePath, 'utf8');
-
-    for (const rule of retiredSingleRegionEnv) {
-      if (rule.pattern.test(content)) {
-        violations.push(`${rel}: ${rule.message}`);
-      }
-    }
-  }
-}
-
-for (const target of retiredRegionalRuntimeTargets) {
-  for (const filePath of collectFiles(target)) {
-    const rel = relative(root, filePath);
-    const content = readFileSync(filePath, 'utf8');
-
-    for (const rule of retiredRegionalRuntimeSurface) {
-      if (rule.pattern.test(content)) {
-        violations.push(`${rel}: ${rule.message}`);
-      }
-    }
-  }
-}
+checkRegexSurface(singleRegionCopyTargets, retiredSingleRegionCopy);
+checkRegexSurface(singleRegionEnvTargets, retiredSingleRegionEnv);
+checkRegexSurface(retiredRegionalRuntimeTargets, retiredRegionalRuntimeSurface);
 
 if (violations.length > 0) {
   console.error('Retired topology check failed:\n');

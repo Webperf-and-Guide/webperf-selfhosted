@@ -34,6 +34,13 @@ import {
 
 type SavedProfileMeta = SavedChecksData['profileMeta'][number];
 
+type ProfileActionResult =
+  | string
+  | {
+      message: string;
+      controlDataAlreadyRefreshed: true;
+    };
+
 type ChecksAccessors = {
   getSavedChecksEnabled: () => boolean;
   getProperties: () => Property[];
@@ -394,7 +401,11 @@ export class ChecksController {
             } else {
               this.resetProfileForm();
             }
-            return 'The runtime location changed, so the saved check was reloaded. Review the current location and acknowledge it again.';
+            return {
+              message:
+                'The runtime location changed, so the saved check was reloaded. Review the current location and acknowledge it again.',
+              controlDataAlreadyRefreshed: true
+            };
           }
           throw new Error(
             payload.error ?? `Failed to ${this.state.editingProfileId ? 'update' : 'create'} saved check.`
@@ -627,16 +638,18 @@ export class ChecksController {
   private submitProfileAction = async (
     kind: string,
     actionName: 'create' | 'update' | 'delete',
-    action: () => Promise<string>
+    action: () => Promise<ProfileActionResult>
   ) => {
     this.state.savingProfileKind = `${kind}:${actionName}`;
     this.state.profileActionError = null;
     this.state.profileActionMessage = null;
 
     try {
-      const message = await action();
-      this.state.profileActionMessage = message;
-      await this.accessors.refreshControlData();
+      const result = await action();
+      this.state.profileActionMessage = typeof result === 'string' ? result : result.message;
+      if (typeof result === 'string') {
+        await this.accessors.refreshControlData();
+      }
     } catch (error) {
       this.state.profileActionError =
         error instanceof Error ? error.message : `Failed to ${actionName} ${kind.replace('-', ' ')}.`;

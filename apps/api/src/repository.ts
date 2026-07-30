@@ -630,6 +630,7 @@ export const createSqliteJobRepository = ({
       END) AS oldest_active_at
     FROM execution_jobs
     CROSS JOIN metric_clock
+    WHERE status IN ('queued', 'leased', 'running')
   `);
   const finalizeExhaustedExecutionJobsStatement = db.query<ExecutionJobRow, [
     string,
@@ -844,14 +845,18 @@ export const createSqliteJobRepository = ({
     }
   };
 
-  const createEmptyStatusCounts = (): RuntimeExecutionStatusCounts => ({
-    queued: 0,
-    leased: 0,
-    running: 0,
-    succeeded: 0,
-    failed: 0,
-    cancelled: 0
-  });
+  const createEmptyStatusCounts = (): RuntimeExecutionStatusCounts =>
+    Object.fromEntries(
+      executionJobStatusValues.map((status) => [status, 0])
+    ) as RuntimeExecutionStatusCounts;
+
+  const createEmptyKindCounts = (): RuntimeExecutionQueueMetrics['byKind'] =>
+    Object.fromEntries(
+      executionJobKindValues.map((kind) => [
+        kind,
+        createEmptyStatusCounts()
+      ])
+    ) as RuntimeExecutionQueueMetrics['byKind'];
 
   const getExecutionMetricAgeMs = (
     timestamp: string | null,
@@ -871,11 +876,7 @@ export const createSqliteJobRepository = ({
     now: Date
   ): RuntimeExecutionQueueMetrics => {
     const byStatus = createEmptyStatusCounts();
-    const byKind: RuntimeExecutionQueueMetrics['byKind'] = {
-      network_probe: createEmptyStatusCounts(),
-      browser_audit: createEmptyStatusCounts(),
-      webhook_delivery: createEmptyStatusCounts()
-    };
+    const byKind = createEmptyKindCounts();
 
     for (const row of executionMetricCountsStatement.all()) {
       const kind = executionJobKindValues.find((candidate) => candidate === row.kind);

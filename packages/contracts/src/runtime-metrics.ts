@@ -1,21 +1,34 @@
 import { z } from 'zod';
+import {
+  executionJobKindValues,
+  executionJobStatusValues,
+  type ExecutionJobKind,
+  type ExecutionJobStatus
+} from './execution';
 import { runtimeLocationSchema } from './regions';
 
 export const runtimeMetricsSchemaVersion = 1 as const;
 export const runtimeTopology = 'single-replica-sqlite' as const;
 export const executorConcurrency = 1 as const;
 
-export const runtimeExecutionStatusCountsSchema = z.object({
-  queued: z.number().int().nonnegative(),
-  leased: z.number().int().nonnegative(),
-  running: z.number().int().nonnegative(),
-  succeeded: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  cancelled: z.number().int().nonnegative()
-});
+const executionStatusCountSchema = z.number().int().nonnegative();
+const runtimeExecutionStatusCountsShape = Object.fromEntries(
+  executionJobStatusValues.map((status) => [status, executionStatusCountSchema])
+) as Record<ExecutionJobStatus, typeof executionStatusCountSchema>;
+
+export const runtimeExecutionStatusCountsSchema = z.object(
+  runtimeExecutionStatusCountsShape
+);
 export type RuntimeExecutionStatusCounts = z.infer<
   typeof runtimeExecutionStatusCountsSchema
 >;
+
+const runtimeExecutionByKindShape = Object.fromEntries(
+  executionJobKindValues.map((kind) => [
+    kind,
+    runtimeExecutionStatusCountsSchema
+  ])
+) as Record<ExecutionJobKind, typeof runtimeExecutionStatusCountsSchema>;
 
 export const runtimeExecutionQueueMetricsSchema = z.object({
   ready: z.number().int().nonnegative(),
@@ -27,11 +40,7 @@ export const runtimeExecutionQueueMetricsSchema = z.object({
   oldestReadyAgeMs: z.number().int().nonnegative().nullable(),
   oldestActiveAgeMs: z.number().int().nonnegative().nullable(),
   byStatus: runtimeExecutionStatusCountsSchema,
-  byKind: z.object({
-    network_probe: runtimeExecutionStatusCountsSchema,
-    browser_audit: runtimeExecutionStatusCountsSchema,
-    webhook_delivery: runtimeExecutionStatusCountsSchema
-  })
+  byKind: z.object(runtimeExecutionByKindShape)
 });
 export type RuntimeExecutionQueueMetrics = z.infer<
   typeof runtimeExecutionQueueMetricsSchema

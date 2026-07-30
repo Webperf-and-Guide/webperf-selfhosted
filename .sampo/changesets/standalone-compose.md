@@ -11,4 +11,6 @@ The standalone supervisor launches the public console, API, and executor under
 distinct non-root UIDs with only the capabilities needed to set those
 identities and stop its children. It keeps the API and console available while
 waiting for the separate probe to become healthy, then starts the executor so
-routine stack startups do not exhaust queued work attempts.
+routine stack startups do not exhaust queued work attempts. Database maintenance
+and recovery commands continue to run as the persistent data owner rather than
+inheriting the supervisor identity.

@@ -255,10 +255,10 @@ if [[ "$use_current_dev_override" == 'true' ]]; then
 fi
 current_base_url="$(wait_for_api_debug current webperf)"
 
-current run --rm --no-deps --entrypoint sh webperf -c \
+current run --rm --no-deps --user 1000:1000 --entrypoint sh webperf -c \
   'set -- /data/webperf.sqlite.backup-*; test -f "$1"'
 doctor_output_path="$temp_root/doctor-output.log"
-current run --rm --no-deps --entrypoint bun webperf \
+current run --rm --no-deps --user 1000:1000 --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite > "$doctor_output_path"
 bun -e '

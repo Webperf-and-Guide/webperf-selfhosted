@@ -43,6 +43,7 @@ docker compose --env-file .env -f compose.yml stop webperf
 # Run the backup as a one-shot container. Override the entrypoint so the
 # role dispatcher does not start the API; the db subcommand bypasses it.
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
   --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
@@ -95,6 +96,7 @@ docker compose --env-file .env -f compose.yml cp \
   backups/current/webperf.sqlite webperf:/data/restore.sqlite
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
   --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts restore \
   /data/restore.sqlite --database /data/webperf.sqlite
@@ -130,11 +132,13 @@ After both parts are restored, use the saved internal secret and run:
 
 ```sh
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
   --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts migrate \
   --database /data/webperf.sqlite --backup
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
   --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite

@@ -54,7 +54,7 @@ From a source checkout, maintenance can be run directly. In a release
 container, use the shipped script:
 
 ```sh
-docker compose --env-file .env -f compose.yml exec webperf \
+docker compose --env-file .env -f compose.yml exec --user 1000:1000 webperf \
   bun /app/tooling/scripts/selfhost-database.ts maintenance \
   --database /data/webperf.sqlite --artifacts /data/artifacts
 ```

@@ -133,11 +133,13 @@ Run migrations in a one-off `webperf` container before starting concurrent write
 
 ```sh
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
   --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts migrate \
   --database /data/webperf.sqlite --backup
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
   --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite

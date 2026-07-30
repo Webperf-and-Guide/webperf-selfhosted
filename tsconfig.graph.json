@@ -10,9 +10,9 @@
       "@webperf/contracts": ["./packages/contracts/src/index.ts"],
       "@webperf/contracts/*": ["./packages/contracts/src/*"],
       "@webperf/domain-core": ["./packages/domain-core/src/index.ts"],
+      "@webperf/domain-core/*": ["./packages/domain-core/src/*"],
       "@webperf/report-core": ["./packages/report-core/src/index.ts"],
-      "@webperf/ui": ["./packages/ui/src/index.ts"],
-      "@webperf/ui/*": ["./packages/ui/src/*"]
+      "@webperf/report-core/*": ["./packages/report-core/src/*"]
     }
   },
   "include": [

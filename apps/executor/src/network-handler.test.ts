@@ -310,6 +310,60 @@ describe('network execution handler', () => {
     });
   });
 
+  test('rejects echoed probe correlation identifiers from another request', async () => {
+    for (const correlation of [
+      { jobId: 'job_other' },
+      { targetId: 'job_network:other-region' }
+    ]) {
+      const savedResults: ExecutionResourceResultRequest[] = [];
+      const handler = createNetworkExecutionHandler({
+        client: createClient({ savedResults }),
+        leaseOwner: 'executor-network',
+        probeSharedSecret: 'network-handler-probe-secret',
+        probeBaseUrl: 'http://probe.test:8080',
+        allowInsecureProbeHttp: true,
+        requestImpl: async () => Response.json({
+          ...correlation,
+          measurement: {
+            region: 'local',
+            url: 'https://example.com/',
+            latencyMs: 123,
+            measuredAt: '2026-07-22T00:00:05.000Z',
+            statusCode: 200,
+            success: true,
+            probeImpl: 'rust',
+            finalUrl: 'https://example.com/',
+            redirectCount: 0,
+            timings: {
+              totalMs: 123,
+              dnsMs: 12,
+              tcpMs: null,
+              tlsMs: null,
+              ttfbMs: 80
+            },
+            tls: null,
+            error: null
+          }
+        })
+      });
+
+      await handler(executionJob, new AbortController().signal);
+
+      const result = savedResults.at(-1)?.result;
+      if (result?.kind !== 'network_probe') {
+        throw new Error('Expected a network result');
+      }
+      expect(result.jobs[0]?.targets[0]).toMatchObject({
+        region: 'local',
+        status: 'failed',
+        errorClass: 'terminal',
+        errorCode: 'probe_correlation_mismatch',
+        errorMessage: 'Network probe returned a result for a different request',
+        measurement: null
+      });
+    }
+  });
+
   test('validates the configured single probe origin as a credential-free HTTP(S) origin', () => {
     expect(parseProbeBaseUrl('https://probe.example.com')).toBe('https://probe.example.com');
     expect(parseProbeBaseUrl('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080');

@@ -86,14 +86,17 @@ on disk is not proof that it is current, decryptable, or internally consistent.
 
 ## Restore SQLite
 
-Stop every writer. Copy the selected backup into the existing `webperf` container,
-then run the guarded restore in a one-off container attached to the same named
-volume:
+Stop every writer. Stream the selected backup through a UID/GID `1000` one-off
+container into the named volume, then run the guarded restore through the same
+identity:
 
 ```sh
 docker compose --env-file .env --profile browser-audit -f compose.yml stop
-docker compose --env-file .env -f compose.yml cp \
-  backups/current/webperf.sqlite webperf:/data/restore.sqlite
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
+  --entrypoint sh webperf \
+  -c 'umask 077; cat > /data/restore.sqlite' \
+  < backups/current/webperf.sqlite
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
   --user 1000:1000 \
@@ -101,6 +104,11 @@ docker compose --env-file .env -f compose.yml run --rm --no-deps \
   /app/tooling/scripts/selfhost-database.ts restore \
   /data/restore.sqlite --database /data/webperf.sqlite
 ```
+
+Do not stage the database with `docker compose cp`: Docker creates copied files
+as root by default, while the guarded restore runs as UID/GID `1000` and cannot
+read a root-owned mode-`0600` backup. The streamed command creates the staging
+file with the same identity that performs the restore.
 
 Restore uses a verified temporary file, makes a safety backup of the current
 database by default, atomically replaces the database, and removes only exact

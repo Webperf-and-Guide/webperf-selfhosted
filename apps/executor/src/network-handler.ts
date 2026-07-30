@@ -266,6 +266,23 @@ const processNetworkJob = async ({
         continue;
       }
 
+      const expectedTargetId = `${job.id}:${target.region}`;
+      if (
+        (parsed.data.jobId !== undefined && parsed.data.jobId !== job.id)
+        || (
+          parsed.data.targetId !== undefined
+          && parsed.data.targetId !== expectedTargetId
+        )
+      ) {
+        markTargetFailed(
+          target,
+          'probe_correlation_mismatch',
+          'Network probe returned a result for a different request'
+        );
+        await recomputeAndPersistJob(job, persist);
+        continue;
+      }
+
       if (parsed.data.measurement.region !== target.region) {
         markTargetFailed(
           target,

@@ -191,12 +191,26 @@ legacy.update({
 })
 write_env(legacy_path, legacy)
 
+legacy_api_origin = 'http://api:8788'
+for key in (
+    'SELFHOST_ARTIFACT_UPLOAD_BASE_URL',
+    'SELFHOST_SCHEDULER_API_BASE_URL',
+):
+    if legacy.get(key) != legacy_api_origin:
+        raise SystemExit(
+            f'Published beta environment no longer exposes the expected {key} migration fixture'
+        )
+
 current = read_env(current_path)
 current.update(shared)
 current.update({
     'SELFHOST_REGION_ID': 'tokyo',
     'SELFHOST_REGION_LABEL': 'Tokyo upgrade runtime',
     'SELFHOST_PROBE_BASE_URL': 'http://probe:8080',
+    # Model the two service-origin edits required when an operator copies the
+    # published beta environment into the standalone topology.
+    'SELFHOST_ARTIFACT_UPLOAD_BASE_URL': 'http://webperf:8788',
+    'SELFHOST_SCHEDULER_API_BASE_URL': 'http://webperf:8788',
     'SELFHOST_SCHEDULER_MODE': 'disabled',
     'SELFHOST_MIGRATION_BACKUP': 'true',
 })
@@ -207,11 +221,12 @@ chmod 600 "$legacy_env" "$current_env"
 wait_for_api_debug() {
   local runner="$1"
   local runtime_service="$2"
+  shift 2
   local mapping
   local port
   local base_url
 
-  "$runner" --profile debug up -d "$runtime_service" api-debug
+  "$runner" --profile debug up -d "$@" "$runtime_service" api-debug
   mapping="$("$runner" --profile debug port api-debug 8789)"
   port="${mapping##*:}"
   if [[ ! "$port" =~ ^[0-9]+$ ]]; then
@@ -251,9 +266,9 @@ if (( legacy_down_status != 0 )); then
 fi
 
 if [[ "$use_current_dev_override" == 'true' ]]; then
-  current --profile debug build webperf
+  current --profile debug build webperf probe
 fi
-current_base_url="$(wait_for_api_debug current webperf)"
+current_base_url="$(wait_for_api_debug current webperf probe)"
 
 current run --rm --no-deps --user 1000:1000 --entrypoint sh webperf -c \
   'set -- /data/webperf.sqlite.backup-*; test -f "$1"'

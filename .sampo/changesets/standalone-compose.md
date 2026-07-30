@@ -15,4 +15,7 @@ routine stack startups do not exhaust queued work attempts. Database maintenance
 and recovery commands continue to run as the persistent data owner rather than
 inheriting the supervisor identity. Custom-Compose upgrade guidance now states
 the exact supervisor identity, capability, and `no-new-privileges` boundary
-required by the standalone role.
+required by the standalone role, migrates copied internal API origins from the
+retired `api` service to `webperf`, stages restore snapshots through the data
+owner identity, and starts the separate probe before waiting on standalone
+health in the cross-version drill.

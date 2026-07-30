@@ -116,6 +116,18 @@ capabilities to launch the console, API, and executor under separate non-root
 UIDs and to stop them cleanly. Omitting the explicit root supervisor identity
 or any required capability makes standalone startup fail closed.
 
+The published beta `.env` addressed the old API container as
+`http://api:8788`. Because the standalone topology has no `api` service, update
+both copied values before startup:
+
+```dotenv
+SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://webperf:8788
+SELFHOST_SCHEDULER_API_BASE_URL=http://webperf:8788
+```
+
+Leaving either value at `http://api:8788` makes Browser Audit artifact uploads
+or an optional external scheduler target an unresolvable service name.
+
 If you previously relied on a standalone scheduler container, either remove it
 and accept the default embedded mode, or retain the optional split scheduler
 role and set `SELFHOST_SCHEDULER_MODE=external` on `webperf`. Split console,

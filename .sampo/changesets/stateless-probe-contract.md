@@ -12,4 +12,6 @@ request configurations and its documented four-hop redirect allowance now
 follows all four redirects before rejecting a fifth. Request buffering is
 admitted through a separate fixed memory budget with a bounded body-read
 deadline, and lifecycle timeouts retain the last validated redirect URL and
-redirect count for managed-service diagnostics.
+redirect count for managed-service diagnostics. The self-host executor verifies
+echoed job and target correlation identifiers when present while continuing to
+accept legacy probe responses that omit them.

@@ -1,9 +1,9 @@
-# Self-hosted vs WebPerf Cloud
+# WebPerf Self-hosted and WebPerf & Guide
 
 `WebPerf` is the product brand. This repository and the managed service have a
 deliberate ownership boundary.
 
-| Capability | Self-hosted OSS | WebPerf Cloud |
+| Capability | WebPerf Self-hosted | WebPerf & Guide managed service |
 | --- | --- | --- |
 | Installation and upgrades | Operator-owned Compose release | Managed |
 | Organization model | One trusted organization | Hosted identities, teams, and workspaces |

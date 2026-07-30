@@ -83,6 +83,28 @@ assert_service_unpublished() {
   fi
 }
 
+assert_service_port_unpublished() {
+  local service="$1"
+  local port="$2"
+  local label="$3"
+  shift 3
+  local -a profile_flags=("$@")
+  local container_id
+  local published
+
+  container_id="$(compose "${profile_flags[@]}" ps -q "$service")"
+  if [[ -z "$container_id" ]]; then
+    echo "Expected ${label} container to exist" >&2
+    exit 1
+  fi
+
+  published="$(docker port "$container_id" "${port}/tcp" 2>/dev/null || true)"
+  if [[ -n "$published" ]]; then
+    echo "Expected ${label} port ${port} to stay unpublished, got ${published}" >&2
+    exit 1
+  fi
+}
+
 host_port_from_mapping() {
   local mapping="$1"
   local label="$2"
@@ -169,7 +191,7 @@ if [[ "$profile" == "browser-audit" ]]; then
 fi
 
 compose "${profile_args[@]}" up -d --build
-console_mapping="$(compose "${profile_args[@]}" port console 3000)"
+console_mapping="$(compose "${profile_args[@]}" port webperf 3000)"
 console_host_port="$(host_port_from_mapping "$console_mapping" "console")"
 console_url="http://127.0.0.1:${console_host_port}"
 
@@ -186,7 +208,7 @@ if ! curl -fsS "${console_url}/" >/dev/null 2>&1; then
   echo "--- docker ps ---" >&2
   docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' >&2 2>&1 || true
   echo "--- console container logs ---" >&2
-  docker logs --tail 20 "$(compose "${profile_args[@]}" ps -q console 2>/dev/null)" >&2 2>&1 || true
+  docker logs --tail 20 "$(compose "${profile_args[@]}" ps -q webperf 2>/dev/null)" >&2 2>&1 || true
   exit 1
 fi
 
@@ -195,7 +217,7 @@ if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:*
   exit 1
 fi
 
-assert_service_unpublished api "API" "${profile_args[@]}"
+assert_service_port_unpublished webperf 8788 "API" "${profile_args[@]}"
 
 if [[ "$profile" == "browser-audit" ]]; then
   assert_service_unpublished browser-audit-lighthouse "Browser Audit runner" "${profile_args[@]}"
@@ -298,7 +320,7 @@ if [[ "$profile" == "browser-audit" ]]; then
     ' "$audit_detail" >&2 || true
     echo "Recent Browser Audit service logs follow" >&2
     compose "${profile_args[@]}" logs --no-color --tail 120 \
-      browser-audit-lighthouse executor api >&2 || true
+      browser-audit-lighthouse webperf >&2 || true
   fi
 
   bun -e '

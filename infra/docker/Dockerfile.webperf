@@ -1,7 +1,7 @@
 # Phase 2 of issue #14: single multi-role Bun image for the self-host product.
-# This Dockerfile ships console, api, executor, and scheduler in one image.
-# The role dispatcher (tooling/scripts/webperf-role.ts) selects which app to
-# run based on the WEBPERF_ROLE environment variable.
+# This Dockerfile ships console, API, executor, and scheduler in one image.
+# The default standalone role supervises console, API, and executor in one
+# container; split roles remain available for development and maintenance.
 #
 # Build context: repository root (same as the four legacy Dockerfiles).
 
@@ -51,16 +51,30 @@ COPY packages/domain-core/package.json packages/domain-core/package.json
 COPY packages/report-core/package.json packages/report-core/package.json
 COPY packages/ui/package.json packages/ui/package.json
 
-RUN bun install --frozen-lockfile --no-save
+# Wait for the build stage before starting a second Bun install. Running the
+# two package extractions concurrently has caused intermittent native-package
+# tarball failures under BuildKit.
+COPY --from=build /app/apps/console/build/index.js /tmp/webperf-console-build-ready
+
+RUN test -s /tmp/webperf-console-build-ready \
+  && bun install --frozen-lockfile --production --no-save \
+  --filter=webperf-api \
+  --filter=webperf-console \
+  --filter=webperf-scheduler \
+  --filter=webperf-executor \
+  && rm /tmp/webperf-console-build-ready
 
 # Copy source and the console build output from the build stage.
-COPY --from=build /app/apps ./apps
-COPY --from=build /app/packages ./packages
-COPY --from=build /app/tooling ./tooling
-COPY --from=build /app/infra ./infra
+COPY --chown=bun:bun --from=build /app/apps/api ./apps/api
+COPY --chown=bun:bun --from=build /app/apps/console ./apps/console
+COPY --chown=bun:bun --from=build /app/apps/scheduler ./apps/scheduler
+COPY --chown=bun:bun --from=build /app/apps/executor ./apps/executor
+COPY --chown=bun:bun --from=build /app/packages ./packages
+COPY --chown=bun:bun --from=build /app/tooling ./tooling
+COPY --chown=bun:bun --from=build /app/infra ./infra
 
 # /data is the persistence volume mount point for the API role.
-RUN mkdir -p /data && chown -R bun:bun /app /data
+RUN mkdir -p /data && chown bun:bun /data
 
 USER bun
 

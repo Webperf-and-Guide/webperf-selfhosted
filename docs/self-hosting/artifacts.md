@@ -12,7 +12,7 @@ before every write and again when reading persisted rows.
 - `SELFHOST_ARTIFACTS_PATH` defaults to `./data/artifacts`; Compose uses
   `/data/artifacts` in the same private `webperf-data` volume as SQLite.
 - `SELFHOST_ARTIFACT_UPLOAD_BASE_URL` is the credential-free API origin that
-  the runner can reach. Compose uses `http://api:8788`.
+  the runner can reach. Compose uses `http://webperf:8788`.
 - `SELFHOST_MAX_ARTIFACT_BYTES` defaults to `25000000` per file and is capped
   at `250000000`.
 - `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS` defaults to `900` and is capped at one
@@ -52,7 +52,7 @@ creation, no-replace publication, reads, and cleanup all stay relative to the
 pinned descriptor, and the store rejects a path whose directory identity
 changes during the operation. This local backend supports Linux and macOS,
 including glibc- and musl-based Linux images. Compose mounts the
-`webperf-data` volume only into the API service; executors and Browser Audit
+`webperf-data` volume only into the supervised `webperf` service; Browser Audit
 runtimes do not receive filesystem access to it. At the root, reconciliation
 owns only names that match the generated artifact-ID namespace, so filesystem
 or deployment entries such as `lost+found` and `.gitkeep` are preserved. It

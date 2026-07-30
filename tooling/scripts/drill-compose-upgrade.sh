@@ -206,11 +206,12 @@ chmod 600 "$legacy_env" "$current_env"
 
 wait_for_api_debug() {
   local runner="$1"
+  local runtime_service="$2"
   local mapping
   local port
   local base_url
 
-  "$runner" --profile debug up -d api api-debug
+  "$runner" --profile debug up -d "$runtime_service" api-debug
   mapping="$("$runner" --profile debug port api-debug 8789)"
   port="${mapping##*:}"
   if [[ ! "$port" =~ ^[0-9]+$ ]]; then
@@ -230,7 +231,7 @@ wait_for_api_debug() {
   exit 1
 }
 
-legacy_base_url="$(wait_for_api_debug legacy)"
+legacy_base_url="$(wait_for_api_debug legacy api)"
 WEBPERF_UPGRADE_ADMIN_TOKEN="$admin_token" \
   bun "$root_dir/tooling/scripts/compose-upgrade-fixture.ts" \
     seed-legacy "$legacy_base_url" "$manifest_path"
@@ -250,16 +251,14 @@ if (( legacy_down_status != 0 )); then
 fi
 
 if [[ "$use_current_dev_override" == 'true' ]]; then
-  # Both services use the same unified webperf image. Building it once avoids
-  # concurrent writers exporting the same development tag.
-  current --profile debug build api
+  current --profile debug build webperf
 fi
-current_base_url="$(wait_for_api_debug current)"
+current_base_url="$(wait_for_api_debug current webperf)"
 
-current run --rm --no-deps --entrypoint sh api -c \
+current run --rm --no-deps --entrypoint sh webperf -c \
   'set -- /data/webperf.sqlite.backup-*; test -f "$1"'
 doctor_output_path="$temp_root/doctor-output.log"
-current run --rm --no-deps --entrypoint bun api \
+current run --rm --no-deps --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite > "$doctor_output_path"
 bun -e '

@@ -48,11 +48,11 @@ bun run capture:console:baselines
 
 ## What You Get
 
-- `console`: SvelteKit UI
-- `api`: Bun-based API service with SQLite persistence and embedded scheduling
-- `executor`: Bun worker for durable network, webhook, and Browser Audit execution
-- `probe`: Rust measurement runtime on the internal Compose network
-- `browser-audit-lighthouse`: optional Bun browser-audit runtime when you enable the `browser-audit` profile
+- `webperf`: one supervised container running the SvelteKit console, Bun API,
+  embedded scheduler, and durable executor;
+- `probe`: the Rust measurement trust boundary on the internal Compose network;
+- `browser-audit-lighthouse`: an optional third container when you enable the
+  `browser-audit` profile.
 
 `compose.yml` consumes versioned GHCR images. Repository contributors can add
 `-f infra/docker-compose/compose.dev.yml --build` to build the same services
@@ -60,7 +60,6 @@ from the current checkout.
 
 ## Useful Env Vars
 
-- `CONTROL_BASE_URL`: where the console proxies API requests
 - `SELFHOST_ADMIN_TOKEN`: server-only console and operator API token
 - `SELFHOST_INTERNAL_SECRET`: scheduler/executor credential and encrypted-payload key source
 - `PROBE_SHARED_SECRET`: shared secret used between the executor and probe; replace the example value before you boot the stack
@@ -69,8 +68,8 @@ from the current checkout.
 - `BROWSER_AUDIT_ALLOW_NO_SANDBOX`: explicit opt-in for local runtimes that cannot keep Chrome sandboxing enabled
 - `SELFHOST_REGION_ID`: stable runtime location identifier (default `local`)
 - `SELFHOST_PROBE_BASE_URL`: probe origin the executor calls
-- `SELFHOST_DATABASE_PATH`: SQLite file path inside the API container
-- `SELFHOST_ARTIFACTS_PATH`: Browser Audit artifact root inside the API container
+- `SELFHOST_DATABASE_PATH`: SQLite file path inside the `webperf` container
+- `SELFHOST_ARTIFACTS_PATH`: Browser Audit artifact root inside the `webperf` container
 - `SELFHOST_ARTIFACT_UPLOAD_BASE_URL`: internal API origin reachable by the runner
 - `SELFHOST_MAX_ARTIFACT_BYTES`: per-file upload limit
 - `SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS`: lifetime of scoped runner upload grants
@@ -79,10 +78,10 @@ from the current checkout.
 - `SELFHOST_SCHEDULER_API_BASE_URL`: base URL the scheduler polls
 - `SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS`: scheduler polling interval
 
-Only the console is published, and it binds to `127.0.0.1`. The API, probe,
-scheduler, executor, and optional Browser Audit runner have no host ports. Use
-the loopback-only `debug` profile when direct API or runner access is necessary;
-do not add a permanent public mapping.
+Only the console port is published, and it binds to `127.0.0.1`. The API port,
+probe, optional external scheduler, and optional Browser Audit runner have no
+host ports. Use the loopback-only `debug` profile when direct API or runner
+access is necessary; do not add a permanent public mapping.
 
 See [SQLite operations](../self-hosting/database-operations.md) before an
 upgrade or restore. It includes commands that operate directly on the Compose

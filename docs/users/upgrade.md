@@ -74,39 +74,32 @@ manual behavior cannot silently collapse from several regions to one. Legacy
 Region Set rows remain encrypted in SQLite for recovery compatibility, but
 they are not exposed as a current operator workflow.
 
-### Phase 2+3 of issue #14: migrate to the three-image runtime set
+### Migrate to the two-container default runtime
 
-Phase 2+3 consolidated the four Bun runtime images (`webperf-console`,
-`webperf-api`, `webperf-scheduler`, `webperf-executor`) into a single
-multi-role `webperf` image. The active role is selected at container start by
-the `WEBPERF_ROLE` environment variable (`console`, `api`, `scheduler`, or
-`executor`) through the `tooling/scripts/webperf-role.ts` dispatcher, so all
-four services now share one image. The scheduler also defaults to embedded
-mode inside the API process (`SELFHOST_SCHEDULER_MODE=embedded`); external mode
-remains available for operators who want to keep the dispatch loop in its own
-container.
+The four Bun runtime images (`webperf-console`, `webperf-api`,
+`webperf-scheduler`, `webperf-executor`) were first consolidated into one
+multi-role `webperf` image. The default release topology now goes further:
+`WEBPERF_ROLE=standalone` supervises console, API, embedded scheduler, and
+executor in one container. `webperf-probe` stays separate, so the normal
+installation has two containers. The optional Lighthouse Browser Audit runner
+is a third profile container.
 
 **Before starting the upgraded stack**, replace any
-`webperf-console`/`webperf-api`/`webperf-scheduler`/`webperf-executor` image
-references in your Compose file or release directory with the single `webperf`
-image, and set `WEBPERF_ROLE` on each of those services. The release bundle's
-`compose.yml` already reflects this; operators maintaining a custom Compose
-file should mirror the same mapping:
+`webperf-console`/`webperf-api`/`webperf-scheduler`/`webperf-executor` services
+in your Compose file or release directory with the single `webperf` service.
+The release bundle's `compose.yml` already reflects this; operators maintaining
+a custom Compose file should prefer:
 
 ```dotenv
-# console service
-WEBPERF_ROLE=console
-# api service
-WEBPERF_ROLE=api
-# scheduler service (only needed if you keep SELFHOST_SCHEDULER_MODE=external)
-WEBPERF_ROLE=scheduler
-# executor service
-WEBPERF_ROLE=executor
+# webperf service
+WEBPERF_ROLE=standalone
 ```
 
 If you previously relied on a standalone scheduler container, either remove it
-and accept the default embedded mode, or keep it and set
-`SELFHOST_SCHEDULER_MODE=external` on the API service. The probe
+and accept the default embedded mode, or retain the optional split scheduler
+role and set `SELFHOST_SCHEDULER_MODE=external` on `webperf`. Split console,
+API, scheduler, and executor roles remain available for custom development and
+maintenance topologies, but they are not the default release layout. The probe
 (`webperf-probe`) and optional Lighthouse runner
 (`webperf-browser-audit-lighthouse`) images are unchanged.
 
@@ -125,16 +118,16 @@ add `-v` to any stop or down command.
 
 ## 3. Migrate and diagnose
 
-Run migrations in a one-off API container before starting concurrent writers:
+Run migrations in a one-off `webperf` container before starting concurrent writers:
 
 ```sh
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
-  --entrypoint bun api \
+  --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts migrate \
   --database /data/webperf.sqlite --backup
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
-  --entrypoint bun api \
+  --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite
 ```

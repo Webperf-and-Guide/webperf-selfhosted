@@ -1,20 +1,23 @@
+export {};
+
 /**
  * Phase 2 of issue #14: single-image role dispatcher.
  *
  * One `webperf` image ships every Bun app. This script reads `WEBPERF_ROLE`
  * (or `argv[2]`) and execs into the matching entrypoint, so the same image
- * runs as console, api, executor, scheduler, or a one-off db command without
- * a separate image per role.
+ * runs as the complete standalone control surface, one split service role, or
+ * a one-off db command without a separate image per role.
  *
  * Usage in Compose:
  *   environment:
- *     WEBPERF_ROLE: api
+ *     WEBPERF_ROLE: standalone
  *
  * Or as a command override:
  *   command: ["bun", "run", "tooling/scripts/webperf-role.ts", "api"]
  */
 
 const ROLE_ENTRYPOINTS: Record<string, string[]> = {
+  standalone: ['bun', './tooling/scripts/webperf-standalone.ts'],
   console: ['bun', './apps/console/build/index.js'],
   api: ['bun', './apps/api/src/index.ts'],
   executor: ['bun', './apps/executor/src/index.ts'],
@@ -82,7 +85,18 @@ const child = Bun.spawn(finalArgv, {
 
 // Forward signals to the child so container stop works correctly.
 const forwardSignal = (signal: NodeJS.Signals) => {
-  child.kill(signal as number);
+  try {
+    process.kill(child.pid, signal);
+  } catch (error) {
+    if (
+      error instanceof Error
+      && 'code' in error
+      && error.code === 'ESRCH'
+    ) {
+      return;
+    }
+    throw error;
+  }
 };
 
 process.once('SIGINT', forwardSignal);

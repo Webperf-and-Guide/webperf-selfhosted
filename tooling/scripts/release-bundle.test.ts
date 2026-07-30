@@ -321,9 +321,9 @@ npm/@webperf/contracts: patch
     expect(compose).not.toContain('WEBPERF_VERSION');
     expect(regionalRuntimeCompose).not.toContain('WEBPERF_VERSION');
     expect(compose).toContain(`WEBPERF_RUNTIME_VERSION: "${version}"`);
-    // 5 services using webperf + probe + browser-audit + 2 debug = 8 image lines
-    // (console/api/scheduler/executor share one webperf digest)
-    expect(validateReleaseComposeImages(compose)).toHaveLength(8);
+    // webperf + optional scheduler + probe + browser-audit + 2 debug
+    // services produce six digest-pinned image references.
+    expect(validateReleaseComposeImages(compose)).toHaveLength(6);
     expect(validateReleaseComposeImages(regionalRuntimeCompose)).toHaveLength(3);
     for (const definition of releaseImages) {
       expect(compose).toContain(`${definition.image}@sha256:`);

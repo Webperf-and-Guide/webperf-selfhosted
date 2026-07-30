@@ -200,16 +200,16 @@ WEBPERF_RECOVERY_ADMIN_TOKEN="$admin_token" \
 
 # Freeze every writer before copying SQLite and artifact bytes.
 compose "${recovery_profiles[@]}" stop
-compose run --rm --no-deps --entrypoint bun api \
+compose run --rm --no-deps --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
   --output "$backup_inside_volume"
-compose cp "api:${backup_inside_volume}" "$backup_database_path"
-compose cp "api:/data/artifacts/." "$backup_artifacts_path/"
+compose cp "webperf:${backup_inside_volume}" "$backup_database_path"
+compose cp "webperf:/data/artifacts/." "$backup_artifacts_path/"
 cp "$temp_env" "$backup_dir/webperf.env"
 chmod 600 "$backup_database_path" "$backup_dir/webperf.env"
 openssl dgst -sha256 -r "$backup_database_path" > "$backup_dir/webperf.sqlite.sha256"
-compose run --rm --no-deps --entrypoint rm api -f "$backup_inside_volume"
+compose run --rm --no-deps --entrypoint rm webperf -f "$backup_inside_volume"
 
 # This is an intentionally destructive step against a uniquely named,
 # process-owned test project. Production documentation continues to prohibit
@@ -239,22 +239,22 @@ fi
 # Recreate an empty named volume, restore both halves of the recovery point as
 # UID/GID 1000, then run the same guarded restore/migrate/doctor commands that
 # operators use from the release bundle.
-compose run -T --rm --no-deps --entrypoint sh api \
+compose run -T --rm --no-deps --entrypoint sh webperf \
   -c 'umask 077; cat > /data/restore.sqlite' < "$backup_database_path"
 tar -C "$backup_artifacts_path" -cf - . \
-  | compose run -T --rm --no-deps --entrypoint sh api \
+  | compose run -T --rm --no-deps --entrypoint sh webperf \
     -c 'set -eu; umask 077; mkdir -p /data/artifacts; tar -C /data/artifacts -xf -'
-compose run --rm --no-deps --entrypoint bun api \
+compose run --rm --no-deps --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts restore \
   /data/restore.sqlite \
   --no-backup \
   --database /data/webperf.sqlite
-compose run --rm --no-deps --entrypoint bun api \
+compose run --rm --no-deps --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts migrate \
   --database /data/webperf.sqlite \
   --backup
 doctor_output_path="$temp_root/doctor-output.log"
-compose run --rm --no-deps --entrypoint bun api \
+compose run --rm --no-deps --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite > "$doctor_output_path"
 bun -e '

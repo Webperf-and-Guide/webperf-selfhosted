@@ -29,13 +29,13 @@ execution jobs; the executor claims and processes those jobs.
 ## Observe the scheduler
 
 ```sh
-docker compose --env-file .env -f compose.yml logs --since=30m scheduler
-docker compose --env-file .env -f compose.yml logs --since=30m executor
+docker compose --env-file .env -f compose.yml logs --since=30m webperf
 ```
 
-Successful scheduler logs report the dispatch time, triggered Check count, and
-created job count without logging credentials or response bodies. In the
-console, verify `lastRunAt`, `nextRunAt`, and the resulting scheduled Run.
+The supervised container combines scheduler and executor logs. Successful
+scheduler records report the dispatch time, triggered Check count, and created
+job count without logging credentials or response bodies. In the console,
+verify `lastRunAt`, `nextRunAt`, and the resulting scheduled Run.
 
 ## External dispatch
 

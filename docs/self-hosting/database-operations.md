@@ -86,36 +86,36 @@ then `selfhost:doctor`, before restarting the stack.
 
 ## Docker Compose
 
-Online backup and diagnostics can run inside the API container so they see the
+Online backup and diagnostics can run inside `webperf` so they see the
 named `/data` volume:
 
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
   -f infra/docker-compose/compose.yml \
-  exec api bun /app/tooling/scripts/selfhost-database.ts backup \
+  exec webperf bun /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite --output /data/webperf-backup.sqlite
 
 docker compose \
   --env-file infra/docker-compose/.env \
   -f infra/docker-compose/compose.yml \
-  exec api bun /app/tooling/scripts/selfhost-database.ts doctor \
+  exec webperf bun /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite
 ```
 
-For restore, stop the API, scheduler, and executor first and use a one-off API
-container attached to the same volume:
+For restore, stop `webperf` first and use a one-off `webperf` container
+attached to the same volume:
 
 ```sh
 docker compose \
   --env-file infra/docker-compose/.env \
   -f infra/docker-compose/compose.yml \
-  stop scheduler executor api
+  stop webperf
 
 docker compose \
   --env-file infra/docker-compose/.env \
   -f infra/docker-compose/compose.yml \
-  run --rm --no-deps --entrypoint bun api \
+  run --rm --no-deps --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts restore \
   /data/webperf-backup.sqlite --database /data/webperf.sqlite
 ```

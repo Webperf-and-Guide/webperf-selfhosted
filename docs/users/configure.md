@@ -31,13 +31,15 @@ key early can make existing rows unreadable.
 - `CONSOLE_ORIGIN` is the browser-visible origin. Set the final HTTPS origin
   when using a reverse proxy.
 - `CONSOLE_PUBLIC_PORT` changes the loopback host port.
-- `CONTROL_BASE_URL=http://api:8788` is the internal console-to-API origin.
-- `SELFHOST_SCHEDULER_API_BASE_URL` and
-  `SELFHOST_EXECUTOR_API_BASE_URL` should remain the internal API origin.
+- The default `standalone` supervisor pins console and executor API calls to
+  loopback inside the `webperf` container. Operators do not configure those
+  internal origins.
+- `SELFHOST_SCHEDULER_API_BASE_URL=http://webperf:8788` is only used by the
+  optional `external-scheduler` profile.
 - Non-loopback plain HTTP for the executor API requires the explicit
   `SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP=true` trusted-network opt-in; use
   HTTPS for remote API origins.
-- `SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://api:8788` is the credential-free
+- `SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://webperf:8788` is the credential-free
   origin the optional runner uses for scoped artifact uploads.
 - Webhook targets require HTTPS. Set
   `SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP=true` only for a legacy public

@@ -37,8 +37,7 @@ too short, or still a placeholder. Never solve it by adding a fallback value.
 
 ## Runtime location is unavailable or a Run stalls
 
-- Confirm `SELFHOST_REGION_ID` on the API and executor matches `REGION_ID` on
-  the probe.
+- Confirm `SELFHOST_REGION_ID` on `webperf` matches `REGION_ID` on the probe.
 - Confirm the executor can reach `SELFHOST_PROBE_BASE_URL` and that the probe
   uses the same `PROBE_SHARED_SECRET`.
 - Remote HTTP origins are rejected unless explicitly trusted; prefer HTTPS.

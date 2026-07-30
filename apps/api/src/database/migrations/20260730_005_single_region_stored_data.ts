@@ -6,7 +6,6 @@ const migrationBatchSize = 100;
 
 type PersistedPayloadRow = {
   rowid: number;
-  id?: string;
   payload_json: string;
 };
 
@@ -65,38 +64,17 @@ const rewriteLegacyJob = (value: unknown) => {
   };
 };
 
-const readLegacyRegionPacks = (
-  rows: PersistedPayloadRow[],
-  parse: (payload: string) => unknown
-) => {
-  const packs = new Map<string, string[]>();
-
-  for (const row of rows) {
-    const value = parse(row.payload_json);
-    if (!isRecord(value) || typeof value.id !== 'string') {
-      continue;
-    }
-
-    const regions = toStringArray(value.regions);
-    if (regions && regions.length > 0) {
-      packs.set(value.id, regions);
-    }
-  }
-
-  return packs;
-};
-
 const rewriteLegacyCheck = (
   value: unknown,
   runtimeRegionId: string,
-  regionPacks: Map<string, string[]>
+  resolveRegionPack: (regionPackId: string) => string[]
 ) => {
   if (!isRecord(value) || typeof value.regionPackId !== 'string') {
     return value;
   }
 
   const sourceRegionPackId = value.regionPackId;
-  const sourceRegions = regionPacks.get(sourceRegionPackId) ?? [];
+  const sourceRegions = resolveRegionPack(sourceRegionPackId);
   const safeSingleton = sourceRegions.length === 1 && sourceRegions[0] === runtimeRegionId;
   const reason = resolveMigrationReason(sourceRegions, safeSingleton);
   const { regionPackId: _removed, ...rest } = value;
@@ -260,25 +238,41 @@ const hasLegacyChecksInBatches = ({
 const rewriteCheckRowsInBatches = ({
   database,
   runtimeRegionId,
-  regionPacks,
   parse,
   stringify
 }: {
   database: Parameters<SqliteMigration['up']>[0];
   runtimeRegionId: string;
-  regionPacks: Map<string, string[]>;
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
 }) => {
+  const readRegionPack = database.query<PersistedPayloadRow, [string]>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'region_pack' AND id = ?
+    LIMIT 1
+  `);
   const update = database.query<never, [string, number]>(
     'UPDATE saved_entities SET payload_json = ? WHERE rowid = ?'
   );
+  const resolveRegionPack = (regionPackId: string) => {
+    const row = readRegionPack.get(regionPackId);
+    if (!row) {
+      return [];
+    }
+    const value = parse(row.payload_json);
+    if (!isRecord(value)) {
+      return [];
+    }
+    return toStringArray(value.regions) ?? [];
+  };
+
   try {
     visitCheckRowsInBatches({
       database,
       parse,
       visit(row, value) {
-        const rewritten = rewriteLegacyCheck(value, runtimeRegionId, regionPacks);
+        const rewritten = rewriteLegacyCheck(value, runtimeRegionId, resolveRegionPack);
         if (rewritten !== value) {
           update.run(stringify(rewritten), row.rowid);
         }
@@ -286,6 +280,7 @@ const rewriteCheckRowsInBatches = ({
       }
     });
   } finally {
+    readRegionPack.finalize();
     update.finalize();
   }
 };
@@ -295,15 +290,6 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
   up(database, context) {
     const parse = (payload: string) => context.storageCrypto.parse(payload);
     const stringify = (value: unknown) => context.storageCrypto.stringify(value);
-    const regionPackRows = database
-      .query<PersistedPayloadRow, []>(`
-        SELECT rowid, id, payload_json
-        FROM saved_entities
-        WHERE kind = 'region_pack'
-        ORDER BY rowid
-      `)
-      .all();
-    const regionPacks = readLegacyRegionPacks(regionPackRows, parse);
 
     const runtimeRegionId = context.runtimeRegionId;
     if (!runtimeRegionId && hasLegacyChecksInBatches({ database, parse })) {
@@ -322,7 +308,6 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
       rewriteCheckRowsInBatches({
         database,
         runtimeRegionId,
-        regionPacks,
         parse,
         stringify
       });

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use sha2::Sha256;
 use std::{
@@ -15,6 +15,23 @@ type HmacSha256 = Hmac<Sha256>;
 
 const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_REGION_ID: &str = "local";
+pub const PROBE_PROTOCOL_VERSION: u32 = 1;
+pub const DEFAULT_MAX_INFLIGHT: usize = 64;
+pub const MAX_CONFIGURED_INFLIGHT: usize = 4_096;
+pub const PROBE_TRANSPORT_MAX_PAYLOAD_BYTES: usize = 2 * 1_024 * 1_024;
+pub const PROBE_REQUEST_TIMEOUT_MS: u64 = 8_000;
+pub const PROBE_MAX_REDIRECTS: u64 = 4;
+pub const PROBE_MEASUREMENT_TIMEOUT_MS: u64 = PROBE_REQUEST_TIMEOUT_MS * (PROBE_MAX_REDIRECTS + 1);
+const MAX_JOB_ID_BYTES: usize = 160;
+const MAX_TARGET_ID_BYTES: usize = 256;
+const MAX_REGION_ID_BYTES: usize = 64;
+const MAX_URL_CODE_UNITS: usize = 8_192;
+const MAX_REQUEST_HEADERS: usize = 20;
+const MAX_HEADER_NAME_BYTES: usize = 120;
+const MAX_HEADER_VALUE_BYTES: usize = 4_000;
+const MAX_BODY_CONTENT_TYPE_BYTES: usize = 120;
+const MAX_BODY_VALUE_CODE_UNITS: usize = 10_000;
+const MAX_RUNTIME_VERSION_CODE_UNITS: usize = 120;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
@@ -26,6 +43,18 @@ pub enum ConfigError {
         "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
     )]
     InvalidSharedSecretNext,
+    #[error("PROBE_MAX_INFLIGHT must be an integer between 1 and {max}")]
+    InvalidMaxInflight { max: usize },
+    #[error(
+        "REGION_ID must contain 1-64 lowercase ASCII letters, digits, or hyphens and start and end with a letter or digit"
+    )]
+    InvalidRegionId,
+    #[error(
+        "WEBPERF_PROBE_VERSION must contain between 1 and 120 UTF-16 code units when configured"
+    )]
+    InvalidRuntimeVersion,
+    #[error("WEBPERF_PROBE_IMAGE_DIGEST must be a lowercase sha256 digest when configured")]
+    InvalidImageDigest,
 }
 
 #[derive(Clone)]
@@ -34,6 +63,9 @@ pub struct Config {
     pub region_id: String,
     pub shared_secret: String,
     pub shared_secret_next: Option<String>,
+    pub max_inflight: usize,
+    pub runtime_version: Option<String>,
+    pub image_digest: Option<String>,
 }
 
 impl fmt::Debug for Config {
@@ -47,6 +79,9 @@ impl fmt::Debug for Config {
                 "shared_secret_next",
                 &self.shared_secret_next.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("max_inflight", &self.max_inflight)
+            .field("runtime_version", &self.runtime_version)
+            .field("image_digest", &self.image_digest)
             .finish()
     }
 }
@@ -63,6 +98,46 @@ impl Config {
             Ok(value) => parse_shared_secret_next(&value)?,
             Err(_) => None,
         };
+        let max_inflight = match env::var("PROBE_MAX_INFLIGHT") {
+            Ok(value) => value
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|value| (1..=MAX_CONFIGURED_INFLIGHT).contains(value))
+                .ok_or(ConfigError::InvalidMaxInflight {
+                    max: MAX_CONFIGURED_INFLIGHT,
+                })?,
+            Err(_) => DEFAULT_MAX_INFLIGHT,
+        };
+        let region_id = env::var("REGION_ID")
+            .unwrap_or_else(|_| DEFAULT_REGION_ID.to_string())
+            .trim()
+            .to_string();
+        if !is_runtime_region_id(&region_id) {
+            return Err(ConfigError::InvalidRegionId);
+        }
+        let runtime_version = match env::var("WEBPERF_PROBE_VERSION") {
+            Ok(value) if value.trim().is_empty() => None,
+            Ok(value) => {
+                let value = value.trim().to_string();
+                if !is_runtime_version_valid(&value) {
+                    return Err(ConfigError::InvalidRuntimeVersion);
+                }
+                Some(value)
+            }
+            Err(_) => None,
+        };
+        let image_digest = match env::var("WEBPERF_PROBE_IMAGE_DIGEST") {
+            Ok(value) if value.trim().is_empty() => None,
+            Ok(value) => {
+                let value = value.trim().to_string();
+                if !is_sha256_digest(&value) {
+                    return Err(ConfigError::InvalidImageDigest);
+                }
+                Some(value)
+            }
+            Err(_) => None,
+        };
 
         Ok(Self {
             listen_addr: env::var("PROBE_LISTEN_ADDR")
@@ -71,11 +146,40 @@ impl Config {
             // defaults to `local` instead of claiming a specific city. The
             // previous REGION_CODE/region_code naming was renamed to match
             // the runtime region id model used across the deployment.
-            region_id: env::var("REGION_ID").unwrap_or_else(|_| DEFAULT_REGION_ID.to_string()),
+            region_id,
             shared_secret,
             shared_secret_next,
+            max_inflight,
+            runtime_version,
+            image_digest,
         })
     }
+}
+
+fn is_sha256_digest(value: &str) -> bool {
+    const SHA256_PREFIX: &str = "sha256:";
+    const SHA256_HEX_LENGTH: usize = 64;
+
+    value.len() == SHA256_PREFIX.len() + SHA256_HEX_LENGTH
+        && value.strip_prefix(SHA256_PREFIX).is_some_and(|digest| {
+            digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        })
+}
+
+fn is_runtime_region_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=MAX_REGION_ID_BYTES).contains(&bytes.len())
+        && bytes
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && bytes
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
 }
 
 /// Parses the optional rotation key while preserving the Compose empty-string
@@ -169,8 +273,40 @@ pub fn utc_timestamp() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProbeMeasurementResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ProbeRuntimeProvenance>,
     pub measurement: ProbeMeasurement,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeRuntimeProvenance {
+    pub implementation: ProbeImplementation,
+    pub version: Option<String>,
+    pub image_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeLimits {
+    pub max_inflight: usize,
+    pub max_payload_bytes: usize,
+    pub measurement_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeCapabilities {
+    pub protocol_version: u32,
+    pub region: String,
+    pub provenance: ProbeRuntimeProvenance,
+    pub limits: ProbeLimits,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,7 +316,11 @@ pub struct MeasureRequest {
     pub target_id: String,
     pub region: String,
     pub url: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_request_config"
+    )]
     pub request: Option<RequestConfig>,
     pub timestamp: String,
     pub signature: String,
@@ -189,14 +329,100 @@ pub struct MeasureRequest {
 }
 
 impl MeasureRequest {
-    pub fn has_required_fields(&self) -> bool {
-        !self.job_id.is_empty()
-            && !self.target_id.is_empty()
-            && !self.region.is_empty()
-            && !self.url.is_empty()
+    pub fn is_contract_valid(&self) -> bool {
+        is_bounded_identifier(&self.job_id, MAX_JOB_ID_BYTES)
+            && is_bounded_identifier(&self.target_id, MAX_TARGET_ID_BYTES)
+            && is_runtime_region_id(&self.region)
+            && (1..=MAX_URL_CODE_UNITS).contains(&utf16_code_units(&self.url))
+            && Url::parse(&self.url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
             && !self.timestamp.is_empty()
             && !self.signature.is_empty()
+            && matches!(self.key_version.as_str(), "current" | "next")
+            && self
+                .request
+                .as_ref()
+                .is_none_or(is_request_config_contract_valid)
     }
+}
+
+fn deserialize_present_request_config<'de, D>(
+    deserializer: D,
+) -> Result<Option<RequestConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    RequestConfig::deserialize(deserializer).map(Some)
+}
+
+fn is_bounded_identifier(value: &str, maximum_chars: usize) -> bool {
+    let bytes = value.as_bytes();
+    (1..=maximum_chars).contains(&bytes.len())
+        && bytes
+            .first()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'.' | b'_' | b':' | b'-'))
+}
+
+fn is_request_config_contract_valid(request: &RequestConfig) -> bool {
+    let method_valid = matches!(
+        request.method.as_str(),
+        "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS"
+    );
+    let headers_valid = request.headers.len() <= MAX_REQUEST_HEADERS
+        && request.headers.iter().all(|header| {
+            (1..=MAX_HEADER_NAME_BYTES).contains(&header.name.len())
+                && header.name.bytes().all(is_http_token_byte)
+                && header.value.len() <= MAX_HEADER_VALUE_BYTES
+                && header.value.bytes().all(is_header_value_byte)
+        });
+    let body_valid = request.body.as_ref().is_none_or(|body| {
+        body.mode == "text"
+            && utf16_code_units(&body.value) <= MAX_BODY_VALUE_CODE_UNITS
+            && body.content_type.as_ref().is_none_or(|content_type| {
+                (1..=MAX_BODY_CONTENT_TYPE_BYTES).contains(&content_type.len())
+                    && content_type.bytes().all(is_header_value_byte)
+            })
+    });
+
+    method_valid
+        && headers_valid
+        && body_valid
+        && !(matches!(request.method.as_str(), "GET" | "HEAD") && request.body.is_some())
+}
+
+fn utf16_code_units(value: &str) -> usize {
+    value.encode_utf16().count()
+}
+
+fn is_runtime_version_valid(value: &str) -> bool {
+    (1..=MAX_RUNTIME_VERSION_CODE_UNITS).contains(&utf16_code_units(value))
+}
+
+fn is_http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+fn is_header_value_byte(byte: u8) -> bool {
+    byte == b'\t' || (b' '..=b'~').contains(&byte)
 }
 
 fn default_key_version() -> String {
@@ -356,11 +582,10 @@ pub fn validate_target_url(url: &Url) -> Result<(), TargetValidationError> {
         return Err(TargetValidationError::EmbeddedCredentials);
     }
 
-    if let Some(port) = url.port()
-        && port != 80
-        && port != 443
-    {
-        return Err(TargetValidationError::InvalidPort);
+    if let Some(port) = url.port() {
+        if port != 80 && port != 443 {
+            return Err(TargetValidationError::InvalidPort);
+        }
     }
 
     let hostname = url
@@ -376,10 +601,10 @@ pub fn validate_target_url(url: &Url) -> Result<(), TargetValidationError> {
         return Err(TargetValidationError::PrivateHostname);
     }
 
-    if let Ok(ip) = hostname.parse::<IpAddr>()
-        && is_private_ip(ip)
-    {
-        return Err(TargetValidationError::PrivateIpLiteral);
+    if let Ok(ip) = hostname.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(TargetValidationError::PrivateIpLiteral);
+        }
     }
 
     Ok(())
@@ -484,12 +709,17 @@ mod tests {
             region_id: DEFAULT_REGION_ID.to_string(),
             shared_secret: "current-probe-secret".to_string(),
             shared_secret_next: Some("next-probe-secret".to_string()),
+            max_inflight: DEFAULT_MAX_INFLIGHT,
+            runtime_version: Some("0.3.0".to_string()),
+            image_digest: Some(format!("sha256:{}", "a".repeat(64))),
         };
 
         let debug = format!("{config:?}");
         assert!(!debug.contains("current-probe-secret"));
         assert!(!debug.contains("next-probe-secret"));
         assert_eq!(debug.matches("[REDACTED]").count(), 2);
+        assert!(debug.contains("max_inflight"));
+        assert!(debug.contains("0.3.0"));
     }
 
     #[test]
@@ -515,5 +745,100 @@ mod tests {
             ConfigError::InvalidSharedSecretNext.to_string(),
             "PROBE_SHARED_SECRET_NEXT must contain at least 16 bytes after trimming surrounding whitespace when configured"
         );
+    }
+
+    #[test]
+    fn validates_sha256_image_digests() {
+        assert!(is_sha256_digest(&format!("sha256:{}", "0".repeat(64))));
+        assert!(is_sha256_digest(&format!(
+            "sha256:{}",
+            "abcdef".repeat(10) + "abcd"
+        )));
+        assert!(!is_sha256_digest(&format!("sha256:{}", "A".repeat(64))));
+        assert!(!is_sha256_digest("sha256:abc"));
+        assert!(!is_sha256_digest(&format!("sha512:{}", "0".repeat(64))));
+    }
+
+    #[test]
+    fn validates_runtime_versions_with_public_contract_semantics() {
+        assert!(is_runtime_version_valid(
+            &"a".repeat(MAX_RUNTIME_VERSION_CODE_UNITS)
+        ));
+        assert!(is_runtime_version_valid(
+            &"😀".repeat(MAX_RUNTIME_VERSION_CODE_UNITS / 2)
+        ));
+        assert!(!is_runtime_version_valid(""));
+        assert!(!is_runtime_version_valid(
+            &"😀".repeat(MAX_RUNTIME_VERSION_CODE_UNITS / 2 + 1)
+        ));
+    }
+
+    #[test]
+    fn validates_runtime_region_ids() {
+        assert!(is_runtime_region_id("local"));
+        assert!(is_runtime_region_id("kr-seoul-office"));
+        assert!(is_runtime_region_id(&"a".repeat(64)));
+        assert!(!is_runtime_region_id(""));
+        assert!(!is_runtime_region_id("Tokyo"));
+        assert!(!is_runtime_region_id(" leading-space"));
+        assert!(!is_runtime_region_id("trailing-"));
+        assert!(!is_runtime_region_id(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn validates_measure_request_contract_bounds() {
+        let mut request = sample_request();
+        request.signature = "0".repeat(64);
+        assert!(request.is_contract_valid());
+
+        request.job_id = format!("job_{}", "a".repeat(MAX_JOB_ID_BYTES));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.target_id = format!("target_{}", "a".repeat(MAX_TARGET_ID_BYTES));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.url = format!("https://example.com/{}", "a".repeat(MAX_URL_CODE_UNITS));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.url = format!(
+            "https://example.com/{}",
+            "😀".repeat(MAX_URL_CODE_UNITS / 2)
+        );
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.url = "file:///etc/passwd".to_string();
+        assert!(!request.is_contract_valid());
+
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.request = Some(RequestConfig {
+            method: "POST".to_string(),
+            headers: vec![],
+            body: Some(RequestBody {
+                mode: "text".to_string(),
+                content_type: Some("text/plain".to_string()),
+                value: "😀".repeat(MAX_BODY_VALUE_CODE_UNITS / 2 + 1),
+            }),
+        });
+        assert!(!request.is_contract_valid());
+    }
+
+    #[test]
+    fn omits_absent_request_config_and_rejects_explicit_null() {
+        let serialized =
+            serde_json::to_value(sample_request()).expect("measure request should serialize");
+        assert!(serialized.get("request").is_none());
+
+        let mut explicit_null = serialized;
+        explicit_null
+            .as_object_mut()
+            .expect("measure request should serialize as an object")
+            .insert("request".to_string(), serde_json::Value::Null);
+
+        assert!(serde_json::from_value::<MeasureRequest>(explicit_null).is_err());
     }
 }

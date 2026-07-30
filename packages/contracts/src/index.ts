@@ -11,5 +11,3 @@ export * from './events';
 export * from './execution';
 export * from './execution-resources';
 export * from './runtime-metrics';
-export * from './regional-runtime';
-export * from './regional-runtime-contract';

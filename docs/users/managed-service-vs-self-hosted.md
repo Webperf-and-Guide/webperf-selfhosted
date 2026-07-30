@@ -1,9 +1,10 @@
-# Self-hosted vs WebPerf Cloud
+# WebPerf Self-hosted and WebPerf & Guide Managed
 
-`WebPerf` is the product brand. This repository and the managed service have a
+`WebPerf & Guide` is the product brand. This repository and the managed
+edition have a
 deliberate ownership boundary.
 
-| Capability | Self-hosted OSS | WebPerf Cloud |
+| Capability | WebPerf Self-hosted | WebPerf & Guide Managed |
 | --- | --- | --- |
 | Installation and upgrades | Operator-owned Compose release | Managed |
 | Organization model | One trusted organization | Hosted identities, teams, and workspaces |
@@ -22,30 +23,29 @@ artifact storage, public contracts, domain models, comparisons, deterministic
 analysis, exports, and vendor-neutral deployment examples.
 
 The managed product should consume versioned `@webperf/*` contracts and the
-digest-bearing runtime metadata from a specific self-host GitHub Release. It
-must not copy public schema source or infer production runtime identity from a
-mutable `main` tag.
+digest-bearing `webperf-probe` entry from a specific self-host GitHub Release.
+It must not copy public schema source or infer production probe identity from
+a mutable `main` tag.
 
 ## What stays out of this repository
 
 Multi-tenant authentication, billing, quotas, seats, managed fleet scaling,
 hosted retention, private anti-abuse logic, internal admin tools,
-provider-specific orchestration, and cloud collaboration features belong to
+provider-specific orchestration, and managed-service collaboration features belong to
 `webperf.and.guide`.
 
 The decision rule is simple: if a self-host operator can use a feature
 independently, it belongs here; if its value depends on managed hosting,
-automation, tenancy, or billing, it belongs in the cloud product.
+automation, tenancy, or billing, it belongs in the managed product.
 
-## Regional runtime handoff
+## Managed probe consumption
 
-A self-host deployment can serve as a **regional runtime** for the managed
-Cloud. In that role, the Cloud control plane submits signed, idempotent
-execution requests and the runtime returns results with provenance. The
-protocol is provider-neutral and defined in this repository — see
-[Regional runtime handoff](../architecture/regional-runtime-handoff.md).
-Cloud-only orchestration (global fan-out, cross-region aggregation, FCU
-metering, plan enforcement) stays in the managed product.
+WebPerf & Guide Managed runs the public, stateless
+`webperf-probe` image in its regional provider fleet. Global fan-out,
+deploy/undeploy lifecycle, queueing, aggregation, FCU metering, and plan
+enforcement are private managed-service concerns. The full self-hosted
+application is not a managed worker protocol; operators who want their own
+multi-region deployment can compose the probe contract independently.
 
-See the detailed [product boundary](../comparison/cloud-vs-selfhosted.md) and
+See the detailed [product boundary](../comparison/managed-service-vs-selfhosted.md) and
 [feature scope](../self-hosting/feature-scope.md).

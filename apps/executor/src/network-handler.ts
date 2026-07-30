@@ -4,13 +4,13 @@ import type {
   ExecutionJob,
   LatencyJobDetail,
   LatencyJobTarget,
-  ProbeMeasurementResponse,
-  RegionalExecutionProvenance
+  ProbeMeasurementResponse
 } from '@webperf/contracts';
 import { isIP } from 'node:net';
 import {
   jsonValueSchema,
   probeMeasurementResponseSchema,
+  probeMeasurementTimeoutMs,
   signedProbeMeasurementRequestSchema
 } from '@webperf/contracts';
 import { isLoopbackHostname } from '@webperf/config/selfhost-executor';
@@ -25,9 +25,9 @@ import { ExecutorApiError, type ExecutorApiClient } from './client';
 import { describeSafeError } from './diagnostics';
 import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
 import {
+  createPinnedHttpRequest,
   normalizeOutboundHostname,
   OutboundHttpPolicyError,
-  requestPinnedHttp,
   type OutboundAddressPolicy,
   type PinnedHttpRequest
 } from './outbound-http';
@@ -44,7 +44,28 @@ export type NetworkHandlerOptions = {
   allowInsecureProbeHttp?: boolean;
   requestImpl?: PinnedHttpRequest;
   logger?: { error(event: Record<string, unknown>): void };
-  regionalExecutionProvenance?: RegionalExecutionProvenance;
+};
+
+export const probeTransportResponseTimeoutMs = probeMeasurementTimeoutMs + 5_000;
+const maximumProbeRetryAfterSeconds = Math.ceil(probeMeasurementTimeoutMs / 1_000);
+const requestProbeHttp = createPinnedHttpRequest({
+  requestTimeoutMs: probeTransportResponseTimeoutMs
+});
+
+export const probeRetryDelayMs = (
+  retryAfter: string | null,
+  attemptCount: number,
+  random = Math.random
+) => {
+  const fallback = retryDelayMs(attemptCount, random);
+  const value = retryAfter?.trim() ?? '';
+  if (!/^[1-9]\d{0,2}$/.test(value)) {
+    return fallback;
+  }
+  const seconds = Number(value);
+  return seconds <= maximumProbeRetryAfterSeconds
+    ? seconds * 1_000
+    : fallback;
 };
 
 export const parseProbeBaseUrl = (
@@ -65,9 +86,8 @@ export const createNetworkExecutionHandler = ({
   probeSharedSecret,
   probeBaseUrl,
   allowInsecureProbeHttp = false,
-  requestImpl = requestPinnedHttp,
-  logger = defaultNetworkLogger,
-  regionalExecutionProvenance
+  requestImpl = requestProbeHttp,
+  logger = defaultNetworkLogger
 }: NetworkHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });
 
@@ -78,21 +98,6 @@ export const createNetworkExecutionHandler = ({
       false
     );
   }
-  if (
-    context.payload.expectedProvenance
-    && !sameRegionalExecutionProvenance(
-      context.payload.expectedProvenance,
-      regionalExecutionProvenance
-    )
-  ) {
-    throw new ExecutionFailure(
-      'regional_runtime_revision_changed',
-      'Regional execution cannot resume on a different runtime revision',
-      false
-    );
-  }
-
-  const deadline = createExecutionDeadlineSignal(context.payload.deadlineAt, signal);
   const jobs = context.jobs.map((job) => structuredClone(job));
   let run = context.run ? structuredClone(context.run) : null;
   const persist = async () => {
@@ -106,125 +111,55 @@ export const createNetworkExecutionHandler = ({
     });
   };
 
-  try {
-    for (const job of jobs) {
-      await processNetworkJob({
-        executionJob,
-        job,
-        persist,
-        probeSharedSecret,
-        probeBaseUrl,
-        allowInsecureProbeHttp,
-        requestImpl,
-        logger,
-        signal: deadline.signal
-      });
-    }
+  for (const job of jobs) {
+    await processNetworkJob({
+      executionJob,
+      job,
+      persist,
+      probeSharedSecret,
+      probeBaseUrl,
+      allowInsecureProbeHttp,
+      requestImpl,
+      logger,
+      signal
+    });
+  }
 
-    if (run && context.check) {
-      const comparison = context.comparisonMode
-        ? buildCheckProfileComparison({
-            currentRun: run,
-            currentJobs: jobs,
-            comparedRun: context.comparedRun,
-            comparedJobs: context.comparedJobs,
-            mode: context.comparisonMode
-          })
-        : null;
-      run = {
-        ...run,
-        evaluation: evaluateMonitorTargets({
-          monitorPolicy: context.check.monitorPolicy,
-          targets: jobs.flatMap((job) => job.targets),
-          regressedCount: comparison?.summary.regressed ?? 0
+  if (run && context.check) {
+    const comparison = context.comparisonMode
+      ? buildCheckProfileComparison({
+          currentRun: run,
+          currentJobs: jobs,
+          comparedRun: context.comparedRun,
+          comparedJobs: context.comparedJobs,
+          mode: context.comparisonMode
         })
-      };
-      await persist();
-
-      const followups = buildWebhookFollowups({
-        executionJob,
-        run,
-        check: context.check,
-        jobs,
-        comparisonSummary: comparison?.summary ?? null
-      });
-
-      if (followups.length > 0) {
-        await client.enqueueFollowups(executionJob.id, {
-          leaseOwner,
-          jobs: followups
-        });
-      }
-    }
-  } finally {
-    deadline.dispose();
-  }
-};
-
-const sameRegionalExecutionProvenance = (
-  expected: RegionalExecutionProvenance,
-  actual: RegionalExecutionProvenance | undefined
-) =>
-  actual !== undefined
-  && expected.regionId === actual.regionId
-  && expected.runnerType === actual.runnerType
-  && expected.runtime.version === actual.runtime.version
-  && expected.runtime.imageDigest === actual.runtime.imageDigest
-  && expected.runner.id === actual.runner.id
-  && expected.runner.implementation === actual.runner.implementation
-  && expected.runner.imageDigest === actual.runner.imageDigest;
-
-const createExecutionDeadlineSignal = (
-  deadlineAt: string | null,
-  parentSignal: AbortSignal
-) => {
-  if (!deadlineAt) {
-    return {
-      signal: parentSignal,
-      dispose: () => {}
+      : null;
+    run = {
+      ...run,
+      evaluation: evaluateMonitorTargets({
+        monitorPolicy: context.check.monitorPolicy,
+        targets: jobs.flatMap((job) => job.targets),
+        regressedCount: comparison?.summary.regressed ?? 0
+      })
     };
-  }
+    await persist();
 
-  const parsedDeadlineMs = Date.parse(deadlineAt);
-  if (Number.isNaN(parsedDeadlineMs)) {
-    throw new ExecutionFailure(
-      'regional_execution_invalid_deadline',
-      'Regional execution deadline is invalid',
-      false
-    );
-  }
+    const followups = buildWebhookFollowups({
+      executionJob,
+      run,
+      check: context.check,
+      jobs,
+      comparisonSummary: comparison?.summary ?? null
+    });
 
-  const controller = new AbortController();
-  const abortFromParent = () => controller.abort(parentSignal.reason);
-  if (parentSignal.aborted) {
-    abortFromParent();
-  } else {
-    parentSignal.addEventListener('abort', abortFromParent, { once: true });
-  }
-
-  const abortForDeadline = () => controller.abort(new ExecutionFailure(
-    'regional_execution_deadline_exceeded',
-    'Regional execution exceeded its accepted deadline',
-    false
-  ));
-  const remainingMs = parsedDeadlineMs - Date.now();
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  if (remainingMs <= 0) {
-    abortForDeadline();
-  } else {
-    timeout = setTimeout(abortForDeadline, remainingMs);
-    timeout.unref?.();
-  }
-
-  return {
-    signal: controller.signal,
-    dispose() {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-      parentSignal.removeEventListener('abort', abortFromParent);
+    if (followups.length > 0) {
+      await client.enqueueFollowups(executionJob.id, {
+        leaseOwner,
+        jobs: followups
+      });
     }
-  };
+  }
 };
 
 const processNetworkJob = async ({
@@ -309,7 +244,12 @@ const processNetworkJob = async ({
             'probe_temporarily_unavailable',
             'Network probe is temporarily unavailable',
             true,
-            retryDelayMs(executionJob.attemptCount)
+            response.status === 429
+              ? probeRetryDelayMs(
+                  response.headers.get('retry-after'),
+                  executionJob.attemptCount
+                )
+              : retryDelayMs(executionJob.attemptCount)
           );
         }
 
@@ -322,6 +262,23 @@ const processNetworkJob = async ({
 
       if (!parsed.success) {
         markTargetFailed(target, 'probe_invalid_payload', 'Network probe returned an invalid result');
+        await recomputeAndPersistJob(job, persist);
+        continue;
+      }
+
+      const expectedTargetId = `${job.id}:${target.region}`;
+      if (
+        (parsed.data.jobId !== undefined && parsed.data.jobId !== job.id)
+        || (
+          parsed.data.targetId !== undefined
+          && parsed.data.targetId !== expectedTargetId
+        )
+      ) {
+        markTargetFailed(
+          target,
+          'probe_correlation_mismatch',
+          'Network probe returned a result for a different request'
+        );
         await recomputeAndPersistJob(job, persist);
         continue;
       }

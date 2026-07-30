@@ -56,6 +56,23 @@ Use `bun run smoke:compose` and `bun run smoke:compose:browser-audit` when a
 change affects images, Compose, health behavior, networking, or optional audit
 execution.
 
+## TypeScript code graph
+
+The repository pins TypeScript 7, `ttsc`, and `@ttsc/graph` so contributors and
+coding agents can build the compiler-resolved runtime graph without downloading
+an unversioned launcher. The graph intentionally covers the TypeScript control
+plane and public core; Svelte components continue to use `svelte-check`.
+
+Verify the local native graph binary and inspect the dump with:
+
+```sh
+bun run graph:dump > /tmp/webperf-ttsc-graph.json
+```
+
+For an MCP client, start `ttsc-graph` from the repository root with
+`--tsconfig tsconfig.graph.json`. The MCP server keeps the graph resident, so a
+separate checked-in dump is not required.
+
 For every edited `.svelte` file, run the Svelte autofixer on that file and then
 the console checks:
 

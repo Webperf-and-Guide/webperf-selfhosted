@@ -1,11 +1,11 @@
-# Cloud Vs Self-Hosted
+# WebPerf & Guide Managed vs WebPerf Self-hosted
 
-`WebPerf` is the product brand.
+`WebPerf & Guide` is the product brand.
 
 The product boundary is:
 
 - `webperf-selfhosted`: self-hosted OSS/open-core product
-- `webperf.and.guide`: managed cloud product
+- `webperf.and.guide`: WebPerf & Guide Managed
 
 ## Self-Hosted Repo
 
@@ -35,7 +35,7 @@ It should include:
 It should not include:
 
 - billing, quotas, or usage metering
-- cloud-only orchestration and provider-managed runner fleets
+- managed-service orchestration and provider-managed runner fleets
 - managed queueing, retention, and fleet logic around browser-audit execution
 - tenant/workspace auth and SaaS permission models
 - hosted artifact retention policy
@@ -45,23 +45,25 @@ It should not include:
 
 When those guides are useful, publish them on `webperf.and.guide/posts` and keep the OSS docs linked but vendor-neutral.
 
-## Managed Cloud Repo
+## Managed Edition Repository
 
-`webperf.and.guide` is the managed product and business layer.
+`webperf.and.guide` is the WebPerf & Guide Managed product and business layer.
 
 It should include:
 
 - marketing, pricing, and SEO landing pages
 - login, teams, workspaces, and permission models
 - managed control-plane orchestration
-- hosted runner pools, queueing, and cloud workflows
+- hosted probe pools, queueing, and managed workflows
 - billing, quotas, and usage metering
 - managed integrations and deployment gates
 - customer notifications and retained hosted artifacts
 - future AI product layers
 - provider-specific deployment guides and affiliate-aware infrastructure content
 
-It should consume public-core artifacts from `webperf-selfhosted` instead of re-owning them.
+For regional network checks it should deploy the versioned, stateless
+`webperf-probe` image directly. It should consume other public-core artifacts
+from `webperf-selfhosted` instead of re-owning them.
 
 ## Source Of Truth Rule
 
@@ -83,4 +85,6 @@ That applies to:
 When a change is ambiguous, use this test:
 
 - if a self-host operator can use it independently, it belongs in `webperf-selfhosted`
-- if it only becomes valuable through managed hosting, cloud orchestration, billing, multi-tenancy, or SaaS automation, it belongs in `webperf.and.guide`
+- if it only becomes valuable through managed hosting, fleet orchestration,
+  billing, multi-tenancy, or SaaS automation, it belongs in
+  `webperf.and.guide`

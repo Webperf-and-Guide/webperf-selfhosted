@@ -1,21 +1,16 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export type ApiAuthSecrets = {
-  runtimeMode: 'full' | 'regional-runtime';
   adminToken?: string;
   adminTokenNext?: string;
   internalSecret: string;
   internalSecretNext?: string;
-  regionalRuntimeSecret?: string;
-  regionalRuntimeSecretNext?: string;
 };
 
 const publicGetPaths = new Set([
   '/health',
   '/v1/capabilities',
-  '/v1/regional-capabilities',
-  '/openapi/public.json',
-  '/openapi/regional-runtime.json'
+  '/openapi/public.json'
 ]);
 
 export const authorizeApiRequest = (request: Request, secrets: ApiAuthSecrets): Response | null => {
@@ -52,14 +47,6 @@ const resolveExpectedTokens = (
   if (isInternalPath(pathname)) {
     return [secrets.internalSecret, secrets.internalSecretNext];
   }
-  if (pathname === '/v1/runtime-metrics') {
-    return secrets.runtimeMode === 'regional-runtime'
-      ? [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext]
-      : [secrets.adminToken, secrets.adminTokenNext];
-  }
-  if (isRegionalExecutionPath(pathname)) {
-    return [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext];
-  }
   return [secrets.adminToken, secrets.adminTokenNext];
 };
 
@@ -67,10 +54,6 @@ const resolveExpectedTokens = (
 // route. Any new service-to-service endpoint must use /internal instead.
 const isInternalPath = (pathname: string) =>
   pathname === '/v1/scheduler/dispatch' || pathname.startsWith('/internal/');
-
-const isRegionalExecutionPath = (pathname: string) =>
-  pathname === '/v1/regional-executions'
-  || pathname.startsWith('/v1/regional-executions/');
 
 const matchesBearerToken = (
   authorization: string | null,

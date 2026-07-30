@@ -14,7 +14,6 @@ import {
   webhookAlertTargetSchema
 } from './public-api';
 import { browserAuditArtifactUploadConfigSchema } from './browser-audit';
-import { regionalExecutionProvenanceSchema } from './regional-runtime';
 
 export const networkProbeMaxJobsPerExecution = 20;
 export const executionFollowupMaxJobs = 20;
@@ -26,15 +25,7 @@ export const networkProbeExecutionPayloadSchema = z
       .min(1)
       .max(networkProbeMaxJobsPerExecution),
     checkId: z.string().min(1).max(160).nullable().default(null),
-    runId: z.string().min(1).max(160).nullable().default(null),
-    regionalExecutionId: z.string().min(1).max(160).nullable().default(null),
-    /** Optional managed handoff deadline. Normal self-host runs leave this null. */
-    deadlineAt: z.string().datetime().nullable().default(null),
-    /**
-     * Immutable runtime and runner identity accepted by the regional API.
-     * The executor refuses to resume this work after a deployment revision.
-     */
-    expectedProvenance: regionalExecutionProvenanceSchema.nullable().default(null)
+    runId: z.string().min(1).max(160).nullable().default(null)
   })
   .superRefine((payload, context) => {
     if (Boolean(payload.checkId) !== Boolean(payload.runId)) {
@@ -42,20 +33,6 @@ export const networkProbeExecutionPayloadSchema = z
         code: 'custom',
         message: 'checkId and runId must either both be present or both be null',
         path: ['runId']
-      });
-    }
-    if (payload.regionalExecutionId && (payload.checkId || payload.runId)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Regional execution payloads cannot reference a saved check run',
-        path: ['regionalExecutionId']
-      });
-    }
-    if (Boolean(payload.regionalExecutionId) !== Boolean(payload.expectedProvenance)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Regional execution id and expected provenance must be present together',
-        path: ['expectedProvenance']
       });
     }
   });

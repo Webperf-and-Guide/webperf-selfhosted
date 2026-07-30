@@ -96,6 +96,38 @@ const singleRegionEnvTargets = [
   'apps/api/test/http.test.ts',
   'apps/api/test/restart-recovery.test.ts'
 ];
+const retiredRegionalRuntimeTargets = [
+  'README.md',
+  'CONTRIBUTING.md',
+  'SECURITY.md',
+  '.github',
+  'apps/api/src/auth.ts',
+  'apps/api/src/index.ts',
+  'apps/executor/src',
+  'docs',
+  'infra/docker-compose',
+  'package.json',
+  'packages/config/src',
+  'packages/contracts/src',
+  'packages/domain-core/src',
+  'tooling/scripts/webperf-role.ts',
+  'tooling/scripts/webperf-standalone.ts',
+  'tooling/scripts/webperf-standalone-config.ts'
+];
+const retiredRegionalRuntimeSurface = [
+  {
+    pattern: /SELFHOST_RUNTIME_MODE/,
+    message: 'the self-hosted application has one standalone runtime mode'
+  },
+  {
+    pattern: /REGIONAL_RUNTIME_SHARED_SECRET/,
+    message: 'managed orchestration must authenticate directly to the stateless probe'
+  },
+  {
+    pattern: /WEBPERF_ROLE\s*(?::|=)\s*["']?regional-runtime\b/,
+    message: 'the unified image no longer exposes a regional-runtime role'
+  }
+];
 
 const collectFiles = (target: string): string[] => {
   const absoluteTarget = join(root, target);
@@ -137,6 +169,23 @@ const collectFiles = (target: string): string[] => {
 };
 
 const violations: string[] = [];
+const checkRegexSurface = (
+  surfaceTargets: string[],
+  rules: Array<{ pattern: RegExp; message: string }>
+) => {
+  for (const target of surfaceTargets) {
+    for (const filePath of collectFiles(target)) {
+      const rel = relative(root, filePath);
+      const content = readFileSync(filePath, 'utf8');
+
+      for (const rule of rules) {
+        if (rule.pattern.test(content)) {
+          violations.push(`${rel}: ${rule.message}`);
+        }
+      }
+    }
+  }
+};
 
 for (const target of targets) {
   for (const filePath of collectFiles(target)) {
@@ -151,31 +200,9 @@ for (const target of targets) {
   }
 }
 
-for (const target of singleRegionCopyTargets) {
-  for (const filePath of collectFiles(target)) {
-    const rel = relative(root, filePath);
-    const content = readFileSync(filePath, 'utf8');
-
-    for (const rule of retiredSingleRegionCopy) {
-      if (rule.pattern.test(content)) {
-        violations.push(`${rel}: ${rule.message}`);
-      }
-    }
-  }
-}
-
-for (const target of singleRegionEnvTargets) {
-  for (const filePath of collectFiles(target)) {
-    const rel = relative(root, filePath);
-    const content = readFileSync(filePath, 'utf8');
-
-    for (const rule of retiredSingleRegionEnv) {
-      if (rule.pattern.test(content)) {
-        violations.push(`${rel}: ${rule.message}`);
-      }
-    }
-  }
-}
+checkRegexSurface(singleRegionCopyTargets, retiredSingleRegionCopy);
+checkRegexSurface(singleRegionEnvTargets, retiredSingleRegionEnv);
+checkRegexSurface(retiredRegionalRuntimeTargets, retiredRegionalRuntimeSurface);
 
 if (violations.length > 0) {
   console.error('Retired topology check failed:\n');

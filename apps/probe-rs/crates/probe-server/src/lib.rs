@@ -3,14 +3,19 @@ use axum::{
     Json, Router,
     body::{Body, to_bytes},
     extract::State,
-    http::{Request, StatusCode},
+    http::{
+        Request, StatusCode,
+        header::{CONTENT_TYPE, RETRY_AFTER},
+    },
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use probe_client::measure_url;
 use probe_core::{
-    Config, MeasureRequest, ProbeImplementation, ProbeMeasurementResponse, timestamp_is_valid,
-    verify_request_signature,
+    Config, MAX_CONFIGURED_INFLIGHT, MeasureRequest, PROBE_MEASUREMENT_TIMEOUT_MS,
+    PROBE_PROTOCOL_VERSION, PROBE_TRANSPORT_MAX_PAYLOAD_BYTES, ProbeCapabilities,
+    ProbeImplementation, ProbeLimits, ProbeMeasurementResponse, ProbeRuntimeProvenance,
+    timestamp_is_valid, verify_request_signature,
 };
 use std::{
     io::{Read, Write},
@@ -18,29 +23,50 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::Semaphore};
 use tower_http::trace::TraceLayer;
-use tracing::{Level, info};
+use tracing::{Level, debug, info, warn};
 
-// Regional Runtime admission is bounded at 1,500,000 bytes. One signed probe
-// envelope contains a single admitted target plus small execution metadata,
-// so this stays above that boundary while retaining a hard allocation limit.
-const MAX_BODY_SIZE_BYTES: usize = 2 * 1024 * 1024;
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 const HEALTH_STATUS_PREFIX: &[u8] = b"HTTP/1.1 200";
 const HEALTH_STATUS_PREFIX_ALT: &[u8] = b"HTTP/1.0 200";
 const HEALTHCHECK_STATUS_PREFIX_BYTES: usize = HEALTH_STATUS_PREFIX.len();
+const REQUEST_BUFFER_BUDGET_BYTES: usize = 64 * 1_024 * 1_024;
+const MAX_REQUEST_BODY_SLOTS: usize =
+    REQUEST_BUFFER_BUDGET_BYTES / PROBE_TRANSPORT_MAX_PAYLOAD_BYTES;
+const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(8);
 const _: () = assert!(HEALTH_STATUS_PREFIX.len() == HEALTH_STATUS_PREFIX_ALT.len());
+const _: () = assert!(MAX_REQUEST_BODY_SLOTS > 0);
 
 #[derive(Clone)]
 pub struct AppState {
     config: Arc<Config>,
+    request_body_slots: Arc<Semaphore>,
+    measurement_slots: Arc<Semaphore>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
+        assert!(
+            (1..=MAX_CONFIGURED_INFLIGHT).contains(&config.max_inflight),
+            "max_inflight must be within the public configuration bounds"
+        );
+        let request_body_slots = Arc::new(Semaphore::new(
+            config.max_inflight.min(MAX_REQUEST_BODY_SLOTS),
+        ));
+        let measurement_slots = Arc::new(Semaphore::new(config.max_inflight));
         Self {
             config: Arc::new(config),
+            request_body_slots,
+            measurement_slots,
+        }
+    }
+
+    fn provenance(&self) -> ProbeRuntimeProvenance {
+        ProbeRuntimeProvenance {
+            implementation: ProbeImplementation::Rust,
+            version: self.config.runtime_version.clone(),
+            image_digest: self.config.image_digest.clone(),
         }
     }
 }
@@ -48,6 +74,7 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(handle_healthz))
+        .route("/capabilities", get(handle_capabilities))
         .route("/measure", post(handle_measure))
         .with_state(state)
         .layer(
@@ -123,22 +150,53 @@ async fn handle_healthz(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+async fn handle_capabilities(State(state): State<AppState>) -> impl IntoResponse {
+    Json(ProbeCapabilities {
+        protocol_version: PROBE_PROTOCOL_VERSION,
+        region: state.config.region_id.clone(),
+        provenance: state.provenance(),
+        limits: ProbeLimits {
+            max_inflight: state.config.max_inflight,
+            max_payload_bytes: PROBE_TRANSPORT_MAX_PAYLOAD_BYTES,
+            measurement_timeout_ms: PROBE_MEASUREMENT_TIMEOUT_MS,
+        },
+    })
+}
+
 async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -> Response {
-    let body_bytes = match to_bytes(request.into_body(), MAX_BODY_SIZE_BYTES).await {
-        Ok(body) => body,
-        Err(_) => return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body"),
+    let request_body_slot = match state.request_body_slots.clone().try_acquire_owned() {
+        Ok(slot) => slot,
+        Err(_) => return capacity_exhausted_response(),
+    };
+    let body_bytes = match tokio::time::timeout(
+        REQUEST_BODY_TIMEOUT,
+        to_bytes(request.into_body(), PROBE_TRANSPORT_MAX_PAYLOAD_BYTES),
+    )
+    .await
+    {
+        Ok(Ok(body)) => body,
+        Ok(Err(_)) => {
+            debug!("probe request body read failed");
+            return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body");
+        }
+        Err(_) => {
+            warn!(
+                timeout_ms = REQUEST_BODY_TIMEOUT.as_millis(),
+                "probe request body read timed out"
+            );
+            return plain_text_response(StatusCode::REQUEST_TIMEOUT, "request body timeout");
+        }
     };
 
     let body = match serde_json::from_slice::<MeasureRequest>(&body_bytes) {
         Ok(body) => body,
         Err(_) => return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body"),
     };
+    // MeasureRequest owns its fields, so release the raw buffer before validation and execution.
+    drop(body_bytes);
 
-    if !body.has_required_fields() {
-        return plain_text_response(
-            StatusCode::BAD_REQUEST,
-            "jobId, targetId, region, url, timestamp, and signature are required",
-        );
+    if !body.is_contract_valid() {
+        return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body");
     }
 
     let timestamp_valid = match timestamp_is_valid(&body.timestamp, chrono::Utc::now()) {
@@ -157,6 +215,16 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
     ) {
         return plain_text_response(StatusCode::UNAUTHORIZED, "invalid signature");
     }
+
+    if body.region != state.config.region_id {
+        return plain_text_response(StatusCode::BAD_REQUEST, "region does not match probe");
+    }
+    drop(request_body_slot);
+
+    let _measurement_slot = match state.measurement_slots.clone().try_acquire_owned() {
+        Ok(slot) => slot,
+        Err(_) => return capacity_exhausted_response(),
+    };
 
     let measurement = measure_url(&state.config.region_id, &body.url, body.request.as_ref()).await;
     info!(
@@ -179,7 +247,12 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
 
     (
         StatusCode::OK,
-        Json(ProbeMeasurementResponse { measurement }),
+        Json(ProbeMeasurementResponse {
+            job_id: Some(body.job_id),
+            target_id: Some(body.target_id),
+            provenance: Some(state.provenance()),
+            measurement,
+        }),
     )
         .into_response()
 }
@@ -188,9 +261,24 @@ fn plain_text_response(status: StatusCode, body: &'static str) -> Response {
     (status, body).into_response()
 }
 
+fn capacity_exhausted_response() -> Response {
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "probe capacity exhausted",
+    )
+        .into_response();
+    response.headers_mut().insert(
+        RETRY_AFTER,
+        (PROBE_MEASUREMENT_TIMEOUT_MS / 1_000).max(1).into(),
+    );
+    response
+}
+
 #[cfg(test)]
 mod tests {
-    use super::run_local_healthcheck;
+    use super::{AppState, MAX_REQUEST_BODY_SLOTS, run_local_healthcheck};
+    use probe_core::{Config, MAX_CONFIGURED_INFLIGHT};
     use std::{
         io::{BufRead, BufReader, Read, Write},
         net::TcpListener as StdTcpListener,
@@ -238,5 +326,64 @@ mod tests {
                 .contains("connection closed before HTTP status")
         );
         server.join().expect("health fixture exits");
+    }
+
+    #[test]
+    fn measurement_slots_fail_fast_at_the_configured_limit() {
+        let state = AppState::new(Config {
+            listen_addr: "127.0.0.1:0".to_string(),
+            region_id: "local".to_string(),
+            shared_secret: "test-probe-secret".to_string(),
+            shared_secret_next: None,
+            max_inflight: 1,
+            runtime_version: None,
+            image_digest: None,
+        });
+        let first = state
+            .measurement_slots
+            .clone()
+            .try_acquire_owned()
+            .expect("first slot should be available");
+
+        assert!(state.measurement_slots.clone().try_acquire_owned().is_err());
+
+        drop(first);
+        assert!(state.measurement_slots.clone().try_acquire_owned().is_ok());
+    }
+
+    #[test]
+    fn request_body_slots_have_a_fixed_memory_budget() {
+        let state = AppState::new(Config {
+            listen_addr: "127.0.0.1:0".to_string(),
+            region_id: "local".to_string(),
+            shared_secret: "test-probe-secret".to_string(),
+            shared_secret_next: None,
+            max_inflight: MAX_CONFIGURED_INFLIGHT,
+            runtime_version: None,
+            image_digest: None,
+        });
+        let permits = state
+            .request_body_slots
+            .clone()
+            .try_acquire_many_owned(
+                u32::try_from(MAX_REQUEST_BODY_SLOTS)
+                    .expect("request body slot limit should fit in u32"),
+            )
+            .expect("the fixed request body budget should be available");
+
+        assert!(
+            state
+                .request_body_slots
+                .clone()
+                .try_acquire_owned()
+                .is_err()
+        );
+        assert_eq!(
+            state.measurement_slots.available_permits(),
+            MAX_CONFIGURED_INFLIGHT
+        );
+
+        drop(permits);
+        assert!(state.request_body_slots.clone().try_acquire_owned().is_ok());
     }
 }

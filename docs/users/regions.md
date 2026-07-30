@@ -5,7 +5,7 @@ measurement region**. The runtime location is an operator-chosen identity,
 not a city claim: every Fast Check, scheduled Check, and Browser Audit runs
 from this single location and records it on its results as provenance.
 
-The managed WebPerf Cloud product coordinates several regional runtimes
+WebPerf & Guide Managed coordinates several regional probes
 under one control plane; that multi-region orchestration lives outside this
 repository. A self-host installation only knows its own runtime location.
 
@@ -52,17 +52,16 @@ measure from a remote location instead:
 1. Deploy the versioned `webperf-probe` image on a host that represents the
    runtime location.
 2. Give it the same `PROBE_SHARED_SECRET` used by the executor and set its
-   `REGION_ID` to the same value as `SELFHOST_REGION_ID` on the API/executor.
+   `REGION_ID` to the same value as `SELFHOST_REGION_ID` on `webperf`.
 3. Terminate TLS at the probe or a private ingress and restrict network
    access to the executor.
-4. Set `SELFHOST_PROBE_BASE_URL` to the probe's HTTPS origin on the API and
-   executor.
+4. Set `SELFHOST_PROBE_BASE_URL` to the probe's HTTPS origin on `webperf`.
 5. Set `SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP=false` for remote probes.
-6. Recreate the API and executor containers so they pick up the new
+6. Recreate `webperf` so its API and executor processes pick up the new
    environment:
 
    ```sh
-   docker compose --env-file .env -f compose.yml up -d --force-recreate api executor
+   docker compose --env-file .env -f compose.yml up -d --force-recreate webperf
    ```
 
 The executor appends the signed `/measure` path itself; configure only an

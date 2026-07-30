@@ -27,7 +27,7 @@ const requiredUserGuides = [
   'security',
   'troubleshooting',
   'reverse-proxy',
-  'cloud-vs-self-hosted'
+  'managed-service-vs-self-hosted'
 ].map((name) => `docs/users/${name}.md`);
 const requiredContributorGuides = [
   'docs/contributors/development.md',
@@ -148,7 +148,7 @@ if (readme !== null) {
     '## Core features',
     '## Optional Browser Audit',
     '## Security warning',
-    '## Self-hosted and WebPerf Cloud',
+    '## WebPerf Self-hosted vs WebPerf & Guide Managed',
     '## Upgrade and backup',
     '## Contributor setup'
   ];

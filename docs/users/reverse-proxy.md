@@ -61,7 +61,7 @@ CONSOLE_ORIGIN=https://webperf.example.com
 ```
 
 ```sh
-docker compose --env-file .env -f compose.yml up -d console
+docker compose --env-file .env -f compose.yml up -d webperf
 curl --fail http://127.0.0.1:5173/
 curl --fail --user operator https://webperf.example.com/
 ```

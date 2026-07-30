@@ -7,19 +7,11 @@ x-webperf-build: &webperf-build
   dockerfile: infra/docker/Dockerfile.webperf
 
 services:
-  console:
-    image: webperf:dev
-    build: *webperf-build
-
-  api:
+  webperf:
     image: webperf:dev
     build: *webperf-build
 
   scheduler:
-    image: webperf:dev
-    build: *webperf-build
-
-  executor:
     image: webperf:dev
     build: *webperf-build
 

@@ -561,10 +561,11 @@
   <RegionCatalog regionId={regionCatalog.regionId} regionLabel={regionCatalog.regionLabel}>
     <div class="runtime-location-card">
       <p class="card-copy">
-        This standalone deployment is one regional runtime. New checks, manual jobs,
+        This standalone deployment measures from one fixed location. New checks, manual jobs,
         and browser audits all measure from <strong>{regionCatalog.regionLabel}</strong>
-        (<code>{regionCatalog.regionId}</code>). The managed Cloud product coordinates
-        several regional runtimes; that orchestration lives outside this repository.
+        (<code>{regionCatalog.regionId}</code>). WebPerf & Guide Managed
+        orchestrates stateless probe containers separately; that fleet logic is not
+        part of this self-hosted application.
       </p>
     </div>
   </RegionCatalog>

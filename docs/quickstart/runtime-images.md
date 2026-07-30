@@ -5,11 +5,16 @@ self-hosted product. Every published runtime reference is a multi-platform OCI
 index for `linux/amd64` and `linux/arm64`:
 
 - `ghcr.io/webperf-and-guide/webperf` — single multi-role Bun image covering
-  console, API, scheduler, and executor. The active role is selected at
-  container start by the `WEBPERF_ROLE` environment variable (`console`, `api`,
-  `scheduler`, `executor`, or restricted `regional-runtime`) via the
-  `tooling/scripts/webperf-role.ts`
-  dispatcher.
+  console, API, scheduler, and executor. The default `standalone` role
+  supervises console, API, and executor in one container with embedded
+  scheduling. Its PID 1 supervisor holds only `SETUID`, `SETGID`, and `KILL`
+  so it can run those services under distinct non-root UIDs; it does not open
+  a network listener. The API and console can start while the separate probe is
+  unavailable, but the supervisor waits for the probe health endpoint before
+  starting the executor so queued work does not consume retries during a
+  routine stack startup. Split `console`, `api`, `scheduler`, and `executor`
+  roles remain available for development and maintenance through
+  `tooling/scripts/webperf-role.ts`.
 - `ghcr.io/webperf-and-guide/webperf-probe`
 - `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`
 
@@ -32,8 +37,6 @@ is pinned by OCI digest. It also contains:
 - `runtime-metadata.json`, with the version, source commit, image tags, and
   digests;
 - root `VERSION`;
-- the provider-neutral Regional Runtime Compose, environment template,
-  machine-readable multi-container profile, and deployment notes;
 - two SPDX JSON SBOMs per image, one for each Linux platform;
 - `browser-audit-seccomp.json`, kept beside `compose.yml` for the optional
   Chromium runtime;
@@ -41,8 +44,8 @@ is pinned by OCI digest. It also contains:
 - a generated `.env.example` with no default secrets.
 
 Official installation material never uses `:main` or `:latest`. A version tag
-is convenient for discovery, while the release Compose file and managed-cloud
-runtime handoff use the immutable digest recorded in the same release.
+is convenient for discovery, while the release Compose file and the WebPerf &
+Guide Managed use immutable image digests recorded in the same release.
 Docker resolves that digest to the host's matching native platform manifest.
 For compatibility, `images[].sbom` names the amd64 SBOM; releases that include
 both platforms also expose `images[].sboms`, which maps each platform manifest

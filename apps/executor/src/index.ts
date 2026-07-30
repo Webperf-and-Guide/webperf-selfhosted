@@ -1,7 +1,6 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { parseSelfhostExecutorVars } from '@webperf/config/selfhost-executor';
-import { regionalExecutionProvenanceSchema } from '@webperf/contracts';
 import { startProcessHeartbeat } from '@webperf/config/selfhost-process-heartbeat';
 import { createBrowserAuditExecutionHandler } from './browser-audit-handler';
 import { createExecutorApiClient } from './client';
@@ -33,10 +32,6 @@ const main = async () => {
     SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP:
       process.env.SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP,
     SELFHOST_EXECUTOR_ID: process.env.SELFHOST_EXECUTOR_ID,
-    SELFHOST_REGION_ID: process.env.SELFHOST_REGION_ID,
-    WEBPERF_RUNTIME_VERSION: process.env.WEBPERF_RUNTIME_VERSION,
-    WEBPERF_RUNTIME_IMAGE_DIGEST: process.env.WEBPERF_RUNTIME_IMAGE_DIGEST,
-    WEBPERF_PROBE_IMAGE_DIGEST: process.env.WEBPERF_PROBE_IMAGE_DIGEST,
     SELFHOST_EXECUTOR_POLL_INTERVAL_MS: process.env.SELFHOST_EXECUTOR_POLL_INTERVAL_MS,
     SELFHOST_EXECUTOR_LEASE_DURATION_MS: process.env.SELFHOST_EXECUTOR_LEASE_DURATION_MS,
     SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS: process.env.SELFHOST_EXECUTOR_HEARTBEAT_INTERVAL_MS,
@@ -110,20 +105,7 @@ const main = async () => {
     probeBaseUrl: parseProbeBaseUrl(runtime.SELFHOST_PROBE_BASE_URL, {
       allowInsecureHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP
     }),
-    allowInsecureProbeHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP,
-    regionalExecutionProvenance: regionalExecutionProvenanceSchema.parse({
-      regionId: runtime.SELFHOST_REGION_ID,
-      runnerType: 'network_probe',
-      runtime: {
-        version: runtime.WEBPERF_RUNTIME_VERSION ?? null,
-        imageDigest: runtime.WEBPERF_RUNTIME_IMAGE_DIGEST ?? null
-      },
-      runner: {
-        id: 'probe-rs',
-        implementation: 'rust',
-        imageDigest: runtime.WEBPERF_PROBE_IMAGE_DIGEST ?? null
-      }
-    })
+    allowInsecureProbeHttp: runtime.SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP
   });
   const webhookHandler = createWebhookExecutionHandler({
     client,

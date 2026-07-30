@@ -27,6 +27,7 @@ type ComposeService = {
   shm_size?: string | number;
   environment?: Record<string, string>;
   volumes?: Array<{ target?: string }>;
+  depends_on?: unknown;
 };
 
 type ComposeModel = {
@@ -42,21 +43,21 @@ const browserSeccompFile = resolve(repositoryRoot, 'infra/docker-compose/browser
 const browserAppArmorFile = resolve(repositoryRoot, 'infra/docker-compose/browser-audit.apparmor');
 const composeRenderTimeoutMs = 30_000;
 const maximumTmpfsBytes = 2 * 1024 ** 3;
-// Phase 3: scheduler moved to the external-scheduler profile because the
-// default topology embeds it inside the API process.
-const defaultServiceNames = ['api', 'console', 'executor', 'probe'];
+// The default topology runs the complete Bun control surface in one
+// supervised container and keeps the Rust probe as a separate trust boundary.
+const defaultServiceNames = ['probe', 'webperf'];
 const expectedImages: Record<string, string> = {
-  api: 'webperf',
-  console: 'webperf',
-  executor: 'webperf',
+  webperf: 'webperf',
   probe: 'webperf-probe',
   scheduler: 'webperf',
   'browser-audit-lighthouse': 'webperf-browser-audit-lighthouse'
 };
 const browserCapabilityAdditions = ['SYS_CHROOT'];
 const expectedCapabilityAdditions: Record<string, string[]> = {
+  webperf: ['KILL', 'SETGID', 'SETUID'],
   'browser-audit-lighthouse': browserCapabilityAdditions
 };
+const expectedRootSupervisors = new Set(['webperf']);
 const nonRootNumericUserPattern = /^[1-9]\d*(?::[1-9]\d*)?$/;
 
 assert(nonRootNumericUserPattern.test('1000'), 'numeric non-root UID must be accepted');
@@ -104,10 +105,17 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
   const privilegeOptions = service.security_opt?.filter(
     (entry) => entry.startsWith('no-new-privileges:')
   ) ?? [];
-  assert(
-    nonRootNumericUserPattern.test(service.user ?? ''),
-    `${name} must run as an explicit non-root numeric user`
-  );
+  if (expectedRootSupervisors.has(name)) {
+    assert(
+      service.user === '0:0',
+      `${name} must start the UID-isolating supervisor as explicit root`
+    );
+  } else {
+    assert(
+      nonRootNumericUserPattern.test(service.user ?? ''),
+      `${name} must run as an explicit non-root numeric user`
+    );
+  }
   assert(
     service.cap_drop?.includes('ALL'),
     `${name} must drop all Linux capabilities`
@@ -134,13 +142,12 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
   assert(service.logging?.options?.['max-file'] === '3', `${name} must cap rotated log files`);
 }
 
-for (const name of ['api', 'console', 'executor', 'scheduler', 'api-debug', 'browser-audit-debug']) {
+for (const name of ['webperf', 'scheduler', 'api-debug', 'browser-audit-debug']) {
   assertSecureTmpfs(productionWithProfiles.services[name], '/tmp', name);
 }
 
 for (const [name, heartbeatPath] of Object.entries({
-  scheduler: '/tmp/webperf-scheduler-heartbeat',
-  executor: '/tmp/webperf-executor-heartbeat'
+  scheduler: '/tmp/webperf-scheduler-heartbeat'
 })) {
   const service = productionWithProfiles.services[name];
   const healthCommand = service?.healthcheck?.test?.join(' ') ?? '';
@@ -160,17 +167,40 @@ for (const [name, heartbeatPath] of Object.entries({
   );
 }
 
+const webperf = production.services.webperf;
+const webperfHealthCommand = webperf.healthcheck?.test?.join(' ') ?? '';
+assert(
+  webperf.environment?.WEBPERF_ROLE === 'standalone',
+  'webperf must run the standalone supervisor'
+);
+assert(
+  webperf.depends_on === undefined,
+  'webperf control services must boot even when the measurement probe is unhealthy'
+);
+assert(
+  webperf.environment?.WEBPERF_PROCESS_HEARTBEAT_PATH
+    === '/tmp/webperf-executor-heartbeat',
+  'webperf must publish the executor heartbeat path'
+);
+assert(
+  webperfHealthCommand.includes('/health')
+    && webperfHealthCommand.includes('/tmp/webperf-executor-heartbeat')
+    && webperfHealthCommand.includes('mtimeMs')
+    && webperfHealthCommand.includes("PORT ?? '3000'"),
+  'webperf healthcheck must cover API, console, and executor liveness'
+);
+
 assertStringArrayEqual(
   Object.entries(production.services)
     .filter(([, service]) => (service.ports?.length ?? 0) > 0)
     .map(([name]) => name),
-  ['console'],
+  ['webperf'],
   'default published services'
 );
-assertLoopbackPort(production.services.console, 3000, 'console');
+assertLoopbackPort(webperf, 3000, 'webperf console');
 assert(
-  production.services.api.volumes?.some((volume) => volume.target === '/data'),
-  'API must retain the writable /data volume'
+  webperf.volumes?.some((volume) => volume.target === '/data'),
+  'webperf must retain the writable /data volume'
 );
 
 const browser = productionWithProfiles.services['browser-audit-lighthouse'];

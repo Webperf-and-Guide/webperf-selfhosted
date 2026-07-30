@@ -2,10 +2,11 @@
 
 `apps/browser-audit-lighthouse` is an optional self-host runtime.
 
-It is the OSS source of truth for the Bun-first browser-audit container used by both:
+It is the OSS source of truth for the Bun-first browser-audit container used by:
 
 - self-host operators who want to run the worker directly
-- the managed cloud product, which consumes the published image and adds orchestration around it
+- compatible managed integrations that consume the published image and add
+  their own orchestration
 
 What it does not include:
 

@@ -37,15 +37,14 @@
     "drill:compose:upgrade": "bash tooling/scripts/drill-compose-upgrade.sh",
     "capture:console:baselines": "bash tooling/scripts/capture-console-baselines.sh",
     "capture:console:baselines:parallel": "BASE_URL=${SELFHOST_PARALLEL_CONSOLE_BASE_URL:-http://localhost:4174} bash tooling/scripts/capture-console-baselines.sh",
+    "graph:dump": "ttsc-graph dump --tsconfig tsconfig.graph.json",
     "selfhost:init": "bun tooling/scripts/selfhost-init.ts",
     "selfhost:migrate": "bun tooling/scripts/selfhost-database.ts migrate",
     "selfhost:backup": "bun tooling/scripts/selfhost-database.ts backup",
     "selfhost:restore": "bun tooling/scripts/selfhost-database.ts restore",
     "selfhost:doctor": "bun tooling/scripts/selfhost-database.ts doctor",
     "selfhost:maintenance": "bun tooling/scripts/selfhost-database.ts maintenance",
-    "compose:config": "bun tooling/scripts/check-compose.ts && bun tooling/scripts/check-regional-runtime.ts",
-    "compose:regional:config": "bun tooling/scripts/check-regional-runtime.ts",
-    "smoke:regional-runtime": "bash tooling/scripts/smoke-regional-runtime.sh",
+    "compose:config": "bun tooling/scripts/check-compose.ts",
     "ui:normalize-imports": "bun tooling/scripts/normalize-ui-imports.ts",
     "ui:jsrepo:add": "jsrepo add",
     "ui:jsrepo:add:extras": "jsrepo add --cwd packages/ui --registry @ieedan/shadcn-svelte-extras && bun run ui:normalize-imports",
@@ -59,6 +58,7 @@
   "devDependencies": {
     "@libsql/client": "^0.17.2",
     "@lucide/svelte": "^1.7.0",
+    "@ttsc/graph": "0.23.0",
     "@types/bun": "^1.3.11",
     "@webperf/contracts": "workspace:*",
     "@webperf/domain-core": "workspace:*",
@@ -73,6 +73,7 @@
     "svelte-toolbelt": "^0.10.6",
     "tailwind-merge": "^3.5.0",
     "tailwind-variants": "^3.2.2",
-    "typescript": "^5.9.3"
+    "ttsc": "0.23.0",
+    "typescript": "7.0.2"
   }
 }

@@ -110,8 +110,7 @@ The exact diff will stay small within each phase, but the expected surface is:
   Comparison, Export, Analysis, and Browser Audit.
 - Canonical routes remain `/v1/sites`, `/v1/route-groups`, `/v1/checks`,
   nested check runs, run detail, comparisons, exports, analyses, browser
-  audits, and capabilities. Regional mode has a separate allowlisted handoff
-  surface documented in `regional-runtime-handoff.md`.
+  audits, capabilities, and the authenticated self-host runtime metrics.
 - `/v1/properties`, `/v1/route-sets`, and `/v1/check-profiles` remain tested
   compatibility aliases during beta, but will
   return deprecation and successor-link headers and will not receive new
@@ -225,8 +224,9 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Make `compose.yml` consume versioned GHCR images.
 - [x] Add `compose.dev.yml` source-build overrides.
 - [x] Publish only console on loopback by default; add a debug profile.
-- [x] Add health checks, restart/stop policies, non-root execution, read-only
-  filesystems where possible, tmpfs, log rotation, and resource examples.
+- [x] Add health checks, restart/stop policies, non-root runtime execution,
+  distinct standalone child UIDs, read-only filesystems where possible, tmpfs,
+  log rotation, and resource examples.
 - [x] Keep Lighthouse optional, sandboxed, single-concurrency, and host-port
   free without default `SYS_ADMIN`.
 - [x] Validate default and browser-audit Compose smoke paths.
@@ -250,7 +250,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Reorder README around Docker installation and operator outcomes.
 - [x] Add install, configure, regions, checks, scheduling, browser audits,
   artifacts, backup/restore, upgrade, security, troubleshooting, reverse proxy,
-  and cloud-vs-self-hosted user guides.
+  and managed-service-vs-self-hosted user guides.
 - [x] Move contributor setup below operator guidance.
 - [x] Remove local absolute paths and validate all documentation links.
 - [x] Document Browser sandboxing, trusted single-organization deployment, TLS,

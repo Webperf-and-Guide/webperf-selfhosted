@@ -247,16 +247,6 @@ describe('execution job contracts', () => {
         runId: null
       }).success
     ).toBe(false);
-    expect(
-      networkProbeExecutionPayloadSchema.safeParse({
-        version: 'v1',
-        jobIds: ['job_contract'],
-        checkId: null,
-        runId: null,
-        regionalExecutionId: 'regional_contract',
-        expectedProvenance: null
-      }).success
-    ).toBe(false);
   });
 
   test('binds comparison mode, run, and jobs together', () => {

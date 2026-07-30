@@ -6,10 +6,13 @@ question: **did this deploy get worse?**
 WebPerf runs repeatable network checks from the location where you deploy it,
 keeps run history and baselines in SQLite, and produces deterministic
 comparisons and exports. The default installation is a small,
-single-organization stack with an operator console, API with embedded
-scheduling, durable executor, and Rust probe. An
+single-organization, two-container stack: one supervised `webperf` container
+runs the operator console, API, embedded scheduler, and durable executor, while
+the Rust `webperf-probe` remains a separate measurement trust boundary. The
+small PID 1 supervisor starts the three Bun services under distinct non-root
+UIDs so the public console cannot inspect API or executor credentials. An
 engine-neutral Browser Audit Protocol and Lighthouse reference runner are
-available as an optional profile.
+available as an optional third container.
 
 [Apache-2.0](LICENSE) · [User guides](docs/users/README.md) ·
 [Public API](docs/architecture/public-api-surface.md) · [Security](SECURITY.md)
@@ -49,9 +52,9 @@ docker compose --env-file .env -f compose.yml ps
 curl --fail http://127.0.0.1:5173/
 ```
 
-Open `http://127.0.0.1:5173`. Only the console is published, and it binds to
-loopback. The API, executor, probe, and optional browser runner stay
-on internal Compose networks.
+Open `http://127.0.0.1:5173`. Only the console port on the `webperf` container
+is published, and it binds to loopback. Its API port, the probe, and the
+optional browser runner stay on internal Compose networks.
 
 Read the full [installation guide](docs/users/install.md) before using a
 non-local hostname or upgrading an existing database.
@@ -108,8 +111,8 @@ See [Browser Audits](docs/users/browser-audits.md) and
 > WebPerf self-hosted is a trusted, single-organization deployment. Do not
 > expose the console directly to the public internet. For remote access, keep
 > the console on loopback and put it behind a TLS reverse proxy plus an
-> additional access-control layer. Never publish the API, probe, executor,
-> scheduler, Browser Audit runner, or `debug` profile.
+> additional access-control layer. Never publish the API port, probe, Browser
+> Audit runner, split worker roles, or `debug` profile.
 
 Only `GET /health`, `GET /v1/capabilities`, and
 `GET /openapi/public.json` are intentionally unauthenticated at the API
@@ -121,7 +124,7 @@ Read [Security](docs/users/security.md),
 [self-host authentication](docs/security/auth-and-secrets.md) before external
 access.
 
-## Self-hosted and WebPerf Cloud
+## WebPerf Self-hosted vs WebPerf & Guide Managed
 
 | | `webperf-selfhosted` | `webperf.and.guide` |
 | --- | --- | --- |
@@ -135,10 +138,10 @@ This repository is the public source of truth for self-host contracts, schemas,
 domain models, report logic, console/API behavior, deployment examples, and
 runtime images. It intentionally excludes billing, multi-tenancy, managed
 fleet orchestration, private provider credentials, and AI analyst product
-features. It also publishes the provider-neutral
-[Regional Runtime Protocol](docs/architecture/regional-runtime-handoff.md) and
-three-container deployment profile used by managed orchestrators. See
-[Cloud vs self-hosted](docs/users/cloud-vs-self-hosted.md).
+features. WebPerf & Guide Managed consumes the versioned
+`webperf-probe` image and orchestrates its own private regional fleet without
+turning the self-hosted application into a managed worker. See
+[Managed service vs self-hosted](docs/users/managed-service-vs-self-hosted.md).
 
 ## Upgrade and backup
 

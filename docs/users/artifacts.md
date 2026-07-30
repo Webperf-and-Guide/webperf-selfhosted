@@ -9,7 +9,7 @@ as SQLite BLOBs.
 
 ```dotenv
 SELFHOST_ARTIFACTS_PATH=/data/artifacts
-SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://api:8788
+SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://webperf:8788
 SELFHOST_MAX_ARTIFACT_BYTES=25000000
 SELFHOST_ARTIFACT_UPLOAD_TTL_SECONDS=900
 SELFHOST_RETENTION_DAYS=30
@@ -45,15 +45,16 @@ keep the validated audit-directory descriptor pinned and reject directory
 identity changes. Linux uses asynchronous `/proc/self/fd` operations relative
 to that descriptor, while macOS uses POSIX `unlinkat` for rollback deletion.
 Both platforms are supported without depending on a Linux libc soname. In the
-Compose deployment, only the API service mounts the artifact volume. Cleanup
-removes only unindexed entries below the configured directory after a one-hour
-grace period; internal callers must opt in explicitly before using a zero grace.
+Compose deployment, only the supervised `webperf` service mounts the artifact
+volume. Cleanup removes only unindexed entries below the configured directory
+after a one-hour grace period; internal callers must opt in explicitly before
+using a zero grace.
 
 From a source checkout, maintenance can be run directly. In a release
 container, use the shipped script:
 
 ```sh
-docker compose --env-file .env -f compose.yml exec api \
+docker compose --env-file .env -f compose.yml exec --user 1000:1000 webperf \
   bun /app/tooling/scripts/selfhost-database.ts maintenance \
   --database /data/webperf.sqlite --artifacts /data/artifacts
 ```
@@ -68,8 +69,8 @@ Correct the artifact root or permissions and rerun maintenance.
 
 A SQLite backup contains artifact metadata but not bytes. A valid recovery
 point must capture the verified SQLite snapshot and the entire artifact
-directory while API and executor writers are stopped. Restore the matching
-pair. Startup reconciliation removes unindexed files, so mixing database and
+directory while `webperf` is stopped. Restore the matching pair. Startup
+reconciliation removes unindexed files, so mixing database and
 artifact snapshots from different times can lose evidence.
 
 See [Backup and restore](./backup-restore.md) and the detailed

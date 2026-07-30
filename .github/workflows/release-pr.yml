@@ -10,7 +10,6 @@ on:
       - 'VERSION'
       - 'CHANGELOG.md'
       - 'infra/docker-compose/.env.example'
-      - 'infra/regional-runtime/.env.example'
       - 'package.json'
       - 'bun.lock'
       - 'packages/**/package.json'

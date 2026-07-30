@@ -31,13 +31,23 @@ key early can make existing rows unreadable.
 - `CONSOLE_ORIGIN` is the browser-visible origin. Set the final HTTPS origin
   when using a reverse proxy.
 - `CONSOLE_PUBLIC_PORT` changes the loopback host port.
-- `CONTROL_BASE_URL=http://api:8788` is the internal console-to-API origin.
-- `SELFHOST_SCHEDULER_API_BASE_URL` and
-  `SELFHOST_EXECUTOR_API_BASE_URL` should remain the internal API origin.
+- The default `standalone` supervisor pins console and executor API calls to
+  the configured API bind address inside the `webperf` container. Wildcard
+  binds use loopback for those child-process calls.
+- The supervisor itself is a network-inert root PID 1 with only
+  `SETUID`, `SETGID`, and `KILL`; it drops the console, API, and executor into
+  distinct non-root UIDs before their entrypoints run. Keep the checked
+  Compose capability and user settings intact.
+- `WEBPERF_STANDALONE_STARTUP_TIMEOUT_MS=0` keeps waiting while the API process
+  remains alive, so long first-start migrations and artifact reconciliation
+  can finish. Set a positive millisecond deadline only when the operator
+  explicitly prefers fail-closed startup.
+- `SELFHOST_SCHEDULER_API_BASE_URL=http://webperf:8788` is only used by the
+  optional `external-scheduler` profile.
 - Non-loopback plain HTTP for the executor API requires the explicit
   `SELFHOST_EXECUTOR_ALLOW_INSECURE_API_HTTP=true` trusted-network opt-in; use
   HTTPS for remote API origins.
-- `SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://api:8788` is the credential-free
+- `SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://webperf:8788` is the credential-free
   origin the optional runner uses for scoped artifact uploads.
 - Webhook targets require HTTPS. Set
   `SELFHOST_EXECUTOR_ALLOW_INSECURE_WEBHOOK_HTTP=true` only for a legacy public

@@ -7,7 +7,7 @@ headers, cookies, signed payloads, or database files into an issue.
 docker compose --env-file .env -f compose.yml config --quiet
 docker compose --env-file .env --profile browser-audit -f compose.yml ps
 docker compose --env-file .env -f compose.yml logs --since=20m \
-  console api scheduler executor probe
+  webperf probe
 ```
 
 ## Console does not load
@@ -37,8 +37,7 @@ too short, or still a placeholder. Never solve it by adding a fallback value.
 
 ## Runtime location is unavailable or a Run stalls
 
-- Confirm `SELFHOST_REGION_ID` on the API and executor matches `REGION_ID` on
-  the probe.
+- Confirm `SELFHOST_REGION_ID` on `webperf` matches `REGION_ID` on the probe.
 - Confirm the executor can reach `SELFHOST_PROBE_BASE_URL` and that the probe
   uses the same `PROBE_SHARED_SECRET`.
 - Remote HTTP origins are rejected unless explicitly trusted; prefer HTTPS.

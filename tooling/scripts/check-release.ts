@@ -434,23 +434,9 @@ try {
   const composeVersion = composeEnvironmentVersion(
     readFileSync(join(root, 'infra/docker-compose/.env.example'), 'utf8')
   );
-  const regionalEnvPath = join(root, 'infra/regional-runtime/.env.example');
-  const regionalEnvExists = existsSync(regionalEnvPath);
-  if (!regionalEnvExists) {
-    violations.push(
-      'infra/regional-runtime/.env.example: required release environment file is missing'
-    );
-  }
-  const regionalVersion = regionalEnvExists
-    ? composeEnvironmentVersion(readFileSync(regionalEnvPath, 'utf8'))
-    : undefined;
   for (const [path, version] of [
-    ['infra/docker-compose/.env.example', composeVersion],
-    ['infra/regional-runtime/.env.example', regionalVersion]
+    ['infra/docker-compose/.env.example', composeVersion]
   ] as const) {
-    if (version === undefined) {
-      continue;
-    }
     if (
       version !== repositoryVersion
       && !(recoverablePreparation && version === latestChangelogVersion)

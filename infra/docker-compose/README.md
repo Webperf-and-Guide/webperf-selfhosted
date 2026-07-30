@@ -8,9 +8,10 @@ This directory contains two Compose layers:
 - `compose.dev.yml` overrides those images with builds from the current source
   checkout.
 
-The default stack runs `console`, `api`, `scheduler`, `executor`, and `probe`.
-Only the console is published, on `127.0.0.1:5173`. API, probe, scheduler, and
-executor traffic stays on segmented Compose networks.
+The default stack runs `webperf` and `probe`. The supervised `webperf`
+container owns the console, API, embedded scheduler, and durable executor.
+Only its console port is published, on `127.0.0.1:5173`; API and probe traffic
+stays on segmented Compose networks.
 
 ## Production Start
 
@@ -102,10 +103,13 @@ binds a non-loopback interface. Debug proxy requests have an 8 MiB body limit;
 oversized requests receive `413` before any upstream call.
 
 All production services have health checks, restart and stop policies, log
-rotation, non-root users, and configurable CPU/memory ceilings. Services are
-read-only except for explicit tmpfs mounts and the API's `/data` volume.
-`bun run compose:config` also requires non-zero numeric UID and GID values and
-the exact same service/security surface in the development override.
+rotation, and configurable CPU/memory ceilings. Runtime services use non-root
+users. The `webperf` PID 1 supervisor is the sole exception: it is
+network-inert, retains only `SETUID`, `SETGID`, and `KILL`, and starts the
+console, API, and executor under distinct non-root UIDs. Services are read-only
+except for explicit tmpfs mounts and the API's `/data` volume. `bun run
+compose:config` requires this exact user/capability model and the same
+service/security surface in the development override.
 
 See [Docker Compose install](../../docs/quickstart/local-compose.md),
 [authentication and secrets](../../docs/security/auth-and-secrets.md), and

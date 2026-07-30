@@ -44,7 +44,7 @@ The public README should help a new visitor answer these questions within a minu
 1. What problem does this solve?
 2. Is this self-hosted and usable on its own?
 3. What runtimes and deployment modes are included?
-4. What is intentionally *not* included because it belongs to the managed cloud product?
+4. What is intentionally *not* included because it belongs to WebPerf & Guide Managed?
 
 The current README is already close; avoid turning it into an exhaustive architecture document.
 

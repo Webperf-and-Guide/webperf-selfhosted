@@ -21,7 +21,7 @@ installation.
 - [Upgrade](./upgrade.md)
 - [Runtime metrics](./runtime-metrics.md)
 - [Troubleshooting](./troubleshooting.md)
-- [Self-hosted vs WebPerf Cloud](./cloud-vs-self-hosted.md)
+- [WebPerf Self-hosted and WebPerf & Guide Managed](./managed-service-vs-self-hosted.md)
 
 The frozen [public API surface](../architecture/public-api-surface.md) is the
 integration reference. Contributor setup lives separately under

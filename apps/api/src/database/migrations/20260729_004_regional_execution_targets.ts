@@ -1,5 +1,9 @@
 import type { SqliteMigration } from './types';
 
+// Historical compatibility migration. Regional Runtime was removed after
+// v0.3.0, but released databases must keep the original migration chain so
+// upgrades remain deterministic and previously created rows can be retained
+// and cleaned safely.
 export const regionalExecutionTargetsMigration: SqliteMigration = {
   id: '20260729_004_regional_execution_targets',
   up(database) {

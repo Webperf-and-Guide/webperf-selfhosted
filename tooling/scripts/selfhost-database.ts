@@ -16,7 +16,7 @@ import {
 } from '../../apps/api/src/database/operations';
 import { createStorageCrypto } from '../../apps/api/src/storage-crypto';
 import { LocalBrowserAuditArtifactStore } from '../../apps/api/src/browser-audit-artifact-store';
-import { runtimeRegionIdSchema } from '@webperf/contracts';
+import { runtimeRegionIdSchema } from '../../packages/contracts/src/regions';
 
 type Command = 'migrate' | 'backup' | 'restore' | 'doctor' | 'maintenance';
 

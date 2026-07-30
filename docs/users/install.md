@@ -63,7 +63,7 @@ docker compose --env-file .env -f compose.yml up -d
 docker compose --env-file .env -f compose.yml ps
 ```
 
-Wait until `console`, `api`, `executor`, and `probe` are healthy,
+Wait until `webperf` and `probe` are healthy,
 then verify the loopback console:
 
 ```sh
@@ -76,8 +76,8 @@ measures from the `local` runtime location.
 
 ## Default exposure
 
-Only the console publishes a host port, and it binds to `127.0.0.1`. All other
-services communicate on segmented Compose networks. The persistent
+Only the console port on `webperf` is published, and it binds to `127.0.0.1`.
+The API port and probe remain on segmented Compose networks. The persistent
 `webperf-data` volume stores `/data/webperf.sqlite` and `/data/artifacts`.
 
 The `debug` profile creates temporary loopback-only proxies for diagnosis. It

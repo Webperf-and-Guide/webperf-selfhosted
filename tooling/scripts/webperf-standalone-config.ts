@@ -1,0 +1,203 @@
+import { isIP } from 'node:net';
+
+export const standaloneSecretNames = [
+  'SELFHOST_ADMIN_TOKEN',
+  'SELFHOST_ADMIN_TOKEN_NEXT',
+  'SELFHOST_INTERNAL_SECRET',
+  'SELFHOST_INTERNAL_SECRET_NEXT',
+  'PROBE_SHARED_SECRET',
+  'PROBE_SHARED_SECRET_NEXT',
+  'BROWSER_AUDIT_SHARED_SECRET',
+  'BROWSER_AUDIT_SHARED_SECRET_NEXT'
+] as const;
+
+export type StandaloneSecretName = typeof standaloneSecretNames[number];
+export type StandaloneSecrets = Partial<Record<StandaloneSecretName, string>>;
+type Environment = Record<string, string | undefined>;
+
+export const standaloneChildIdentities = {
+  api: { uid: 1_000, gid: 1_000 },
+  console: { uid: 10_001, gid: 10_001 },
+  executor: { uid: 10_002, gid: 10_002 }
+} as const;
+
+export const standaloneChildCommands = {
+  api: ['bun', './apps/api/src/index.ts'],
+  console: ['bun', './apps/console/build/index.js'],
+  executor: ['bun', './apps/executor/src/index.ts']
+} as const satisfies Record<keyof typeof standaloneChildIdentities, readonly string[]>;
+
+const hostnamePattern =
+  /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
+const maximumStartupTimeoutMs = 24 * 60 * 60 * 1_000;
+const startupTimeoutErrorMessage =
+  `WEBPERF_STANDALONE_STARTUP_TIMEOUT_MS must be 0 or an integer up to ${maximumStartupTimeoutMs}`;
+
+/**
+ * Extracts standalone secrets and removes them from the provided environment
+ * so a later environment spread cannot leak them into child processes.
+ */
+export const takeStandaloneSecrets = (environment: Environment): StandaloneSecrets => {
+  const secrets: StandaloneSecrets = {};
+
+  for (const name of standaloneSecretNames) {
+    const value = environment[name];
+    if (value !== undefined) {
+      secrets[name] = value;
+    }
+    delete environment[name];
+  }
+
+  return secrets;
+};
+
+export const selectStandaloneSecrets = (
+  secrets: StandaloneSecrets,
+  names: readonly StandaloneSecretName[]
+): Record<string, string> => Object.fromEntries(
+  names.flatMap((name) => {
+    const value = secrets[name];
+    return value === undefined ? [] : [[name, value]];
+  })
+);
+
+export const assertStandaloneSupervisorEnvironment = (
+  platform: NodeJS.Platform,
+  uid: number | undefined
+): void => {
+  if (platform !== 'linux') {
+    throw new Error('The standalone supervisor requires a Linux container runtime');
+  }
+  if (uid !== 0) {
+    throw new Error(
+      'The standalone supervisor must start as UID 0 so it can isolate child service UIDs'
+    );
+  }
+};
+
+export const isolateStandaloneChildArgv = (
+  name: keyof typeof standaloneChildIdentities,
+  argv: readonly string[]
+): string[] => {
+  const identity = standaloneChildIdentities[name];
+  return [
+    '/usr/bin/setpriv',
+    `--reuid=${identity.uid}`,
+    `--regid=${identity.gid}`,
+    '--clear-groups',
+    '--no-new-privs',
+    '--',
+    ...argv
+  ];
+};
+
+export const resolveStandaloneApiBinding = (
+  rawHost: string | undefined,
+  port: number
+) => {
+  const configuredHost = rawHost?.trim() || '0.0.0.0';
+  const unbracketedHost = configuredHost.startsWith('[') && configuredHost.endsWith(']')
+    ? configuredHost.slice(1, -1)
+    : configuredHost;
+  const ipVersion = isIP(unbracketedHost);
+
+  if (
+    ipVersion === 0
+    && !hostnamePattern.test(unbracketedHost)
+  ) {
+    throw new Error('SELFHOST_API_HOST must be an IP address or hostname without a scheme or port');
+  }
+  if (
+    configuredHost !== unbracketedHost
+    && ipVersion !== 6
+  ) {
+    throw new Error('SELFHOST_API_HOST brackets are allowed only for an IPv6 address');
+  }
+
+  const bindHost = unbracketedHost;
+  let connectHost = bindHost;
+  if (bindHost === '0.0.0.0') {
+    connectHost = '127.0.0.1';
+  } else if (bindHost === '::') {
+    connectHost = '::1';
+  }
+  const urlHost = isIP(connectHost) === 6 ? `[${connectHost}]` : connectHost;
+
+  return {
+    bindHost,
+    origin: `http://${urlHost}:${port}`
+  };
+};
+
+export const resolveStandaloneProbeHealthUrl = (
+  rawBaseUrl: string | undefined
+): string => {
+  const configuredBaseUrl = rawBaseUrl?.trim() || 'http://127.0.0.1:8080';
+  let baseUrl: URL;
+
+  try {
+    baseUrl = new URL(configuredBaseUrl);
+  } catch {
+    throw new Error('SELFHOST_PROBE_BASE_URL must be a valid HTTP(S) origin');
+  }
+
+  if (
+    !['http:', 'https:'].includes(baseUrl.protocol)
+    || baseUrl.username
+    || baseUrl.password
+    || baseUrl.pathname !== '/'
+    || baseUrl.search
+    || baseUrl.hash
+  ) {
+    throw new Error('SELFHOST_PROBE_BASE_URL must be a credential-free HTTP(S) origin');
+  }
+
+  return new URL('/healthz', baseUrl).toString();
+};
+
+export const parseStandaloneStartupTimeoutMs = (
+  raw: string | undefined
+): number => {
+  const value = raw?.trim() || '0';
+  if (!/^\d{1,8}$/.test(value)) {
+    throw new Error(startupTimeoutErrorMessage);
+  }
+
+  const parsed = Number(value);
+  if (
+    !Number.isSafeInteger(parsed)
+    || parsed < 0
+    || parsed > maximumStartupTimeoutMs
+  ) {
+    throw new Error(startupTimeoutErrorMessage);
+  }
+
+  return parsed;
+};
+
+export const assertStandalonePortsDistinct = (
+  consolePort: number,
+  apiPort: number
+) => {
+  if (consolePort === apiPort) {
+    throw new Error(
+      'PORT and SELFHOST_API_PORT must use different ports in standalone mode'
+    );
+  }
+};
+
+export const parseStandalonePort = (
+  name: 'PORT' | 'SELFHOST_API_PORT',
+  raw: string | undefined,
+  fallback: number
+) => {
+  const value = raw?.trim() || String(fallback);
+  if (!/^\d{1,5}$/.test(value)) {
+    throw new Error(`${name} must be an integer between 1 and 65535`);
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new Error(`${name} must be an integer between 1 and 65535`);
+  }
+  return parsed;
+};

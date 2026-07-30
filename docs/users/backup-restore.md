@@ -35,23 +35,24 @@ WAL-aware snapshot:
 mkdir -m 700 -p backups/current
 
 # Stop all writers to freeze new work. In the default embedded mode the
-# scheduler runs inside the API process, so the API must be stopped too.
+# scheduler runs inside the supervised webperf container.
 # If you run an external scheduler (--profile external-scheduler), stop
 # that container explicitly as well.
-docker compose --env-file .env -f compose.yml stop api executor
+docker compose --env-file .env -f compose.yml stop webperf
 
 # Run the backup as a one-shot container. Override the entrypoint so the
 # role dispatcher does not start the API; the db subcommand bypasses it.
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
-  --entrypoint bun api \
+  --user 1000:1000 \
+  --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
   --output /data/webperf-backup.sqlite
 
 docker compose --env-file .env -f compose.yml cp \
-  api:/data/webperf-backup.sqlite backups/current/webperf.sqlite
+  webperf:/data/webperf-backup.sqlite backups/current/webperf.sqlite
 docker compose --env-file .env -f compose.yml cp \
-  api:/data/artifacts/. backups/current/artifacts/
+  webperf:/data/artifacts/. backups/current/artifacts/
 cp .env backups/current/webperf.env
 chmod 600 backups/current/webperf.env backups/current/webperf.sqlite
 
@@ -85,20 +86,29 @@ on disk is not proof that it is current, decryptable, or internally consistent.
 
 ## Restore SQLite
 
-Stop every writer. Copy the selected backup into the existing API container,
-then run the guarded restore in a one-off container attached to the same named
-volume:
+Stop every writer. Stream the selected backup through a UID/GID `1000` one-off
+container into the named volume, then run the guarded restore through the same
+identity:
 
 ```sh
 docker compose --env-file .env --profile browser-audit -f compose.yml stop
-docker compose --env-file .env -f compose.yml cp \
-  backups/current/webperf.sqlite api:/data/restore.sqlite
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  --user 1000:1000 \
+  --entrypoint sh webperf \
+  -c 'umask 077; cat > /data/restore.sqlite' \
+  < backups/current/webperf.sqlite
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
-  --entrypoint bun api \
+  --user 1000:1000 \
+  --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts restore \
   /data/restore.sqlite --database /data/webperf.sqlite
 ```
+
+Do not stage the database with `docker compose cp`: Docker creates copied files
+as root by default, while the guarded restore runs as UID/GID `1000` and cannot
+read a root-owned mode-`0600` backup. The streamed command creates the staging
+file with the same identity that performs the restore.
 
 Restore uses a verified temporary file, makes a safety backup of the current
 database by default, atomically replaces the database, and removes only exact
@@ -116,10 +126,10 @@ restore still decrypts every row below the explicit bound before replacement.
 ## Restore artifacts
 
 Restore the artifact directory from the same recovery point before starting
-the API. Preserve the current directory as a safety copy rather than merging
+`webperf`. Preserve the current directory as a safety copy rather than merging
 two generations. A volume-aware backup tool is preferred; if using
-`docker compose cp`, make the replacement while the API and executor are
-stopped and confirm ownership remains writable by UID/GID `1000`.
+`docker compose cp`, make the replacement while `webperf` is stopped and
+confirm ownership remains writable by UID/GID `1000`.
 
 Startup and maintenance reconciliation retain unindexed artifact files and
 directories younger than one hour. This grace window prevents a concurrent
@@ -130,12 +140,14 @@ After both parts are restored, use the saved internal secret and run:
 
 ```sh
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
-  --entrypoint bun api \
+  --user 1000:1000 \
+  --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts migrate \
   --database /data/webperf.sqlite --backup
 
 docker compose --env-file .env -f compose.yml run --rm --no-deps \
-  --entrypoint bun api \
+  --user 1000:1000 \
+  --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite
 

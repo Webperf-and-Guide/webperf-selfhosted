@@ -3154,10 +3154,6 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
   const locationReconciliation = existing
     ? reconcileCheckProfileRuntimeLocation(existing)
     : null;
-  if (locationReconciliation) {
-    existing = locationReconciliation.profile;
-  }
-
   if (locationReconciliation?.locationChanged) {
     return json(
       {
@@ -3303,15 +3299,17 @@ async function handleRunCheckProfile(profileId: string, request: Request) {
 
 async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
   const dispatchAt = parseDispatchTime(url.searchParams.get('now'));
-  const dueProfiles = repository
-    .listCheckProfiles()
-    .map((profile) => reconcileCheckProfileRuntimeLocation(profile).profile)
-    .filter(
-      (profile) =>
-        profile.locationMigration?.status !== 'requires_review'
-        && profile.schedule?.nextRunAt != null
-        && new Date(profile.schedule.nextRunAt).getTime() <= dispatchAt.getTime()
-    );
+  const dueProfiles: CheckProfile[] = [];
+  for (const storedProfile of repository.listCheckProfiles()) {
+    const { profile } = reconcileCheckProfileRuntimeLocation(storedProfile);
+    if (
+      profile.locationMigration?.status !== 'requires_review'
+      && profile.schedule?.nextRunAt != null
+      && new Date(profile.schedule.nextRunAt).getTime() <= dispatchAt.getTime()
+    ) {
+      dueProfiles.push(profile);
+    }
+  }
 
   const triggeredProfiles = dueProfiles.flatMap((profile) => {
     try {

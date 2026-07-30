@@ -223,7 +223,7 @@ async function performStop() {
       emit('child_graceful_signal_failed', { child: name });
     }
   }
-  await Promise.all([
+  const workerStops = await Promise.allSettled([
     observeExit('console'),
     observeExit('executor')
   ]);
@@ -231,7 +231,13 @@ async function performStop() {
   if (!signalChild('api', 'SIGTERM')) {
     emit('child_graceful_signal_failed', { child: 'api' });
   }
-  await observeExit('api');
+  const apiStop = await Promise.allSettled([observeExit('api')]);
+  const stopFailures = [...workerStops, ...apiStop]
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason);
+  if (stopFailures.length > 0) {
+    throw new AggregateError(stopFailures, 'One or more standalone child processes failed to stop');
+  }
   emit('stopped');
 }
 

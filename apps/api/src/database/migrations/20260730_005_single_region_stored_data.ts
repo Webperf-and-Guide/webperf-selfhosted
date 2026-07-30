@@ -12,6 +12,16 @@ type PersistedPayloadRow = {
 
 type JsonRecord = Record<string, unknown>;
 
+type FirstBatchStatement = {
+  all: () => PersistedPayloadRow[];
+  finalize: () => void;
+};
+
+type NextBatchStatement = {
+  all: (lastRowId: number) => PersistedPayloadRow[];
+  finalize: () => void;
+};
+
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -105,6 +115,41 @@ const rewriteLegacyCheck = (
   };
 };
 
+const visitPayloadRowsInBatches = ({
+  readFirstBatch,
+  readNextBatch,
+  parse,
+  visit
+}: {
+  readFirstBatch: FirstBatchStatement;
+  readNextBatch: NextBatchStatement;
+  parse: (payload: string) => unknown;
+  visit: (row: PersistedPayloadRow, value: unknown) => boolean;
+}) => {
+  let lastRowId: number | null = null;
+
+  try {
+    while (true) {
+      const rows: PersistedPayloadRow[] = lastRowId === null
+        ? readFirstBatch.all()
+        : readNextBatch.all(lastRowId);
+      if (rows.length === 0) {
+        return;
+      }
+
+      for (const row of rows) {
+        if (!visit(row, parse(row.payload_json))) {
+          return;
+        }
+        lastRowId = row.rowid;
+      }
+    }
+  } finally {
+    readFirstBatch.finalize();
+    readNextBatch.finalize();
+  }
+};
+
 const rewriteJobRowsInBatches = ({
   database,
   rewrite,
@@ -133,29 +178,21 @@ const rewriteJobRowsInBatches = ({
   const update = database.query<never, [string, number]>(
     'UPDATE jobs SET payload_json = ? WHERE rowid = ?'
   );
-  let lastRowId: number | null = null;
 
   try {
-    while (true) {
-      const rows: PersistedPayloadRow[] = lastRowId === null
-        ? readFirstBatch.all()
-        : readNextBatch.all(lastRowId);
-      if (rows.length === 0) {
-        break;
-      }
-
-      for (const row of rows) {
-        const value = parse(row.payload_json);
+    visitPayloadRowsInBatches({
+      readFirstBatch,
+      readNextBatch,
+      parse,
+      visit(row, value) {
         const rewritten = rewrite(value);
         if (rewritten !== value) {
           update.run(stringify(rewritten), row.rowid);
         }
-        lastRowId = row.rowid;
+        return true;
       }
-    }
+    });
   } finally {
-    readFirstBatch.finalize();
-    readNextBatch.finalize();
     update.finalize();
   }
 };
@@ -184,28 +221,12 @@ const visitCheckRowsInBatches = ({
     ORDER BY rowid
     LIMIT ${migrationBatchSize}
   `);
-  let lastRowId: number | null = null;
-
-  try {
-    while (true) {
-      const rows: PersistedPayloadRow[] = lastRowId === null
-        ? readFirstBatch.all()
-        : readNextBatch.all(lastRowId);
-      if (rows.length === 0) {
-        return;
-      }
-
-      for (const row of rows) {
-        if (!visit(row, parse(row.payload_json))) {
-          return;
-        }
-        lastRowId = row.rowid;
-      }
-    }
-  } finally {
-    readFirstBatch.finalize();
-    readNextBatch.finalize();
-  }
+  visitPayloadRowsInBatches({
+    readFirstBatch,
+    readNextBatch,
+    parse,
+    visit
+  });
 };
 
 const hasLegacyChecksInBatches = ({

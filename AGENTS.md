@@ -2,7 +2,7 @@
 
 Living execution brief for `webperf-selfhosted`.
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 Build a self-hosted product for:
 - global release verification
@@ -63,7 +63,11 @@ Included here:
 
 ## Snapshot
 
-Current repo state as of 2026-07-26:
+Current repo state as of 2026-07-30:
+- the completed issue #14 architecture now has an operational-readiness follow-up: public `v0.2.1` multi-region data is migrated without rewriting historical target provenance, unsafe saved Checks require explicit operator review, and the release workflow proves the migration against real public bundles
+- backup, restore, database-doctor, and cross-version Compose drills are automated; the recovery drill verifies checksums and restored rows, while the release gate verifies a `v0.2.1` deployment can be replaced by the prepared digest-pinned release without losing its volume
+- full and Regional Runtime modes expose authenticated provider-neutral execution pressure at `GET /v1/runtime-metrics`, including ready/delayed/active work, retry and lease signals, oldest-work ages, status/kind counts, and retention context without exposing request payloads
+- the current Regional Runtime capacity contract is explicitly `single-replica-sqlite` with executor concurrency `1` and `horizontalScalingSafe: false`; operators and managed providers may use its metrics for warm policy, scheduling, and vertical sizing, but must not create independent replicas that split SQLite leases and idempotency state
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite
@@ -255,10 +259,11 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 ## Immediate Next Tasks
 
-1. merge and release the completed issue #14 Regional Runtime Protocol and deployment profile
-2. run a documented operator backup/restore drill against the released bundle
-3. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
-4. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+1. merge and formally release the issue #14 operational-readiness follow-up, then confirm the protected release publishes the three digest-pinned runtime images and upgrade-tested bundle
+2. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
+3. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+4. evaluate production dependency pruning and image-size budgets for the unified `webperf` image without weakening role parity
+5. keep Regional Runtime deployments at one replica unless a future public shared-state protocol makes horizontal scaling explicitly safe
 
 ## Update Protocol
 

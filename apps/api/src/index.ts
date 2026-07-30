@@ -2521,11 +2521,22 @@ function buildExecutionResourceContext(
       throw new Error('Network execution references a missing job');
     }
 
-    const check = payload.checkId ? repository.getCheckProfile(payload.checkId) : null;
+    const storedCheck = payload.checkId
+      ? repository.getCheckProfile(payload.checkId)
+      : null;
+    const check = storedCheck
+      ? reconcileCheckProfileRuntimeLocation(storedCheck).profile
+      : null;
     const run = payload.runId ? repository.getCheckProfileRun(payload.runId) : null;
 
     if ((payload.checkId && !check) || (payload.runId && !run)) {
       throw new Error('Network execution references a missing check or run');
+    }
+    if (check?.locationMigration?.status === 'requires_review') {
+      repository.cancelExecutionJob(executionJob.id);
+      throw new Error(
+        'Network execution is disabled until the saved Check runtime location is reviewed'
+      );
     }
 
     const baselineRun = check && run ? resolveBaselineRun(check) : null;
@@ -3140,20 +3151,14 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     );
   }
 
-  if (
-    existing?.locationMigration?.status === 'requires_review'
-    && existing.locationMigration.runtimeRegionId !== runtime.runtimeLocation.regionId
-  ) {
-    repository.saveCheckProfile({
-      ...existing,
-      schedule: null,
-      locationMigration: {
-        ...existing.locationMigration,
-        runtimeRegionId: runtime.runtimeLocation.regionId,
-        acknowledgedAt: null
-      },
-      updatedAt: new Date().toISOString()
-    });
+  const locationReconciliation = existing
+    ? reconcileCheckProfileRuntimeLocation(existing)
+    : null;
+  if (locationReconciliation) {
+    existing = locationReconciliation.profile;
+  }
+
+  if (locationReconciliation?.locationChanged) {
     return json(
       {
         code: 'runtime_location_changed',
@@ -3237,16 +3242,23 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
 }
 
 async function handleRunCheckProfile(profileId: string, request: Request) {
-  const profile = repository.getCheckProfile(profileId);
+  const storedProfile = repository.getCheckProfile(profileId);
 
-  if (!profile) {
+  if (!storedProfile) {
     return json({ error: 'Check profile not found' }, { status: 404 });
   }
 
+  const { profile, locationChanged } =
+    reconcileCheckProfileRuntimeLocation(storedProfile);
   if (profile.locationMigration?.status === 'requires_review') {
     return json(
       {
-        error: 'This saved check is disabled until its legacy Region Set migration is reviewed and acknowledged.'
+        code: locationChanged
+          ? 'runtime_location_changed'
+          : 'location_review_required',
+        error: locationChanged
+          ? 'The self-host runtime location changed. Review the current runtime location and acknowledge it before running this saved check.'
+          : 'This saved check is disabled until its legacy Region Set migration is reviewed and acknowledged.'
       },
       { status: 409 }
     );
@@ -3293,6 +3305,7 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
   const dispatchAt = parseDispatchTime(url.searchParams.get('now'));
   const dueProfiles = repository
     .listCheckProfiles()
+    .map((profile) => reconcileCheckProfileRuntimeLocation(profile).profile)
     .filter(
       (profile) =>
         profile.locationMigration?.status !== 'requires_review'
@@ -3343,6 +3356,33 @@ async function handleDispatchScheduledProfiles(_request: Request, url: URL) {
   };
 
   return json(response, { status: 200 });
+}
+
+function reconcileCheckProfileRuntimeLocation(profile: CheckProfile): {
+  profile: CheckProfile;
+  locationChanged: boolean;
+} {
+  const locationMigration = profile.locationMigration;
+  if (
+    !locationMigration
+    || locationMigration.runtimeRegionId === runtime.runtimeLocation.regionId
+  ) {
+    return { profile, locationChanged: false };
+  }
+
+  const updatedProfile: CheckProfile = {
+    ...profile,
+    schedule: null,
+    locationMigration: {
+      ...locationMigration,
+      runtimeRegionId: runtime.runtimeLocation.regionId,
+      status: 'requires_review',
+      acknowledgedAt: null
+    },
+    updatedAt: new Date().toISOString()
+  };
+  repository.saveCheckProfile(updatedProfile);
+  return { profile: updatedProfile, locationChanged: true };
 }
 
 function handleListCheckProfileRuns(profileId: string, query?: ListQuery) {

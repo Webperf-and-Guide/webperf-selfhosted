@@ -14,6 +14,7 @@ import {
   analysisResourceSchema,
   appContract,
   comparisonResourceSchema,
+  networkProbeExecutionPayloadSchema,
   opsContract,
   publicContract
 } from '@webperf/contracts';
@@ -1165,6 +1166,7 @@ describe('api service monitoring expansion', () => {
       await assertSingleRegionSavedCheckMigration({
         baseUrl: harness.baseUrl,
         repository: harness.repository,
+        probePort: probe.port,
         propertyId: property.id,
         routeSetId: routeSet.id,
         webhookUrl: webhook.url
@@ -1177,12 +1179,14 @@ describe('api service monitoring expansion', () => {
 const assertSingleRegionSavedCheckMigration = async ({
   baseUrl,
   repository,
+  probePort,
   propertyId,
   routeSetId,
   webhookUrl
 }: {
   baseUrl: string;
   repository: JobRepository;
+  probePort: number;
   propertyId: string;
   routeSetId: string;
   webhookUrl: string;
@@ -1203,7 +1207,7 @@ const assertSingleRegionSavedCheckMigration = async ({
     locationMigration: {
       sourceRegionPackId: 'pack_global',
       sourceRegions: ['tokyo', 'singapore'],
-      runtimeRegionId: 'tokyo',
+      runtimeRegionId: 'local',
       status: 'requires_review',
       reason: 'legacy_multi_region',
       acknowledgedAt: null
@@ -1218,6 +1222,14 @@ const assertSingleRegionSavedCheckMigration = async ({
   expect(blockedRun.status).toBe(409);
   expect(await blockedRun.json()).toMatchObject({
     error: expect.stringContaining('disabled')
+  });
+  const staleRuntimeProfile = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...staleRuntimeProfile,
+    locationMigration: {
+      ...staleRuntimeProfile.locationMigration!,
+      runtimeRegionId: 'tokyo'
+    }
   });
 
   const updatePayload = {
@@ -1280,6 +1292,85 @@ const assertSingleRegionSavedCheckMigration = async ({
     body: '{}'
   });
   expect(acceptedRun.status).toBe(201);
+
+  const appliedProfile = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...appliedProfile,
+    locationMigration: {
+      ...appliedProfile.locationMigration!,
+      runtimeRegionId: 'tokyo',
+      status: 'applied',
+      acknowledgedAt: null
+    }
+  });
+  const changedRuntimeRun = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}'
+  });
+  expect(changedRuntimeRun.status).toBe(409);
+  expect(await changedRuntimeRun.json()).toMatchObject({
+    code: 'runtime_location_changed'
+  });
+  expect(repository.getCheckProfile(profile.id)).toMatchObject({
+    schedule: null,
+    locationMigration: {
+      runtimeRegionId: 'local',
+      status: 'requires_review',
+      acknowledgedAt: null
+    }
+  });
+  const blockedQueuedExecution = repository.listExecutionJobs().find((executionJob) => {
+    const payload = networkProbeExecutionPayloadSchema.safeParse(executionJob.payload);
+    return executionJob.kind === 'network_probe'
+      && executionJob.status === 'queued'
+      && payload.success
+      && payload.data.checkId === profile.id;
+  });
+  expect(blockedQueuedExecution).toBeDefined();
+  await drainExecutions(baseUrl, probePort);
+  expect(repository.getExecutionJob(blockedQueuedExecution!.id)?.status).toBe('cancelled');
+
+  const reacceptedUpdate = await fetch(`${baseUrl}/v1/check-profiles/${profile.id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...updatePayload,
+      acknowledgeLocationMigration: true
+    })
+  });
+  expect(reacceptedUpdate.status).toBe(200);
+  const acceptedScheduledProfile = repository.getCheckProfile(profile.id)!;
+  repository.saveCheckProfile({
+    ...acceptedScheduledProfile,
+    schedule: {
+      intervalMinutes: 60,
+      nextRunAt: '2026-07-29T00:00:00.000Z',
+      lastRunAt: null,
+      lastRunJobCount: null
+    },
+    locationMigration: {
+      ...acceptedScheduledProfile.locationMigration!,
+      runtimeRegionId: 'tokyo',
+      status: 'accepted'
+    }
+  });
+  const changedRuntimeDispatch = await fetch(
+    `${baseUrl}/v1/scheduler/dispatch?now=2026-07-30T00:00:00.000Z`,
+    { method: 'POST' }
+  );
+  expect(changedRuntimeDispatch.status).toBe(200);
+  expect(await changedRuntimeDispatch.json()).toMatchObject({
+    triggeredCount: 0
+  });
+  expect(repository.getCheckProfile(profile.id)).toMatchObject({
+    schedule: null,
+    locationMigration: {
+      runtimeRegionId: 'local',
+      status: 'requires_review',
+      acknowledgedAt: null
+    }
+  });
 };
 
 const createTempDirectory = () => {

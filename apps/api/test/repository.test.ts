@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
-import type { CheckProfile, CheckProfileRun, LatencyJobDetail, Property, RouteSet } from '@webperf/contracts';
+import {
+  browserAuditResourceSchema,
+  type BrowserAuditResource,
+  type CheckProfile,
+  type CheckProfileRun,
+  type LatencyJobDetail,
+  type Property,
+  type RouteSet
+} from '@webperf/contracts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -212,6 +220,27 @@ const createCheckProfileRun = (overrides: Partial<CheckProfileRun> = {}): CheckP
   ...overrides
 });
 
+const createBrowserAudit = (
+  overrides: Partial<BrowserAuditResource> = {}
+): BrowserAuditResource => browserAuditResourceSchema.parse({
+  id: 'audit_test',
+  targetUrl: 'https://example.com/',
+  region: 'tokyo',
+  status: 'queued',
+  requestedAt: '2026-04-08T00:00:00.000Z',
+  startedAt: null,
+  completedAt: null,
+  policy: {
+    preset: 'mobile',
+    flow: { steps: [{ type: 'navigate', url: 'https://example.com/' }] }
+  },
+  customHeaders: [],
+  cookies: [],
+  result: null,
+  error: null,
+  ...overrides
+});
+
 describe('sqlite control repository', () => {
   test('migrates published beta multi-region data without rewriting historical target provenance', () => {
     const databasePath = createTempDatabasePath();
@@ -346,6 +375,39 @@ describe('sqlite control repository', () => {
         })
       );
     }
+    const pendingNullRegionAudit = createBrowserAudit({
+      id: 'audit_legacy_pending_null',
+      region: null
+    });
+    const pendingMismatchedAudit = createBrowserAudit({
+      id: 'audit_legacy_pending_singapore',
+      region: 'singapore'
+    });
+    const pendingMatchingAudit = createBrowserAudit({
+      id: 'audit_legacy_pending_tokyo',
+      region: 'tokyo'
+    });
+    const completedMismatchedAudit = createBrowserAudit({
+      id: 'audit_legacy_completed_singapore',
+      region: 'singapore',
+      status: 'succeeded',
+      startedAt: timestamp,
+      completedAt: timestamp
+    });
+    for (const audit of [
+      pendingNullRegionAudit,
+      pendingMismatchedAudit,
+      pendingMatchingAudit,
+      completedMismatchedAudit
+    ]) {
+      saveEntity.run(
+        'browser_audit',
+        audit.id,
+        timestamp,
+        timestamp,
+        storageCrypto.stringify(audit)
+      );
+    }
 
     const insertRun = database.query(`
       INSERT INTO check_profile_runs (id, profile_id, created_at, payload_json)
@@ -371,6 +433,26 @@ describe('sqlite control repository', () => {
             {
               ...createCheckProfileRun().routes[0]!,
               jobId
+            }
+          ]
+        }))
+      );
+    }
+    for (let index = 0; index < 205; index += 1) {
+      const runId = `run_global_batch_${index}`;
+      insertRun.run(
+        runId,
+        multiRegionProfile.id,
+        timestamp,
+        storageCrypto.stringify(createCheckProfileRun({
+          id: runId,
+          profileId: multiRegionProfile.id,
+          routes: [
+            {
+              ...createCheckProfileRun().routes[0]!,
+              jobId: index === 204
+                ? 'job_legacy_late_saved_check'
+                : 'job_test'
             }
           ]
         }))
@@ -466,6 +548,34 @@ describe('sqlite control repository', () => {
       timestamp,
       timestamp
     );
+    for (const [executionId, resourceId] of [
+      [
+        'exec_standalone_singleton_mismatch_pending',
+        'job_legacy_pending_singleton_standalone'
+      ],
+      [
+        'exec_standalone_singleton_match_pending',
+        'job_legacy_pending_singleton_match'
+      ],
+      ['exec_late_saved_check_pending', 'job_legacy_late_saved_check'],
+      ['exec_audit_null_pending', pendingNullRegionAudit.id],
+      ['exec_audit_mismatch_pending', pendingMismatchedAudit.id],
+      ['exec_audit_matching_pending', pendingMatchingAudit.id]
+    ] as const) {
+      insertExecution.run(
+        executionId,
+        executionId.startsWith('exec_audit_') ? 'browser_audit' : 'network_probe',
+        resourceId,
+        'queued',
+        null,
+        null,
+        0,
+        timestamp,
+        storageCrypto.stringify({ version: 'v1' }),
+        timestamp,
+        timestamp
+      );
+    }
     insertExecution.finalize();
 
     const currentJob = createJob({
@@ -579,6 +689,45 @@ describe('sqlite control repository', () => {
       timestamp,
       storageCrypto.stringify(pendingSingletonJob)
     );
+    const createPendingSingletonJob = (id: string, region: string) => ({
+      ...pendingSingletonJob,
+      id,
+      targets: [{
+        ...pendingSingletonTarget,
+        jobId: id,
+        region
+      }],
+      selectedRegions: [region]
+    });
+    const pendingStandaloneSingletonMismatchJob = createPendingSingletonJob(
+      'job_legacy_pending_singleton_standalone',
+      'singapore'
+    );
+    const pendingStandaloneSingletonMatchJob = createPendingSingletonJob(
+      'job_legacy_pending_singleton_match',
+      'tokyo'
+    );
+    const pendingLateSavedCheckJob = createPendingSingletonJob(
+      'job_legacy_late_saved_check',
+      'tokyo'
+    );
+    for (const pendingJob of [
+      pendingStandaloneSingletonMismatchJob,
+      pendingStandaloneSingletonMatchJob,
+      pendingLateSavedCheckJob
+    ]) {
+      database.query(`
+        INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        pendingJob.id,
+        pendingJob.url,
+        pendingJob.status,
+        pendingJob.requestedAt,
+        timestamp,
+        storageCrypto.stringify(pendingJob)
+      );
+    }
     const insertLegacyJob = database.query(`
       INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -656,12 +805,61 @@ describe('sqlite control repository', () => {
         }
       ]
     });
+    expect(repository.getJob(pendingStandaloneSingletonMismatchJob.id)).toMatchObject({
+      region: 'singapore',
+      historicalRegions: ['singapore'],
+      status: 'failed',
+      targets: [{
+        region: 'singapore',
+        status: 'failed',
+        errorCode: 'single_region_upgrade_cancelled'
+      }]
+    });
+    expect(repository.getJob(pendingStandaloneSingletonMatchJob.id)).toMatchObject({
+      region: 'tokyo',
+      historicalRegions: ['tokyo'],
+      status: 'queued',
+      targets: [{
+        region: 'tokyo',
+        status: 'queued'
+      }]
+    });
+    expect(repository.getJob(pendingLateSavedCheckJob.id)).toMatchObject({
+      region: 'tokyo',
+      historicalRegions: ['tokyo'],
+      status: 'failed',
+      targets: [{
+        region: 'tokyo',
+        status: 'failed',
+        errorCode: 'single_region_upgrade_cancelled'
+      }]
+    });
     for (const index of [0, 99, 100, 199, 204]) {
       expect(repository.getJob(`job_legacy_batch_${index}`)).toMatchObject({
         region: 'historical-multi-region',
         historicalRegions: ['tokyo', 'singapore']
       });
     }
+    expect(repository.getBrowserAudit(pendingNullRegionAudit.id)).toMatchObject({
+      region: null,
+      status: 'cancelled',
+      completedAt: expect.any(String)
+    });
+    expect(repository.getBrowserAudit(pendingMismatchedAudit.id)).toMatchObject({
+      region: 'singapore',
+      status: 'cancelled',
+      completedAt: expect.any(String)
+    });
+    expect(repository.getBrowserAudit(pendingMatchingAudit.id)).toMatchObject({
+      region: 'tokyo',
+      status: 'queued',
+      completedAt: null
+    });
+    expect(repository.getBrowserAudit(completedMismatchedAudit.id)).toMatchObject({
+      region: 'singapore',
+      status: 'succeeded',
+      completedAt: timestamp
+    });
     expect(repository.getCheckProfile('profile_tokyo')).toMatchObject({
       schedule: {
         intervalMinutes: 60
@@ -737,17 +935,29 @@ describe('sqlite control repository', () => {
             'exec_singapore_job_pending',
             'exec_singapore_probe_pending',
             'exec_tokyo_probe_pending',
-            'exec_standalone_multi_pending'
+            'exec_standalone_multi_pending',
+            'exec_standalone_singleton_mismatch_pending',
+            'exec_standalone_singleton_match_pending',
+            'exec_late_saved_check_pending',
+            'exec_audit_null_pending',
+            'exec_audit_mismatch_pending',
+            'exec_audit_matching_pending'
           )
           ORDER BY id
         `)
         .all()
     ).toEqual([
+      { id: 'exec_audit_matching_pending', status: 'queued' },
+      { id: 'exec_audit_mismatch_pending', status: 'cancelled' },
+      { id: 'exec_audit_null_pending', status: 'cancelled' },
       { id: 'exec_global_probe_pending', status: 'cancelled' },
       { id: 'exec_global_webhook_pending', status: 'cancelled' },
+      { id: 'exec_late_saved_check_pending', status: 'cancelled' },
       { id: 'exec_singapore_job_pending', status: 'cancelled' },
       { id: 'exec_singapore_probe_pending', status: 'cancelled' },
       { id: 'exec_standalone_multi_pending', status: 'cancelled' },
+      { id: 'exec_standalone_singleton_match_pending', status: 'queued' },
+      { id: 'exec_standalone_singleton_mismatch_pending', status: 'cancelled' },
       { id: 'exec_tokyo_probe_pending', status: 'queued' }
     ]);
     verifyDatabase.close();

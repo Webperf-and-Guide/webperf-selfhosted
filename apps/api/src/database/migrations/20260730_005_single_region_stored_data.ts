@@ -1,5 +1,6 @@
 import type { SqliteMigration } from './types';
 import {
+  browserAuditResourceSchema,
   checkProfileRunSchema,
   latencyJobDetailSchema,
   type CheckProfileLocationMigrationReason
@@ -131,19 +132,28 @@ const terminalizeUnfinishedJob = (
   };
 };
 
-const finishLegacyMultiRegionJob = (
+const finishLegacyJobForRuntime = (
   value: unknown,
-  migrationTimestamp: string
+  migrationTimestamp: string,
+  runtimeRegionId: string | undefined
 ) => {
   const rewritten = rewriteLegacyJob(value);
   const selectedRegions = isRecord(value)
     ? toStringArray(value.selectedRegions)
     : null;
+  const requiresCancellation = selectedRegions
+    ? selectedRegions.length > 1
+      || (
+        selectedRegions.length === 1
+        && runtimeRegionId !== undefined
+        && selectedRegions[0] !== runtimeRegionId
+      )
+    : false;
   if (
     !isRecord(value)
     || !isRecord(rewritten)
     || !selectedRegions
-    || selectedRegions.length <= 1
+    || !requiresCancellation
     || !Array.isArray(rewritten.targets)
   ) {
     return {
@@ -156,7 +166,9 @@ const finishLegacyMultiRegionJob = (
   const terminalized = terminalizeUnfinishedJob(
     rewritten,
     migrationTimestamp,
-    'Unfinished multi-region execution was cancelled during the single-region upgrade'
+    selectedRegions.length > 1
+      ? 'Unfinished multi-region execution was cancelled during the single-region upgrade'
+      : 'Unfinished execution was cancelled because its legacy location differs from the configured runtime'
   );
 
   return {
@@ -239,11 +251,13 @@ const visitPayloadRowsInBatches = ({
 
 const rewriteJobRowsInBatches = ({
   database,
+  runtimeRegionId,
   migrationTimestamp,
   parse,
   stringify
 }: {
   database: Parameters<SqliteMigration['up']>[0];
+  runtimeRegionId: string | undefined;
   migrationTimestamp: string;
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
@@ -286,9 +300,10 @@ const rewriteJobRowsInBatches = ({
       readNextBatch,
       parse,
       visit(row, value) {
-        const rewritten = finishLegacyMultiRegionJob(
+        const rewritten = finishLegacyJobForRuntime(
           value,
-          migrationTimestamp
+          migrationTimestamp,
+          runtimeRegionId
         );
         if (rewritten.value !== value) {
           update.run(stringify(rewritten.value), row.rowid);
@@ -408,19 +423,24 @@ const rewriteCheckRowsInBatches = ({
         WHERE profile_id = ?
       )
   `);
-  const readFirstRunBatch = database.query<PersistedPayloadRow, [string]>(`
+  const readFirstRunBatch = database.query<PersistedPayloadRow, []>(`
     SELECT rowid, payload_json
     FROM check_profile_runs
-    WHERE profile_id = ?
     ORDER BY rowid
     LIMIT ${migrationBatchSize}
   `);
-  const readNextRunBatch = database.query<PersistedPayloadRow, [string, number]>(`
+  const readNextRunBatch = database.query<PersistedPayloadRow, [number]>(`
     SELECT rowid, payload_json
     FROM check_profile_runs
-    WHERE profile_id = ? AND rowid > ?
+    WHERE rowid > ?
     ORDER BY rowid
     LIMIT ${migrationBatchSize}
+  `);
+  const readCheck = database.query<PersistedPayloadRow, [string]>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'check_profile' AND id = ?
+    LIMIT 1
   `);
   const readJob = database.query<PersistedPayloadRow, [string]>(`
     SELECT rowid, payload_json
@@ -445,20 +465,41 @@ const rewriteCheckRowsInBatches = ({
       AND resource_id = ?
       AND status NOT IN ('succeeded', 'failed', 'cancelled')
   `);
-  const terminalizeCheckJobs = (profileId: string) => {
-    let lastRowId: number | null = null;
+  const terminalizeReviewRequiredCheckJobs = () => {
     const recentlyProcessedJobIds = new Map<string, true>();
-    while (true) {
-      const rows: PersistedPayloadRow[] = lastRowId === null
-        ? readFirstRunBatch.all(profileId)
-        : readNextRunBatch.all(profileId, lastRowId);
-      if (rows.length === 0) {
-        return;
+    const profileReviewCache = new Map<string, boolean>();
+    const requiresReview = (profileId: string) => {
+      const cached = profileReviewCache.get(profileId);
+      if (cached !== undefined) {
+        profileReviewCache.delete(profileId);
+        profileReviewCache.set(profileId, cached);
+        return cached;
       }
+      const profileRow = readCheck.get(profileId);
+      const profile = profileRow ? parse(profileRow.payload_json) : null;
+      const result = isRecord(profile)
+        && isRecord(profile.locationMigration)
+        && profile.locationMigration.status === 'requires_review';
+      profileReviewCache.set(profileId, result);
+      if (profileReviewCache.size > migrationBatchSize) {
+        const oldestProfileId = profileReviewCache.keys().next().value;
+        if (oldestProfileId !== undefined) {
+          profileReviewCache.delete(oldestProfileId);
+        }
+      }
+      return result;
+    };
 
-      for (const row of rows) {
-        const run = checkProfileRunSchema.safeParse(parse(row.payload_json));
-        if (run.success) {
+    // Scan the run table once in its native rowid order. Filtering by profile
+    // while ordering by rowid would repeatedly sort/rescan long-lived Checks
+    // because the published-beta index is (profile_id, created_at DESC).
+    visitPayloadRowsInBatches({
+      readFirstBatch: readFirstRunBatch,
+      readNextBatch: readNextRunBatch,
+      parse,
+      visit(_row, value) {
+        const run = checkProfileRunSchema.safeParse(value);
+        if (run.success && requiresReview(run.data.profileId)) {
           for (const route of run.data.routes) {
             if (recentlyProcessedJobIds.has(route.jobId)) {
               recentlyProcessedJobIds.delete(route.jobId);
@@ -496,9 +537,9 @@ const rewriteCheckRowsInBatches = ({
             }
           }
         }
-        lastRowId = row.rowid;
+        return true;
       }
-    }
+    });
   };
   const regionPackCache = new Map<string, string[]>();
   const resolveRegionPack = (regionPackId: string) => {
@@ -527,6 +568,7 @@ const rewriteCheckRowsInBatches = ({
     return regions;
   };
 
+  let hasChecksRequiringReview = false;
   try {
     visitCheckRowsInBatches({
       database,
@@ -546,22 +588,109 @@ const rewriteCheckRowsInBatches = ({
               migrationTimestamp,
               rewritten.id
             );
-            terminalizeCheckJobs(rewritten.id);
+            hasChecksRequiringReview = true;
           }
         }
         return true;
       }
     });
+    if (hasChecksRequiringReview) {
+      terminalizeReviewRequiredCheckJobs();
+    }
   } finally {
     readRegionPack.finalize();
     update.finalize();
     cancelActiveExecutions.finalize();
-    readFirstRunBatch.finalize();
-    readNextRunBatch.finalize();
+    readCheck.finalize();
     readJob.finalize();
     updateJob.finalize();
     updateJobTerminalIndex.finalize();
     cancelActiveJobExecution.finalize();
+  }
+};
+
+const reconcileLegacyBrowserAuditsInBatches = ({
+  database,
+  runtimeRegionId,
+  migrationTimestamp,
+  parse,
+  stringify
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  runtimeRegionId: string;
+  migrationTimestamp: string;
+  parse: (payload: string) => unknown;
+  stringify: (value: unknown) => string;
+}) => {
+  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'browser_audit'
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'browser_audit' AND rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const updateAudit = database.query<never, [string, string, number]>(`
+    UPDATE saved_entities
+    SET payload_json = ?, updated_at = ?
+    WHERE rowid = ?
+  `);
+  const cancelActiveExecution = database.query<never, [string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'cancelled',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE kind = 'browser_audit'
+      AND resource_id = ?
+      AND status NOT IN ('succeeded', 'failed', 'cancelled')
+  `);
+
+  try {
+    visitPayloadRowsInBatches({
+      readFirstBatch,
+      readNextBatch,
+      parse,
+      visit(row, value) {
+        const parsed = browserAuditResourceSchema.safeParse(value);
+        if (
+          !parsed.success
+          || !isRecord(value)
+          || ['succeeded', 'failed', 'cancelled'].includes(parsed.data.status)
+          || parsed.data.region === runtimeRegionId
+        ) {
+          return true;
+        }
+
+        updateAudit.run(
+          stringify({
+            ...value,
+            status: 'cancelled',
+            completedAt: migrationTimestamp,
+            result: null,
+            error: null
+          }),
+          migrationTimestamp,
+          row.rowid
+        );
+        cancelActiveExecution.run(
+          migrationTimestamp,
+          migrationTimestamp,
+          parsed.data.id
+        );
+        return true;
+      }
+    });
+  } finally {
+    updateAudit.finalize();
+    cancelActiveExecution.finalize();
   }
 };
 
@@ -581,12 +710,20 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
     const migrationTimestamp = new Date().toISOString();
     rewriteJobRowsInBatches({
       database,
+      runtimeRegionId,
       migrationTimestamp,
       parse,
       stringify
     });
     if (runtimeRegionId) {
       rewriteCheckRowsInBatches({
+        database,
+        runtimeRegionId,
+        migrationTimestamp,
+        parse,
+        stringify
+      });
+      reconcileLegacyBrowserAuditsInBatches({
         database,
         runtimeRegionId,
         migrationTimestamp,

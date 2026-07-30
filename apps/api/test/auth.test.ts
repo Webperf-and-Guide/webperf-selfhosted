@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { authorizeApiRequest, type ApiAuthSecrets } from '../src/auth';
 
 const secrets: ApiAuthSecrets = {
+  runtimeMode: 'full',
   adminToken: 'current-admin-token-value',
   adminTokenNext: 'next-admin-token-value',
   internalSecret: 'current-internal-secret-value',
@@ -72,7 +73,7 @@ describe('single-organization API authentication', () => {
     )?.status).toBe(401);
   });
 
-  test('allows operators and managed runtimes to read the shared metrics surface', () => {
+  test('uses only mode-specific credentials for the shared metrics surface', () => {
     expect(authorizeApiRequest(
       request('/v1/runtime-metrics', secrets.adminToken),
       secrets
@@ -80,7 +81,19 @@ describe('single-organization API authentication', () => {
     expect(authorizeApiRequest(
       request('/v1/runtime-metrics', secrets.regionalRuntimeSecret),
       secrets
+    )?.status).toBe(401);
+    const regionalSecrets: ApiAuthSecrets = {
+      ...secrets,
+      runtimeMode: 'regional-runtime'
+    };
+    expect(authorizeApiRequest(
+      request('/v1/runtime-metrics', secrets.regionalRuntimeSecret),
+      regionalSecrets
     )).toBeNull();
+    expect(authorizeApiRequest(
+      request('/v1/runtime-metrics', secrets.adminToken),
+      regionalSecrets
+    )?.status).toBe(401);
     expect(authorizeApiRequest(
       request('/v1/runtime-metrics', secrets.internalSecret),
       secrets

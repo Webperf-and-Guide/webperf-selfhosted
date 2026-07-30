@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export type ApiAuthSecrets = {
+  runtimeMode: 'full' | 'regional-runtime';
   adminToken?: string;
   adminTokenNext?: string;
   internalSecret: string;
@@ -52,12 +53,9 @@ const resolveExpectedTokens = (
     return [secrets.internalSecret, secrets.internalSecretNext];
   }
   if (pathname === '/v1/runtime-metrics') {
-    return [
-      secrets.adminToken,
-      secrets.adminTokenNext,
-      secrets.regionalRuntimeSecret,
-      secrets.regionalRuntimeSecretNext
-    ];
+    return secrets.runtimeMode === 'regional-runtime'
+      ? [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext]
+      : [secrets.adminToken, secrets.adminTokenNext];
   }
   if (isRegionalExecutionPath(pathname)) {
     return [secrets.regionalRuntimeSecret, secrets.regionalRuntimeSecretNext];

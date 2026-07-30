@@ -6,7 +6,7 @@ type RecoveryManifest = {
   schemaVersion: 1;
   job: {
     id: string;
-    region: string;
+    regions: string[];
   };
   browserAudit: {
     id: string;
@@ -136,6 +136,27 @@ const requireString = (value: unknown, label: string) => {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
+};
+
+const requireStringArray = (value: unknown, label: string) => {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || !value.every((item) => typeof item === 'string' && item.length > 0)
+  ) {
+    throw new Error(`${label} must be a non-empty string array`);
+  }
+  return value as string[];
+};
+
+export const resolveRecoveryJobRegions = (
+  job: Record<string, unknown>,
+  label = 'job'
+) => {
+  if (typeof job.region === 'string' && job.region.length > 0) {
+    return [job.region];
+  }
+  return requireStringArray(job.selectedRegions, `${label}.selectedRegions`);
 };
 
 const waitForResource = async ({
@@ -316,7 +337,7 @@ const seed = async (
     schemaVersion: 1,
     job: {
       id: jobId,
-      region: requireString(job.region, 'job.region')
+      regions: resolveRecoveryJobRegions(job)
     },
     browserAudit: {
       id: auditId,
@@ -357,7 +378,9 @@ const parseManifest = async (path: string): Promise<RecoveryManifest> => {
     schemaVersion: 1,
     job: {
       id: requireString(job.id, 'manifest.job.id'),
-      region: requireString(job.region, 'manifest.job.region')
+      regions: job.regions === undefined
+        ? [requireString(job.region, 'manifest.job.region')]
+        : requireStringArray(job.regions, 'manifest.job.regions')
     },
     browserAudit: {
       id: requireString(browserAudit.id, 'manifest.browserAudit.id'),
@@ -377,7 +400,12 @@ const verify = async (baseUrl: string, token: string, manifestPath: string) => {
     await requestJson(baseUrl, token, `/v1/jobs/${encodeURIComponent(manifest.job.id)}`),
     'restored job'
   );
-  if (job.status !== 'succeeded' || job.region !== manifest.job.region) {
+  const restoredRegions = resolveRecoveryJobRegions(job, 'restored job');
+  if (
+    job.status !== 'succeeded'
+    || restoredRegions.length !== manifest.job.regions.length
+    || restoredRegions.some((region, index) => region !== manifest.job.regions[index])
+  ) {
     throw new Error('Restored Fast Check does not match the recovery manifest');
   }
 
@@ -430,18 +458,20 @@ const verify = async (baseUrl: string, token: string, manifestPath: string) => {
   }));
 };
 
-const command = requireArgument(2, 'command');
-const baseUrl = parseBaseUrl(requireArgument(3, 'base URL'));
-const token = requireEnvironment('WEBPERF_RECOVERY_ADMIN_TOKEN');
-const manifestPath = requireArgument(4, 'manifest path');
+if (import.meta.main) {
+  const command = requireArgument(2, 'command');
+  const baseUrl = parseBaseUrl(requireArgument(3, 'base URL'));
+  const token = requireEnvironment('WEBPERF_RECOVERY_ADMIN_TOKEN');
+  const manifestPath = requireArgument(4, 'manifest path');
 
-switch (command) {
-  case 'seed':
-    await seed(baseUrl, token, manifestPath, parseTimeoutMs());
-    break;
-  case 'verify':
-    await verify(baseUrl, token, manifestPath);
-    break;
-  default:
-    throw new Error(`Unknown recovery fixture command: ${command}`);
+  switch (command) {
+    case 'seed':
+      await seed(baseUrl, token, manifestPath, parseTimeoutMs());
+      break;
+    case 'verify':
+      await verify(baseUrl, token, manifestPath);
+      break;
+    default:
+      throw new Error(`Unknown recovery fixture command: ${command}`);
+  }
 }

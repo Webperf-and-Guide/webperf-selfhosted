@@ -1101,50 +1101,61 @@ export const createSqliteJobRepository = ({
         : executionJob.error?.code ?? 'execution_failed';
       const errorMessage = cancelled
         ? 'Network execution was cancelled before producing a result'
-        : executionJob.error?.message
-          ?? 'Network execution stopped before producing a result';
+        : (
+            executionJob.error?.message
+            ?? 'Network execution stopped before producing a result'
+          );
 
       for (const jobId of payload.data.jobIds) {
-        const row = getStatement.get(jobId);
-        const job = row ? parseJob(row) : null;
-        if (!job) {
-          continue;
-        }
-
-        let changed = false;
-        const targets = job.targets.map((target) => {
-          if (target.status === 'succeeded' || target.status === 'failed') {
-            return target;
+        try {
+          const row = getStatement.get(jobId);
+          const job = row ? parseJob(row) : null;
+          if (!job) {
+            continue;
           }
-          changed = true;
-          return {
-            ...target,
-            status: 'failed' as const,
-            latencyMs: null,
-            statusCode: null,
-            success: false,
-            probeImpl: null,
-            measurement: null,
-            slotId: null,
-            errorCode,
-            errorClass: 'terminal' as const,
-            errorMessage,
-            finishedAt: nowIso,
-            updatedAt: nowIso
-          };
-        });
-        if (!changed) {
-          continue;
-        }
 
-        persistJob({
-          ...job,
-          status: deriveJobStatus(targets),
-          completedAt: nowIso,
-          targets,
-          evaluation: null,
-          summary: summarizeTargets(targets)
-        });
+          let changed = false;
+          const targets = job.targets.map((target) => {
+            if (target.status === 'succeeded' || target.status === 'failed') {
+              return target;
+            }
+            changed = true;
+            return {
+              ...target,
+              status: 'failed' as const,
+              latencyMs: null,
+              statusCode: null,
+              success: false,
+              probeImpl: null,
+              measurement: null,
+              slotId: null,
+              errorCode,
+              errorClass: 'terminal' as const,
+              errorMessage,
+              finishedAt: nowIso,
+              updatedAt: nowIso
+            };
+          });
+          if (!changed) {
+            continue;
+          }
+
+          persistJob({
+            ...job,
+            status: deriveJobStatus(targets),
+            completedAt: nowIso,
+            targets,
+            evaluation: null,
+            summary: summarizeTargets(targets)
+          });
+        } catch {
+          console.warn(JSON.stringify({
+            service: 'webperf-api',
+            warning: 'network_probe_terminal_sync_failed',
+            executionJobId: executionJob.id,
+            jobId
+          }));
+        }
       }
       return;
     }

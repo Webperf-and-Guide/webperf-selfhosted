@@ -1,5 +1,9 @@
 import type { SqliteMigration } from './types';
-import type { CheckProfileLocationMigrationReason } from '@webperf/contracts';
+import {
+  latencyJobDetailSchema,
+  type CheckProfileLocationMigrationReason
+} from '@webperf/contracts';
+import { deriveJobStatus, summarizeTargets } from '@webperf/report-core';
 
 const historicalMultiRegionId = 'historical-multi-region';
 const migrationBatchSize = 100;
@@ -86,11 +90,20 @@ const finishLegacyMultiRegionJob = (
     };
   }
 
+  const parsed = latencyJobDetailSchema.safeParse(rewritten);
+  if (!parsed.success) {
+    return {
+      value: rewritten,
+      cancelledExecutionResourceId:
+        typeof rewritten.id === 'string' ? rewritten.id : null,
+      terminalStatus: null
+    };
+  }
+
   let changed = false;
-  const targets = rewritten.targets.map((target) => {
+  const targets = parsed.data.targets.map((target) => {
     if (
-      !isRecord(target)
-      || target.status === 'succeeded'
+      target.status === 'succeeded'
       || target.status === 'failed'
     ) {
       return target;
@@ -98,7 +111,7 @@ const finishLegacyMultiRegionJob = (
     changed = true;
     return {
       ...target,
-      status: 'failed',
+      status: 'failed' as const,
       latencyMs: null,
       statusCode: null,
       success: false,
@@ -106,38 +119,24 @@ const finishLegacyMultiRegionJob = (
       measurement: null,
       slotId: null,
       errorCode: 'single_region_upgrade_cancelled',
-      errorClass: 'terminal',
+      errorClass: 'terminal' as const,
       errorMessage:
         'Unfinished multi-region execution was cancelled during the single-region upgrade',
       finishedAt: migrationTimestamp,
       updatedAt: migrationTimestamp
     };
   });
-  const terminalStatuses = targets
-    .filter(isRecord)
-    .map((target) => target.status);
-  const succeeded = terminalStatuses.filter((status) => status === 'succeeded').length;
-  const failed = terminalStatuses.filter((status) => status === 'failed').length;
-  const terminalStatus = succeeded > 0 && failed > 0
-    ? 'partial'
-    : succeeded > 0
-      ? 'succeeded'
-      : 'failed';
+  const terminalStatus = deriveJobStatus(targets);
 
   return {
     value: changed
       ? {
-          ...rewritten,
+          ...parsed.data,
           status: terminalStatus,
           completedAt: migrationTimestamp,
           targets,
           evaluation: null,
-          summary: {
-            total: targets.length,
-            succeeded,
-            failed,
-            inflight: 0
-          }
+          summary: summarizeTargets(targets)
         }
       : rewritten,
     cancelledExecutionResourceId:

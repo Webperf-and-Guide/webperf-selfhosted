@@ -263,6 +263,28 @@ describe('durable execution repository', () => {
       }
     });
 
+    expect(
+      repository.getExecutionQueueMetrics(
+        new Date('2026-07-22T00:05:00.000Z'),
+        30,
+        'network_probe'
+      )
+    ).toMatchObject({
+      ready: 2,
+      delayed: 0,
+      active: 1,
+      expiredLeases: 1,
+      retryQueued: 0,
+      exhausted: 0,
+      oldestReadyAgeMs: 210_000,
+      oldestActiveAgeMs: 300_000,
+      byStatus: {
+        queued: 3,
+        leased: 2,
+        running: 1
+      }
+    });
+
     repository.close();
   });
 

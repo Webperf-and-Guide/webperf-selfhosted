@@ -188,7 +188,8 @@ export type JobRepository = {
   listExecutionJobs(): ExecutionJob[];
   getExecutionQueueMetrics(
     now: Date,
-    terminalCountsBoundedDays: number
+    terminalCountsBoundedDays: number,
+    claimableKind?: ExecutionJob['kind']
   ): RuntimeExecutionQueueMetrics;
   claimExecutionJob(input: ExecutionJobClaimInput, now?: Date): ExecutionJob | null;
   markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
@@ -573,7 +574,11 @@ export const createSqliteJobRepository = ({
     GROUP BY kind, status
     ORDER BY kind, status
   `);
-  const executionPressureStatement = db.query<ExecutionPressureRow, [string]>(`
+  const executionPressureStatement = db.query<ExecutionPressureRow, [
+    string,
+    string | null,
+    string | null
+  ]>(`
     WITH metric_clock(now) AS (VALUES (?))
     SELECT
       COALESCE(SUM(CASE
@@ -638,6 +643,7 @@ export const createSqliteJobRepository = ({
     FROM execution_jobs
     CROSS JOIN metric_clock
     WHERE status IN ('queued', 'leased', 'running')
+      AND (? IS NULL OR kind = ?)
   `);
   const finalizeExhaustedExecutionJobsStatement = db.query<ExecutionJobRow, [
     string,
@@ -884,7 +890,8 @@ export const createSqliteJobRepository = ({
 
   const buildExecutionQueueMetrics = (
     now: Date,
-    terminalCountsBoundedDays: number
+    terminalCountsBoundedDays: number,
+    claimableKind?: ExecutionJob['kind']
   ): RuntimeExecutionQueueMetrics => {
     if (
       !Number.isSafeInteger(terminalCountsBoundedDays)
@@ -900,7 +907,19 @@ export const createSqliteJobRepository = ({
       terminalCutoff.getUTCDate() - terminalCountsBoundedDays
     );
 
-    for (const row of executionMetricCountsStatement.all(terminalCutoff.toISOString())) {
+    const readSnapshot = db.transaction(() => ({
+      countRows: executionMetricCountsStatement.all(
+        terminalCutoff.toISOString()
+      ),
+      pressure: executionPressureStatement.get(
+        now.toISOString(),
+        claimableKind ?? null,
+        claimableKind ?? null
+      )
+    }));
+    const snapshot = readSnapshot();
+
+    for (const row of snapshot.countRows) {
       const kind = executionJobKindValues.find((candidate) => candidate === row.kind);
       const status = executionJobStatusValues.find((candidate) => candidate === row.status);
       if (!kind || !status) {
@@ -910,7 +929,7 @@ export const createSqliteJobRepository = ({
       byKind[kind][status] += row.count;
     }
 
-    const pressure = executionPressureStatement.get(now.toISOString());
+    const pressure = snapshot.pressure;
     if (!pressure) {
       throw new Error('Execution pressure query did not return a snapshot');
     }
@@ -1614,8 +1633,12 @@ export const createSqliteJobRepository = ({
         .map(parseExecutionJob)
         .filter((job): job is ExecutionJob => job !== null);
     },
-    getExecutionQueueMetrics(now, terminalCountsBoundedDays) {
-      return buildExecutionQueueMetrics(now, terminalCountsBoundedDays);
+    getExecutionQueueMetrics(now, terminalCountsBoundedDays, claimableKind) {
+      return buildExecutionQueueMetrics(
+        now,
+        terminalCountsBoundedDays,
+        claimableKind
+      );
     },
     claimExecutionJob(input, now = new Date()) {
       const leaseExpiresAt = getLeaseExpiresAt(input, now);

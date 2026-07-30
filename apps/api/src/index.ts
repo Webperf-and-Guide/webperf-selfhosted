@@ -321,7 +321,10 @@ const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
     runtimeLocation: runtime.runtimeLocation,
     executions: repository.getExecutionQueueMetrics(
       observedAt,
-      runtime.retentionDays
+      runtime.retentionDays,
+      runtime.runtimeMode === 'regional-runtime'
+        ? 'network_probe'
+        : undefined
     ),
     capacity: {
       topology: runtimeTopology,

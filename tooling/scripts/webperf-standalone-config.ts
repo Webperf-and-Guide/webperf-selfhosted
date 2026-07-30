@@ -15,6 +15,18 @@ export type StandaloneSecretName = typeof standaloneSecretNames[number];
 export type StandaloneSecrets = Partial<Record<StandaloneSecretName, string>>;
 type Environment = Record<string, string | undefined>;
 
+export const standaloneChildIdentities = {
+  api: { uid: 1_000, gid: 1_000 },
+  console: { uid: 10_001, gid: 10_001 },
+  executor: { uid: 10_002, gid: 10_002 }
+} as const;
+
+export const standaloneChildCommands = {
+  api: ['bun', './apps/api/src/index.ts'],
+  console: ['bun', './apps/console/build/index.js'],
+  executor: ['bun', './apps/executor/src/index.ts']
+} as const satisfies Record<keyof typeof standaloneChildIdentities, readonly string[]>;
+
 const hostnamePattern =
   /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
 const maximumStartupTimeoutMs = 24 * 60 * 60 * 1_000;
@@ -48,6 +60,36 @@ export const selectStandaloneSecrets = (
     return value === undefined ? [] : [[name, value]];
   })
 );
+
+export const assertStandaloneSupervisorEnvironment = (
+  platform: NodeJS.Platform,
+  uid: number | undefined
+): void => {
+  if (platform !== 'linux') {
+    throw new Error('The standalone supervisor requires a Linux container runtime');
+  }
+  if (uid !== 0) {
+    throw new Error(
+      'The standalone supervisor must start as UID 0 so it can isolate child service UIDs'
+    );
+  }
+};
+
+export const isolateStandaloneChildArgv = (
+  name: keyof typeof standaloneChildIdentities,
+  argv: readonly string[]
+): string[] => {
+  const identity = standaloneChildIdentities[name];
+  return [
+    '/usr/bin/setpriv',
+    `--reuid=${identity.uid}`,
+    `--regid=${identity.gid}`,
+    '--clear-groups',
+    '--no-new-privs',
+    '--',
+    ...argv
+  ];
+};
 
 export const resolveStandaloneApiBinding = (
   rawHost: string | undefined,

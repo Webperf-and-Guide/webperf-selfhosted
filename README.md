@@ -8,7 +8,9 @@ keeps run history and baselines in SQLite, and produces deterministic
 comparisons and exports. The default installation is a small,
 single-organization, two-container stack: one supervised `webperf` container
 runs the operator console, API, embedded scheduler, and durable executor, while
-the Rust `webperf-probe` remains a separate measurement trust boundary. An
+the Rust `webperf-probe` remains a separate measurement trust boundary. The
+small PID 1 supervisor starts the three Bun services under distinct non-root
+UIDs so the public console cannot inspect API or executor credentials. An
 engine-neutral Browser Audit Protocol and Lighthouse reference runner are
 available as an optional third container.
 

@@ -54,8 +54,10 @@ const expectedImages: Record<string, string> = {
 };
 const browserCapabilityAdditions = ['SYS_CHROOT'];
 const expectedCapabilityAdditions: Record<string, string[]> = {
+  webperf: ['KILL', 'SETGID', 'SETUID'],
   'browser-audit-lighthouse': browserCapabilityAdditions
 };
+const expectedRootSupervisors = new Set(['webperf']);
 const nonRootNumericUserPattern = /^[1-9]\d*(?::[1-9]\d*)?$/;
 
 assert(nonRootNumericUserPattern.test('1000'), 'numeric non-root UID must be accepted');
@@ -103,10 +105,17 @@ for (const [name, service] of Object.entries(productionWithProfiles.services)) {
   const privilegeOptions = service.security_opt?.filter(
     (entry) => entry.startsWith('no-new-privileges:')
   ) ?? [];
-  assert(
-    nonRootNumericUserPattern.test(service.user ?? ''),
-    `${name} must run as an explicit non-root numeric user`
-  );
+  if (expectedRootSupervisors.has(name)) {
+    assert(
+      service.user === '0:0',
+      `${name} must start the UID-isolating supervisor as explicit root`
+    );
+  } else {
+    assert(
+      nonRootNumericUserPattern.test(service.user ?? ''),
+      `${name} must run as an explicit non-root numeric user`
+    );
+  }
   assert(
     service.cap_drop?.includes('ALL'),
     `${name} must drop all Linux capabilities`

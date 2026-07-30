@@ -34,6 +34,10 @@ key early can make existing rows unreadable.
 - The default `standalone` supervisor pins console and executor API calls to
   the configured API bind address inside the `webperf` container. Wildcard
   binds use loopback for those child-process calls.
+- The supervisor itself is a network-inert root PID 1 with only
+  `SETUID`, `SETGID`, and `KILL`; it drops the console, API, and executor into
+  distinct non-root UIDs before their entrypoints run. Keep the checked
+  Compose capability and user settings intact.
 - `WEBPERF_STANDALONE_STARTUP_TIMEOUT_MS=0` keeps waiting while the API process
   remains alive, so long first-start migrations and artifact reconciliation
   can finish. Set a positive millisecond deadline only when the operator

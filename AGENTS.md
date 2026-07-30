@@ -69,6 +69,7 @@ Current repo state as of 2026-07-30:
 - backup, restore, database-doctor, and cross-version Compose drills are automated; the recovery drill verifies checksums and restored rows, while the release gate verifies a `v0.2.1` deployment can be replaced by the prepared digest-pinned release without losing its volume
 - the standalone self-host exposes authenticated execution pressure at `GET /v1/runtime-metrics`, including ready/delayed/active work, retry and lease signals, oldest-work ages, status/kind counts, and retention context without exposing request payloads
 - the standalone capacity contract is explicitly `single-replica-sqlite` with executor concurrency `1` and `horizontalScalingSafe: false`; operators may use its metrics for scheduling and vertical sizing, but must not create independent replicas that split SQLite leases and state
+- the default `webperf` container keeps its two-container install shape without treating same-UID processes as a security boundary: a network-inert PID 1 supervisor retains only `SETUID`, `SETGID`, and `KILL`, then launches console, API, and executor under distinct non-root UIDs so executor signing credentials are not readable from the public console process
 - the console, API service, scheduler, and Rust probe run together locally
 - the optional Bun browser-audit Lighthouse runner now also lives here as the runtime/image source of truth, while managed orchestration stays in `webperf.and.guide`
 - the API service persists saved config, runs, baselines, comparisons, and reports in SQLite

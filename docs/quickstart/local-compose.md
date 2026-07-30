@@ -49,7 +49,7 @@ bun run capture:console:baselines
 ## What You Get
 
 - `webperf`: one supervised container running the SvelteKit console, Bun API,
-  embedded scheduler, and durable executor;
+  embedded scheduler, and durable executor under isolated non-root child UIDs;
 - `probe`: the Rust measurement trust boundary on the internal Compose network;
 - `browser-audit-lighthouse`: an optional third container when you enable the
   `browser-audit` profile.

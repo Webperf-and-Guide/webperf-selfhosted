@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  assertStandaloneSupervisorEnvironment,
   assertStandalonePortsDistinct,
+  isolateStandaloneChildArgv,
   parseStandalonePort,
   parseStandaloneStartupTimeoutMs,
   resolveStandaloneApiBinding,
   selectStandaloneSecrets,
+  standaloneChildIdentities,
   takeStandaloneSecrets
 } from './webperf-standalone-config';
 
@@ -33,6 +36,33 @@ describe('standalone process configuration', () => {
       PROBE_SHARED_SECRET: 'probe-secret-value',
       BROWSER_AUDIT_SHARED_SECRET: 'browser-secret-value'
     });
+  });
+
+  test('isolates each child under a distinct non-root Linux identity', () => {
+    expect(new Set(
+      Object.values(standaloneChildIdentities).map(({ uid, gid }) => `${uid}:${gid}`)
+    ).size).toBe(3);
+    expect(Object.values(standaloneChildIdentities).every(({ uid, gid }) => (
+      uid > 0 && gid > 0
+    ))).toBeTrue();
+    expect(isolateStandaloneChildArgv('console', ['bun', 'console.js'])).toEqual([
+      '/usr/bin/setpriv',
+      '--reuid=10001',
+      '--regid=10001',
+      '--clear-groups',
+      '--no-new-privs',
+      '--',
+      'bun',
+      'console.js'
+    ]);
+  });
+
+  test('requires a Linux root supervisor before dropping child identities', () => {
+    expect(assertStandaloneSupervisorEnvironment('linux', 0)).toBeUndefined();
+    expect(() => assertStandaloneSupervisorEnvironment('linux', 1_000))
+      .toThrow('must start as UID 0');
+    expect(() => assertStandaloneSupervisorEnvironment('darwin', 0))
+      .toThrow('requires a Linux container runtime');
   });
 
   test('connects wildcard binds through loopback and preserves explicit interfaces', () => {

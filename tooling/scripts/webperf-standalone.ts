@@ -1,9 +1,13 @@
 import {
+  assertStandaloneSupervisorEnvironment,
   assertStandalonePortsDistinct,
+  isolateStandaloneChildArgv,
   parseStandalonePort,
   parseStandaloneStartupTimeoutMs,
   resolveStandaloneApiBinding,
   selectStandaloneSecrets,
+  standaloneChildCommands,
+  standaloneChildIdentities,
   takeStandaloneSecrets
 } from './webperf-standalone-config';
 
@@ -17,8 +21,10 @@ import {
  */
 
 type Signal = 'SIGINT' | 'SIGTERM';
-type ChildName = 'api' | 'console' | 'executor';
+type ChildName = keyof typeof standaloneChildIdentities;
 type Child = ReturnType<typeof Bun.spawn>;
+
+assertStandaloneSupervisorEnvironment(process.platform, process.getuid?.());
 
 const consolePort = parseStandalonePort('PORT', process.env.PORT, 3000);
 const apiPort = parseStandalonePort(
@@ -67,7 +73,8 @@ const spawnChild = (
   argv: string[],
   env: Record<string, string | undefined> = {}
 ) => {
-  const child = Bun.spawn(argv, {
+  const identity = standaloneChildIdentities[name];
+  const child = Bun.spawn(isolateStandaloneChildArgv(name, argv), {
     stdio: ['inherit', 'inherit', 'inherit'],
     env: {
       ...childBaseEnvironment,
@@ -75,7 +82,12 @@ const spawnChild = (
     }
   });
   children.set(name, child);
-  emit('child_started', { child: name, pid: child.pid });
+  emit('child_started', {
+    child: name,
+    pid: child.pid,
+    uid: identity.uid,
+    gid: identity.gid
+  });
   return child;
 };
 
@@ -125,7 +137,7 @@ process.on('SIGTERM', onSigterm);
 
 const api = spawnChild(
   'api',
-  ['bun', './apps/api/src/index.ts'],
+  [...standaloneChildCommands.api],
   {
     ...selectStandaloneSecrets(standaloneSecrets, [
       'SELFHOST_ADMIN_TOKEN',
@@ -145,7 +157,7 @@ try {
 
   const consoleChild = spawnChild(
     'console',
-    ['bun', './apps/console/build/index.js'],
+    [...standaloneChildCommands.console],
     {
       ...selectStandaloneSecrets(standaloneSecrets, ['SELFHOST_ADMIN_TOKEN']),
       CONTROL_BASE_URL: apiOrigin,
@@ -154,7 +166,7 @@ try {
   );
   const executor = spawnChild(
     'executor',
-    ['bun', './apps/executor/src/index.ts'],
+    [...standaloneChildCommands.executor],
     {
       // The executor is a client of these authenticated services and signs
       // with current credentials only. Rotation keys belong to the receiving

@@ -224,8 +224,9 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Make `compose.yml` consume versioned GHCR images.
 - [x] Add `compose.dev.yml` source-build overrides.
 - [x] Publish only console on loopback by default; add a debug profile.
-- [x] Add health checks, restart/stop policies, non-root execution, read-only
-  filesystems where possible, tmpfs, log rotation, and resource examples.
+- [x] Add health checks, restart/stop policies, non-root runtime execution,
+  distinct standalone child UIDs, read-only filesystems where possible, tmpfs,
+  log rotation, and resource examples.
 - [x] Keep Lighthouse optional, sandboxed, single-concurrency, and host-port
   free without default `SYS_ADMIN`.
 - [x] Validate default and browser-audit Compose smoke paths.

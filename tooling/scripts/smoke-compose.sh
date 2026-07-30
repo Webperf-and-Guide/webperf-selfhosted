@@ -105,6 +105,38 @@ assert_service_port_unpublished() {
   fi
 }
 
+assert_standalone_child_isolation() {
+  local container_id
+  local console_gid
+  local console_uid
+  local executor_pid
+  local validation_output
+
+  container_id="$(compose "$@" ps -q webperf)"
+  if [[ -z "$container_id" ]]; then
+    echo "Expected webperf container to exist for standalone child isolation validation" >&2
+    exit 1
+  fi
+
+  validation_output="$(
+    docker exec "$container_id" \
+      bun ./tooling/scripts/assert-standalone-child-isolation.ts inspect
+  )"
+  IFS=$'\t' read -r executor_pid console_uid console_gid <<< "$validation_output"
+  if [[ ! "$executor_pid" =~ ^[1-9][0-9]*$ ]] \
+    || [[ ! "$console_uid" =~ ^[1-9][0-9]*$ ]] \
+    || [[ ! "$console_gid" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Failed to parse standalone child isolation validation output" >&2
+    exit 1
+  fi
+
+  if ! docker exec --user "${console_uid}:${console_gid}" "$container_id" \
+    bun ./tooling/scripts/assert-standalone-child-isolation.ts verify "$executor_pid"; then
+    echo "Standalone child credential isolation check failed" >&2
+    exit 1
+  fi
+}
+
 host_port_from_mapping() {
   local mapping="$1"
   local label="$2"
@@ -218,6 +250,7 @@ if [[ "$console_mapping" != 127.0.0.1:* ]] && [[ "$console_mapping" != \[::1\]:*
 fi
 
 assert_service_port_unpublished webperf 8788 "API" "${profile_args[@]}"
+assert_standalone_child_isolation "${profile_args[@]}"
 
 if [[ "$profile" == "browser-audit" ]]; then
   assert_service_unpublished browser-audit-lighthouse "Browser Audit runner" "${profile_args[@]}"

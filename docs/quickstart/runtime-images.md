@@ -7,8 +7,10 @@ index for `linux/amd64` and `linux/arm64`:
 - `ghcr.io/webperf-and-guide/webperf` — single multi-role Bun image covering
   console, API, scheduler, and executor. The default `standalone` role
   supervises console, API, and executor in one container with embedded
-  scheduling. Split `console`, `api`, `scheduler`, and `executor` roles remain
-  available for development and maintenance through
+  scheduling. Its PID 1 supervisor holds only `SETUID`, `SETGID`, and `KILL`
+  so it can run those services under distinct non-root UIDs; it does not open
+  a network listener. Split `console`, `api`, `scheduler`, and `executor` roles
+  remain available for development and maintenance through
   `tooling/scripts/webperf-role.ts`.
 - `ghcr.io/webperf-and-guide/webperf-probe`
 - `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`

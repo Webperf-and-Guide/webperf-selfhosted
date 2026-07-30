@@ -23,6 +23,14 @@ x-bun-read-only: &bun-read-only
 services:
   webperf:
     <<: [*service-defaults, *bun-read-only]
+    # PID 1 needs only these capabilities to launch and supervise the API,
+    # console, and executor under three distinct non-root UIDs. No network
+    # listener runs in the root supervisor process.
+    user: "0:0"
+    cap_add:
+      - KILL
+      - SETGID
+      - SETUID
     stop_grace_period: 16m
     image: "ghcr.io/webperf-and-guide/webperf:${WEBPERF_VERSION:?set WEBPERF_VERSION in infra/docker-compose/.env}"
     environment:

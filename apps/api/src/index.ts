@@ -3156,6 +3156,7 @@ async function handleUpsertCheckProfile(request: Request, existing?: CheckProfil
     });
     return json(
       {
+        code: 'runtime_location_changed',
         error: 'The self-host runtime location changed after this saved check was migrated. Reload the check, review the current runtime location, and acknowledge it again.'
       },
       { status: 409 }

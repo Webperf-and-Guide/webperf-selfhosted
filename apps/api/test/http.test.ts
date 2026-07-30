@@ -1237,6 +1237,7 @@ const assertSingleRegionSavedCheckMigration = async ({
   });
   expect(staleRuntimeApproval.status).toBe(409);
   expect(await staleRuntimeApproval.json()).toMatchObject({
+    code: 'runtime_location_changed',
     error: expect.stringContaining('runtime location changed')
   });
   expect(repository.getCheckProfile(profile.id)?.locationMigration).toMatchObject({

@@ -378,9 +378,23 @@ export class ChecksController {
           }
         );
 
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as { code?: string; error?: string };
 
         if (!response.ok) {
+          if (
+            response.status === 409
+            && payload.code === 'runtime_location_changed'
+            && this.state.editingProfileId
+          ) {
+            const profileId = this.state.editingProfileId;
+            this.state.profileLocationMigrationAcknowledged = false;
+            await this.accessors.refreshControlData();
+            if (this.checkProfileById.has(profileId)) {
+              this.loadProfileEditor(profileId);
+            } else {
+              this.resetProfileForm();
+            }
+          }
           throw new Error(
             payload.error ?? `Failed to ${this.state.editingProfileId ? 'update' : 'create'} saved check.`
           );

@@ -129,6 +129,32 @@ export const resolveStandaloneApiBinding = (
   };
 };
 
+export const resolveStandaloneProbeHealthUrl = (
+  rawBaseUrl: string | undefined
+): string => {
+  const configuredBaseUrl = rawBaseUrl?.trim() || 'http://127.0.0.1:8080';
+  let baseUrl: URL;
+
+  try {
+    baseUrl = new URL(configuredBaseUrl);
+  } catch {
+    throw new Error('SELFHOST_PROBE_BASE_URL must be a valid HTTP(S) origin');
+  }
+
+  if (
+    !['http:', 'https:'].includes(baseUrl.protocol)
+    || baseUrl.username
+    || baseUrl.password
+    || baseUrl.pathname !== '/'
+    || baseUrl.search
+    || baseUrl.hash
+  ) {
+    throw new Error('SELFHOST_PROBE_BASE_URL must be a credential-free HTTP(S) origin');
+  }
+
+  return new URL('/healthz', baseUrl).toString();
+};
+
 export const parseStandaloneStartupTimeoutMs = (
   raw: string | undefined
 ): number => {

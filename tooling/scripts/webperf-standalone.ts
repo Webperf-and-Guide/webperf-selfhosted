@@ -5,6 +5,7 @@ import {
   parseStandalonePort,
   parseStandaloneStartupTimeoutMs,
   resolveStandaloneApiBinding,
+  resolveStandaloneProbeHealthUrl,
   selectStandaloneSecrets,
   standaloneChildCommands,
   standaloneChildIdentities,
@@ -35,6 +36,9 @@ const apiPort = parseStandalonePort(
 assertStandalonePortsDistinct(consolePort, apiPort);
 const apiBinding = resolveStandaloneApiBinding(process.env.SELFHOST_API_HOST, apiPort);
 const apiOrigin = apiBinding.origin;
+const probeHealthUrl = resolveStandaloneProbeHealthUrl(
+  process.env.SELFHOST_PROBE_BASE_URL
+);
 const startupTimeoutMs = parseStandaloneStartupTimeoutMs(
   process.env.WEBPERF_STANDALONE_STARTUP_TIMEOUT_MS
 );
@@ -153,7 +157,7 @@ const api = spawnChild(
 );
 
 try {
-  await waitForApi(api, `${apiOrigin}/health`);
+  await waitForHealth('api', `${apiOrigin}/health`, [['api', api]]);
 
   const consoleChild = spawnChild(
     'console',
@@ -164,6 +168,15 @@ try {
       PORT: String(consolePort)
     }
   );
+
+  // The API and console stay available while the independently deployed probe
+  // is unavailable. Delay the executor so a routine stack startup cannot burn
+  // durable jobs while the probe is still coming online.
+  await waitForHealth('probe', probeHealthUrl, [
+    ['api', api],
+    ['console', consoleChild]
+  ]);
+
   const executor = spawnChild(
     'executor',
     [...standaloneChildCommands.executor],
@@ -221,7 +234,11 @@ try {
   process.exit(1);
 }
 
-async function waitForApi(apiChild: Child, healthUrl: string) {
+async function waitForHealth(
+  service: 'api' | 'probe',
+  healthUrl: string,
+  watchedChildren: readonly (readonly [ChildName, Child])[]
+) {
   const deadline = startupTimeoutMs === 0 ? null : Date.now() + startupTimeoutMs;
   let attempt = 0;
 
@@ -230,8 +247,11 @@ async function waitForApi(apiChild: Child, healthUrl: string) {
     if (shutdownSignal) {
       throw new Error('shutdown requested during startup');
     }
-    if (apiChild.exitCode !== null) {
-      throw new Error(`API exited before readiness with code ${apiChild.exitCode}`);
+    const exitedChild = watchedChildren.find(([, child]) => child.exitCode !== null);
+    if (exitedChild) {
+      throw new Error(
+        `${exitedChild[0]} exited before ${service} readiness with code ${exitedChild[1].exitCode}`
+      );
     }
 
     try {
@@ -244,11 +264,11 @@ async function waitForApi(apiChild: Child, healthUrl: string) {
       }
       await response.body?.cancel();
     } catch (error) {
-      // Connection refusal is expected while the API binds. Emit a bounded,
-      // secret-safe diagnostic periodically so persistent startup failures are
-      // still distinguishable from a slow first migration.
+      // Connection refusal is expected while the target service binds. Emit a
+      // bounded, secret-safe diagnostic periodically so persistent startup
+      // failures remain distinguishable from a slow first startup.
       if (attempt === 1 || attempt % healthDiagnosticEveryN === 0) {
-        emit('api_health_waiting', {
+        emit(`${service}_health_waiting`, {
           attempt,
           errorType: error instanceof Error ? error.name : typeof error,
           errorCode: safeErrorCode(error)
@@ -259,7 +279,7 @@ async function waitForApi(apiChild: Child, healthUrl: string) {
     await Bun.sleep(startupPollMs);
   }
 
-  throw new Error(`API did not become ready within ${startupTimeoutMs}ms`);
+  throw new Error(`${service} did not become ready within ${startupTimeoutMs}ms`);
 }
 
 function stopStandalone() {

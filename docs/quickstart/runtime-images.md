@@ -9,8 +9,11 @@ index for `linux/amd64` and `linux/arm64`:
   supervises console, API, and executor in one container with embedded
   scheduling. Its PID 1 supervisor holds only `SETUID`, `SETGID`, and `KILL`
   so it can run those services under distinct non-root UIDs; it does not open
-  a network listener. Split `console`, `api`, `scheduler`, and `executor` roles
-  remain available for development and maintenance through
+  a network listener. The API and console can start while the separate probe is
+  unavailable, but the supervisor waits for the probe health endpoint before
+  starting the executor so queued work does not consume retries during a
+  routine stack startup. Split `console`, `api`, `scheduler`, and `executor`
+  roles remain available for development and maintenance through
   `tooling/scripts/webperf-role.ts`.
 - `ghcr.io/webperf-and-guide/webperf-probe`
 - `ghcr.io/webperf-and-guide/webperf-browser-audit-lighthouse`

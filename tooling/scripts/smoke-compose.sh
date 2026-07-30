@@ -222,7 +222,11 @@ if [[ "$profile" == "browser-audit" ]]; then
   profile_args+=(--profile browser-audit)
 fi
 
-compose "${profile_args[@]}" up -d --build
+# Start the control container without its independent probe first. This proves
+# the API and console become available while the executor remains gated on
+# probe readiness, instead of consuming durable job attempts during a routine
+# stack startup.
+compose "${profile_args[@]}" up -d --build webperf
 console_mapping="$(compose "${profile_args[@]}" port webperf 3000)"
 console_host_port="$(host_port_from_mapping "$console_mapping" "console")"
 console_url="http://127.0.0.1:${console_host_port}"
@@ -241,6 +245,60 @@ if ! curl -fsS "${console_url}/" >/dev/null 2>&1; then
   docker ps --format '{{.Names}} {{.Status}} {{.Ports}}' >&2 2>&1 || true
   echo "--- console container logs ---" >&2
   docker logs --tail 20 "$(compose "${profile_args[@]}" ps -q webperf 2>/dev/null)" >&2 2>&1 || true
+  exit 1
+fi
+
+webperf_container_id="$(compose "${profile_args[@]}" ps -q webperf)"
+if [[ -z "$webperf_container_id" ]]; then
+  echo "Expected webperf container to exist before probe startup" >&2
+  exit 1
+fi
+
+probe_wait_observed=false
+startup_logs=""
+for _ in {1..20}; do
+  if ! startup_logs="$(docker logs "$webperf_container_id" 2>&1)"; then
+    echo "Failed to read webperf startup logs before probe startup" >&2
+    exit 1
+  fi
+  if grep -Fq '"event":"probe_health_waiting"' <<< "$startup_logs"; then
+    probe_wait_observed=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$probe_wait_observed" != "true" ]]; then
+  echo "WebPerf did not report waiting for probe readiness" >&2
+  exit 1
+fi
+if grep -Fq '"event":"child_started","child":"executor"' <<< "$startup_logs"; then
+  echo "Executor started before the standalone probe became ready" >&2
+  exit 1
+fi
+
+compose "${profile_args[@]}" up -d --build probe
+if [[ "$profile" == "browser-audit" ]]; then
+  compose "${profile_args[@]}" up -d --build browser-audit-lighthouse
+fi
+
+webperf_health=""
+for _ in {1..90}; do
+  if ! webperf_health="$(
+    docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+      "$webperf_container_id" 2>/dev/null
+  )"; then
+    compose "${profile_args[@]}" logs --no-color webperf probe >&2 || true
+    echo "WebPerf container became unreachable during health polling" >&2
+    exit 1
+  fi
+  if [[ "$webperf_health" == "healthy" ]]; then
+    break
+  fi
+  sleep 2
+done
+if [[ "$webperf_health" != "healthy" ]]; then
+  compose "${profile_args[@]}" logs --no-color webperf probe >&2 || true
+  echo "WebPerf did not become healthy after probe startup (status: ${webperf_health:-unknown})" >&2
   exit 1
 fi
 

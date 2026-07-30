@@ -9,4 +9,6 @@ optional Lighthouse Browser Audit runner remains a third profile container,
 and split `webperf` roles remain available for development and maintenance.
 The standalone supervisor launches the public console, API, and executor under
 distinct non-root UIDs with only the capabilities needed to set those
-identities and stop its children.
+identities and stop its children. It keeps the API and console available while
+waiting for the separate probe to become healthy, then starts the executor so
+routine stack startups do not exhaust queued work attempts.

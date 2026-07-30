@@ -6,6 +6,7 @@ import {
   parseStandalonePort,
   parseStandaloneStartupTimeoutMs,
   resolveStandaloneApiBinding,
+  resolveStandaloneProbeHealthUrl,
   selectStandaloneSecrets,
   standaloneChildIdentities,
   takeStandaloneSecrets
@@ -84,6 +85,19 @@ describe('standalone process configuration', () => {
     });
     expect(() => resolveStandaloneApiBinding('http://127.0.0.1', 8788))
       .toThrow('without a scheme or port');
+  });
+
+  test('resolves the standalone probe health endpoint from a bounded origin', () => {
+    expect(resolveStandaloneProbeHealthUrl(undefined))
+      .toBe('http://127.0.0.1:8080/healthz');
+    expect(resolveStandaloneProbeHealthUrl('https://probe.internal:8443/'))
+      .toBe('https://probe.internal:8443/healthz');
+    expect(() => resolveStandaloneProbeHealthUrl('https://operator:secret@probe.internal/'))
+      .toThrow('credential-free HTTP(S) origin');
+    expect(() => resolveStandaloneProbeHealthUrl('http://probe.internal/measure'))
+      .toThrow('credential-free HTTP(S) origin');
+    expect(() => resolveStandaloneProbeHealthUrl('ftp://probe.internal/'))
+      .toThrow('credential-free HTTP(S) origin');
   });
 
   test('waits without a deadline by default and bounds explicit deadlines', () => {

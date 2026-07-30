@@ -10,6 +10,7 @@ import { isIP } from 'node:net';
 import {
   jsonValueSchema,
   probeMeasurementResponseSchema,
+  probeMeasurementTimeoutMs,
   signedProbeMeasurementRequestSchema
 } from '@webperf/contracts';
 import { isLoopbackHostname } from '@webperf/config/selfhost-executor';
@@ -24,9 +25,9 @@ import { ExecutorApiError, type ExecutorApiClient } from './client';
 import { describeSafeError } from './diagnostics';
 import { isRetryableHttpStatus, retryDelayMs, throwIfAborted } from './execution-utils';
 import {
+  createPinnedHttpRequest,
   normalizeOutboundHostname,
   OutboundHttpPolicyError,
-  requestPinnedHttp,
   type OutboundAddressPolicy,
   type PinnedHttpRequest
 } from './outbound-http';
@@ -44,6 +45,11 @@ export type NetworkHandlerOptions = {
   requestImpl?: PinnedHttpRequest;
   logger?: { error(event: Record<string, unknown>): void };
 };
+
+export const probeTransportResponseTimeoutMs = probeMeasurementTimeoutMs + 5_000;
+const requestProbeHttp = createPinnedHttpRequest({
+  requestTimeoutMs: probeTransportResponseTimeoutMs
+});
 
 export const parseProbeBaseUrl = (
   baseUrl: string,
@@ -63,7 +69,7 @@ export const createNetworkExecutionHandler = ({
   probeSharedSecret,
   probeBaseUrl,
   allowInsecureProbeHttp = false,
-  requestImpl = requestPinnedHttp,
+  requestImpl = requestProbeHttp,
   logger = defaultNetworkLogger
 }: NetworkHandlerOptions) => async (executionJob: ExecutionJob, signal: AbortSignal) => {
   const context = await client.context(executionJob.id, { leaseOwner });

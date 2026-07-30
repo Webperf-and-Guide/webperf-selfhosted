@@ -5,8 +5,13 @@ import type {
   ExecutionResourceResultRequest,
   LatencyJobDetail
 } from '@webperf/contracts';
+import { probeMeasurementTimeoutMs } from '@webperf/contracts';
 import type { ExecutorApiClient } from './client';
-import { createNetworkExecutionHandler, parseProbeBaseUrl } from './network-handler';
+import {
+  createNetworkExecutionHandler,
+  parseProbeBaseUrl,
+  probeTransportResponseTimeoutMs
+} from './network-handler';
 import { OutboundHttpPolicyError } from './outbound-http';
 import { ExecutionFailure } from './runner';
 
@@ -116,6 +121,10 @@ const createClient = ({
 });
 
 describe('network execution handler', () => {
+  test('allows the probe lifecycle to finish before its transport deadline', () => {
+    expect(probeTransportResponseTimeoutMs).toBeGreaterThan(probeMeasurementTimeoutMs);
+  });
+
   test('persists measuring and terminal states around a signed probe request', async () => {
     const savedResults: ExecutionResourceResultRequest[] = [];
     let probeRequest: Request | null = null;

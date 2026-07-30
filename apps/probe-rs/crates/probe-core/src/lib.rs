@@ -25,12 +25,12 @@ pub const PROBE_MEASUREMENT_TIMEOUT_MS: u64 = PROBE_REQUEST_TIMEOUT_MS * (PROBE_
 const MAX_JOB_ID_BYTES: usize = 160;
 const MAX_TARGET_ID_BYTES: usize = 256;
 const MAX_REGION_ID_BYTES: usize = 64;
-const MAX_URL_CHARS: usize = 8_192;
+const MAX_URL_CODE_UNITS: usize = 8_192;
 const MAX_REQUEST_HEADERS: usize = 20;
 const MAX_HEADER_NAME_BYTES: usize = 120;
 const MAX_HEADER_VALUE_BYTES: usize = 4_000;
 const MAX_BODY_CONTENT_TYPE_BYTES: usize = 120;
-const MAX_BODY_VALUE_CHARS: usize = 10_000;
+const MAX_BODY_VALUE_CODE_UNITS: usize = 10_000;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
@@ -326,7 +326,7 @@ impl MeasureRequest {
         is_bounded_identifier(&self.job_id, MAX_JOB_ID_BYTES)
             && is_bounded_identifier(&self.target_id, MAX_TARGET_ID_BYTES)
             && is_runtime_region_id(&self.region)
-            && (1..=MAX_URL_CHARS).contains(&self.url.chars().count())
+            && (1..=MAX_URL_CODE_UNITS).contains(&utf16_code_units(&self.url))
             && Url::parse(&self.url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
             && !self.timestamp.is_empty()
             && !self.signature.is_empty()
@@ -363,7 +363,7 @@ fn is_request_config_contract_valid(request: &RequestConfig) -> bool {
         });
     let body_valid = request.body.as_ref().is_none_or(|body| {
         body.mode == "text"
-            && body.value.chars().count() <= MAX_BODY_VALUE_CHARS
+            && utf16_code_units(&body.value) <= MAX_BODY_VALUE_CODE_UNITS
             && body.content_type.as_ref().is_none_or(|content_type| {
                 (1..=MAX_BODY_CONTENT_TYPE_BYTES).contains(&content_type.len())
                     && content_type.bytes().all(is_header_value_byte)
@@ -374,6 +374,10 @@ fn is_request_config_contract_valid(request: &RequestConfig) -> bool {
         && headers_valid
         && body_valid
         && !(matches!(request.method.as_str(), "GET" | "HEAD") && request.body.is_some())
+}
+
+fn utf16_code_units(value: &str) -> usize {
+    value.encode_utf16().count()
 }
 
 fn is_http_token_byte(byte: u8) -> bool {
@@ -761,11 +765,31 @@ mod tests {
         assert!(!request.is_contract_valid());
         request = sample_request();
         request.signature = "0".repeat(64);
-        request.url = format!("https://example.com/{}", "a".repeat(MAX_URL_CHARS));
+        request.url = format!("https://example.com/{}", "a".repeat(MAX_URL_CODE_UNITS));
+        assert!(!request.is_contract_valid());
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.url = format!(
+            "https://example.com/{}",
+            "😀".repeat(MAX_URL_CODE_UNITS / 2)
+        );
         assert!(!request.is_contract_valid());
         request = sample_request();
         request.signature = "0".repeat(64);
         request.url = "file:///etc/passwd".to_string();
+        assert!(!request.is_contract_valid());
+
+        request = sample_request();
+        request.signature = "0".repeat(64);
+        request.request = Some(RequestConfig {
+            method: "POST".to_string(),
+            headers: vec![],
+            body: Some(RequestBody {
+                mode: "text".to_string(),
+                content_type: Some("text/plain".to_string()),
+                value: "😀".repeat(MAX_BODY_VALUE_CODE_UNITS / 2 + 1),
+            }),
+        });
         assert!(!request.is_contract_valid());
     }
 }

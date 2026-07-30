@@ -53,6 +53,24 @@ describe('stateless probe protocol', () => {
     }).success).toBe(false);
   });
 
+  test('distinguishes an omitted request configuration from explicit null', () => {
+    const base = {
+      jobId: 'job_123',
+      targetId: 'job_123:tokyo',
+      region: 'tokyo',
+      url: 'https://example.com/',
+      timestamp: '2026-07-30T00:00:00.000Z',
+      signature: '0'.repeat(64),
+      keyVersion: 'current'
+    };
+
+    expect(signedProbeMeasurementRequestSchema.safeParse(base).success).toBe(true);
+    expect(signedProbeMeasurementRequestSchema.safeParse({
+      ...base,
+      request: null
+    }).success).toBe(false);
+  });
+
   test('rejects non-http target URLs', () => {
     expect(signedProbeMeasurementRequestSchema.safeParse({
       jobId: 'job_123',

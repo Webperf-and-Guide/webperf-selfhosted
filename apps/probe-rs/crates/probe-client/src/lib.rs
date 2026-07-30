@@ -195,7 +195,7 @@ async fn measure_url_inner(
             }
 
             redirect_count += 1;
-            if u64::from(redirect_count) >= PROBE_MAX_REDIRECTS {
+            if exceeds_redirect_limit(redirect_count) {
                 return ProbeMeasurement::failure(
                     region,
                     target,
@@ -231,6 +231,10 @@ async fn measure_url_inner(
             error: None,
         };
     }
+}
+
+fn exceeds_redirect_limit(redirect_count: u32) -> bool {
+    u64::from(redirect_count) > PROBE_MAX_REDIRECTS
 }
 
 fn build_pinned_client(url: &Url, addresses: &[SocketAddr]) -> Result<Client, String> {
@@ -349,8 +353,18 @@ fn display_url(url: &Url) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::display_url;
+    use super::{PROBE_MAX_REDIRECTS, display_url, exceeds_redirect_limit};
     use reqwest::Url;
+
+    #[test]
+    fn follows_four_redirects_before_rejecting_the_fifth() {
+        assert!(!exceeds_redirect_limit(
+            u32::try_from(PROBE_MAX_REDIRECTS).expect("redirect limit should fit in u32")
+        ));
+        assert!(exceeds_redirect_limit(
+            u32::try_from(PROBE_MAX_REDIRECTS + 1).expect("redirect limit should fit in u32")
+        ));
+    }
 
     #[test]
     fn display_url_removes_query_credentials_and_fragment() {

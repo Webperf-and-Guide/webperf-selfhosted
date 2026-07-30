@@ -87,13 +87,34 @@ is a third profile container.
 **Before starting the upgraded stack**, replace any
 `webperf-console`/`webperf-api`/`webperf-scheduler`/`webperf-executor` services
 in your Compose file or release directory with the single `webperf` service.
-The release bundle's `compose.yml` already reflects this; operators maintaining
-a custom Compose file should prefer:
+The release bundle's `compose.yml` already reflects this. Operators maintaining
+a custom Compose file should copy that complete service stanza. At minimum, the
+standalone supervisor requires the following exact identity and capability
+boundary in addition to `WEBPERF_ROLE=standalone`:
 
-```dotenv
-# webperf service
-WEBPERF_ROLE=standalone
+```yaml
+services:
+  webperf:
+    init: true
+    user: "0:0"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - KILL
+      - SETGID
+      - SETUID
+    stop_grace_period: 16m
+    environment:
+      WEBPERF_ROLE: standalone
 ```
+
+The root process is a network-inert supervisor only. It uses those three
+capabilities to launch the console, API, and executor under separate non-root
+UIDs and to stop them cleanly. Omitting the explicit root supervisor identity
+or any required capability makes standalone startup fail closed.
 
 If you previously relied on a standalone scheduler container, either remove it
 and accept the default embedded mode, or retain the optional split scheduler

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use sha2::Sha256;
 use std::{
@@ -316,7 +316,11 @@ pub struct MeasureRequest {
     pub target_id: String,
     pub region: String,
     pub url: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_request_config"
+    )]
     pub request: Option<RequestConfig>,
     pub timestamp: String,
     pub signature: String,
@@ -339,6 +343,15 @@ impl MeasureRequest {
                 .as_ref()
                 .is_none_or(is_request_config_contract_valid)
     }
+}
+
+fn deserialize_present_request_config<'de, D>(
+    deserializer: D,
+) -> Result<Option<RequestConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    RequestConfig::deserialize(deserializer).map(Some)
 }
 
 fn is_bounded_identifier(value: &str, maximum_chars: usize) -> bool {
@@ -812,5 +825,20 @@ mod tests {
             }),
         });
         assert!(!request.is_contract_valid());
+    }
+
+    #[test]
+    fn omits_absent_request_config_and_rejects_explicit_null() {
+        let serialized =
+            serde_json::to_value(sample_request()).expect("measure request should serialize");
+        assert!(serialized.get("request").is_none());
+
+        let mut explicit_null = serialized;
+        explicit_null
+            .as_object_mut()
+            .expect("measure request should serialize as an object")
+            .insert("request".to_string(), serde_json::Value::Null);
+
+        assert!(serde_json::from_value::<MeasureRequest>(explicit_null).is_err());
     }
 }

@@ -131,6 +131,31 @@ async fn rejects_signed_requests_outside_public_contract_bounds() -> Result<()> 
 }
 
 #[tokio::test]
+async fn rejects_an_explicit_null_request_configuration() -> Result<()> {
+    let _guard = TEST_MUTEX
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
+    let harness = Harness::start().await?;
+    let request = signed_request("https://example.com");
+    let mut payload = serde_json::to_value(request)?;
+    payload
+        .as_object_mut()
+        .expect("measure request should serialize as an object")
+        .insert("request".to_string(), serde_json::Value::Null);
+
+    let response = harness
+        .client
+        .post(format!("{}/measure", harness.base_url))
+        .json(&payload)
+        .send()
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
 async fn returns_failure_measurements_for_blocked_private_targets() -> Result<()> {
     let _guard = TEST_MUTEX
         .get_or_init(|| tokio::sync::Mutex::new(()))

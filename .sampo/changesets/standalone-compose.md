@@ -13,4 +13,6 @@ identities and stop its children. It keeps the API and console available while
 waiting for the separate probe to become healthy, then starts the executor so
 routine stack startups do not exhaust queued work attempts. Database maintenance
 and recovery commands continue to run as the persistent data owner rather than
-inheriting the supervisor identity.
+inheriting the supervisor identity. Custom-Compose upgrade guidance now states
+the exact supervisor identity, capability, and `no-new-privileges` boundary
+required by the standalone role.

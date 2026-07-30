@@ -423,19 +423,6 @@ const rewriteCheckRowsInBatches = ({
         WHERE profile_id = ?
       )
   `);
-  const readFirstRunBatch = database.query<PersistedPayloadRow, []>(`
-    SELECT rowid, payload_json
-    FROM check_profile_runs
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
-  const readNextRunBatch = database.query<PersistedPayloadRow, [number]>(`
-    SELECT rowid, payload_json
-    FROM check_profile_runs
-    WHERE rowid > ?
-    ORDER BY rowid
-    LIMIT ${migrationBatchSize}
-  `);
   const readCheck = database.query<PersistedPayloadRow, [string]>(`
     SELECT rowid, payload_json
     FROM saved_entities
@@ -466,6 +453,19 @@ const rewriteCheckRowsInBatches = ({
       AND status NOT IN ('succeeded', 'failed', 'cancelled')
   `);
   const terminalizeReviewRequiredCheckJobs = () => {
+    const readFirstRunBatch = database.query<PersistedPayloadRow, []>(`
+      SELECT rowid, payload_json
+      FROM check_profile_runs
+      ORDER BY rowid
+      LIMIT ${migrationBatchSize}
+    `);
+    const readNextRunBatch = database.query<PersistedPayloadRow, [number]>(`
+      SELECT rowid, payload_json
+      FROM check_profile_runs
+      WHERE rowid > ?
+      ORDER BY rowid
+      LIMIT ${migrationBatchSize}
+    `);
     const recentlyProcessedJobIds = new Map<string, true>();
     const profileReviewCache = new Map<string, boolean>();
     const requiresReview = (profileId: string) => {

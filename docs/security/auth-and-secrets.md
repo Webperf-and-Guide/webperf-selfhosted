@@ -37,6 +37,10 @@ All other REST and RPC routes require
 authentication returns `401` and a Bearer challenge without reflecting the
 supplied token.
 
+`GET /v1/runtime-metrics` is shared by both deployment modes: a full
+self-hosted runtime accepts the administrator token, while a regional runtime
+accepts its dedicated current/next regional-runtime secret.
+
 ## Persistence and display
 
 SQLite JSON payloads are encrypted with AES-256-GCM using an HKDF-derived,

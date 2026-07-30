@@ -134,6 +134,127 @@ afterEach(() => {
 });
 
 describe('durable execution repository', () => {
+  test('summarizes provider-neutral queue pressure without decrypting payloads', () => {
+    const repository = createRepository(createTempDatabasePath());
+    const enqueue = (
+      id: string,
+      kind: 'network_probe' | 'browser_audit' | 'webhook_delivery',
+      createdAt: string,
+      options: { maxAttempts?: number; availableAt?: string } = {}
+    ) => repository.enqueueExecutionJob({
+      id,
+      kind,
+      resourceId: `resource_${id}`,
+      maxAttempts: options.maxAttempts ?? 3,
+      availableAt: options.availableAt,
+      payload: { fixture: id }
+    }, new Date(createdAt));
+
+    enqueue('exec_metrics_active', 'network_probe', '2026-07-22T00:00:00.000Z');
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-active', leaseDurationMs: 3_600_000 },
+      new Date('2026-07-22T00:00:00.000Z')
+    );
+    repository.markExecutionJobRunning(
+      {
+        id: 'exec_metrics_active',
+        leaseOwner: 'metrics-active',
+        leaseDurationMs: 3_600_000
+      },
+      new Date('2026-07-22T00:00:01.000Z')
+    );
+
+    enqueue('exec_metrics_expired', 'network_probe', '2026-07-22T00:01:00.000Z');
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-expired', leaseDurationMs: 60_000 },
+      new Date('2026-07-22T00:01:00.000Z')
+    );
+
+    enqueue(
+      'exec_metrics_exhausted',
+      'browser_audit',
+      '2026-07-22T00:01:10.000Z',
+      { maxAttempts: 1 }
+    );
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-exhausted', leaseDurationMs: 60_000 },
+      new Date('2026-07-22T00:01:10.000Z')
+    );
+
+    enqueue('exec_metrics_retry', 'webhook_delivery', '2026-07-22T00:01:20.000Z');
+    repository.claimExecutionJob(
+      { leaseOwner: 'metrics-retry', leaseDurationMs: 60_000 },
+      new Date('2026-07-22T00:01:20.000Z')
+    );
+    repository.failExecutionJob({
+      id: 'exec_metrics_retry',
+      leaseOwner: 'metrics-retry',
+      error: {
+        code: 'retry_fixture',
+        message: 'retry fixture',
+        retryable: true
+      },
+      retryDelayMs: 0
+    }, new Date('2026-07-22T00:01:21.000Z'));
+
+    enqueue('exec_metrics_ready', 'network_probe', '2026-07-22T00:01:30.000Z');
+    enqueue(
+      'exec_metrics_delayed',
+      'browser_audit',
+      '2026-07-22T00:01:40.000Z',
+      { availableAt: '2026-07-22T00:10:00.000Z' }
+    );
+
+    expect(
+      repository.getExecutionQueueMetrics(new Date('2026-07-22T00:05:00.000Z'))
+    ).toEqual({
+      ready: 3,
+      delayed: 1,
+      active: 1,
+      expiredLeases: 2,
+      retryQueued: 1,
+      exhausted: 1,
+      oldestReadyAgeMs: 219_000,
+      oldestActiveAgeMs: 299_000,
+      byStatus: {
+        queued: 3,
+        leased: 2,
+        running: 1,
+        succeeded: 0,
+        failed: 0,
+        cancelled: 0
+      },
+      byKind: {
+        network_probe: {
+          queued: 1,
+          leased: 1,
+          running: 1,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        },
+        browser_audit: {
+          queued: 1,
+          leased: 1,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        },
+        webhook_delivery: {
+          queued: 1,
+          leased: 0,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        }
+      }
+    });
+
+    repository.close();
+  });
+
   test('creates the domain resource and queue row in one transaction', () => {
     const databasePath = createTempDatabasePath();
     const repository = createRepository(databasePath);

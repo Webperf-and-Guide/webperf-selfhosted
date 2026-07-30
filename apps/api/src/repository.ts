@@ -15,6 +15,8 @@ import type {
   LatencyJob,
   LatencyJobDetail,
   Property,
+  RuntimeExecutionQueueMetrics,
+  RuntimeExecutionStatusCounts,
   RouteSet
 } from '@webperf/contracts';
 import {
@@ -33,7 +35,9 @@ import {
   executionAvailabilityMaxDelayDays,
   executionAvailabilityMaxDelayMs,
   executionJobErrorSchema,
+  executionJobKindValues,
   executionJobSchema,
+  executionJobStatusValues,
   executionLeaseDurationMaxMs,
   executionLeaseDurationMinMs,
   executionLeaseOwnerMaxLength,
@@ -181,6 +185,7 @@ export type JobRepository = {
   }, now?: Date): ExecutionJob[] | null;
   getExecutionJob(id: string): ExecutionJob | null;
   listExecutionJobs(): ExecutionJob[];
+  getExecutionQueueMetrics(now?: Date): RuntimeExecutionQueueMetrics;
   claimExecutionJob(input: ExecutionJobClaimInput, now?: Date): ExecutionJob | null;
   markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
   renewExecutionJobLease(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
@@ -253,6 +258,23 @@ type ExecutionJobRow = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+};
+
+type ExecutionMetricCountRow = {
+  kind: string;
+  status: string;
+  count: number;
+};
+
+type ExecutionPressureRow = {
+  ready: number;
+  delayed: number;
+  active: number;
+  expired_leases: number;
+  retry_queued: number;
+  exhausted: number;
+  oldest_ready_at: string | null;
+  oldest_active_at: string | null;
 };
 
 type BrowserAuditArtifactRow = {
@@ -538,6 +560,77 @@ export const createSqliteJobRepository = ({
     FROM execution_jobs
     ORDER BY created_at DESC, id DESC
   `);
+  const executionMetricCountsStatement = db.query<ExecutionMetricCountRow, []>(`
+    SELECT kind, status, COUNT(*) AS count
+    FROM execution_jobs
+    GROUP BY kind, status
+    ORDER BY kind, status
+  `);
+  const executionPressureStatement = db.query<ExecutionPressureRow, [string]>(`
+    WITH metric_clock(now) AS (VALUES (?))
+    SELECT
+      COALESCE(SUM(CASE
+        WHEN attempt_count < max_attempts
+          AND (
+            (status = 'queued' AND available_at <= metric_clock.now)
+            OR (
+              status IN ('leased', 'running')
+              AND lease_expires_at <= metric_clock.now
+            )
+          )
+        THEN 1 ELSE 0
+      END), 0) AS ready,
+      COALESCE(SUM(CASE
+        WHEN status = 'queued'
+          AND attempt_count < max_attempts
+          AND available_at > metric_clock.now
+        THEN 1 ELSE 0
+      END), 0) AS delayed,
+      COALESCE(SUM(CASE
+        WHEN status IN ('leased', 'running')
+          AND lease_expires_at > metric_clock.now
+        THEN 1 ELSE 0
+      END), 0) AS active,
+      COALESCE(SUM(CASE
+        WHEN status IN ('leased', 'running')
+          AND lease_expires_at <= metric_clock.now
+        THEN 1 ELSE 0
+      END), 0) AS expired_leases,
+      COALESCE(SUM(CASE
+        WHEN status = 'queued' AND attempt_count > 0
+        THEN 1 ELSE 0
+      END), 0) AS retry_queued,
+      COALESCE(SUM(CASE
+        WHEN attempt_count >= max_attempts
+          AND (
+            (status = 'queued' AND available_at <= metric_clock.now)
+            OR (
+              status IN ('leased', 'running')
+              AND lease_expires_at <= metric_clock.now
+            )
+          )
+        THEN 1 ELSE 0
+      END), 0) AS exhausted,
+      MIN(CASE
+        WHEN attempt_count < max_attempts
+          AND status = 'queued'
+          AND available_at <= metric_clock.now
+        THEN available_at
+        WHEN attempt_count < max_attempts
+          AND status IN ('leased', 'running')
+          AND lease_expires_at <= metric_clock.now
+        THEN lease_expires_at
+        ELSE NULL
+      END) AS oldest_ready_at,
+      MIN(CASE
+        WHEN status IN ('leased', 'running')
+          AND lease_expires_at > metric_clock.now
+        THEN updated_at
+        ELSE NULL
+      END) AS oldest_active_at
+    FROM execution_jobs
+    CROSS JOIN metric_clock
+  `);
   const finalizeExhaustedExecutionJobsStatement = db.query<ExecutionJobRow, [
     string,
     string,
@@ -749,6 +842,74 @@ export const createSqliteJobRepository = ({
       );
       return null;
     }
+  };
+
+  const createEmptyStatusCounts = (): RuntimeExecutionStatusCounts => ({
+    queued: 0,
+    leased: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    cancelled: 0
+  });
+
+  const getExecutionMetricAgeMs = (
+    timestamp: string | null,
+    nowMs: number
+  ) => {
+    if (!timestamp) {
+      return null;
+    }
+    const timestampMs = Date.parse(timestamp);
+    if (!Number.isFinite(timestampMs)) {
+      return null;
+    }
+    return Math.max(0, Math.trunc(nowMs - timestampMs));
+  };
+
+  const buildExecutionQueueMetrics = (
+    now: Date
+  ): RuntimeExecutionQueueMetrics => {
+    const byStatus = createEmptyStatusCounts();
+    const byKind: RuntimeExecutionQueueMetrics['byKind'] = {
+      network_probe: createEmptyStatusCounts(),
+      browser_audit: createEmptyStatusCounts(),
+      webhook_delivery: createEmptyStatusCounts()
+    };
+
+    for (const row of executionMetricCountsStatement.all()) {
+      const kind = executionJobKindValues.find((candidate) => candidate === row.kind);
+      const status = executionJobStatusValues.find((candidate) => candidate === row.status);
+      if (!kind || !status) {
+        continue;
+      }
+      byStatus[status] += row.count;
+      byKind[kind][status] += row.count;
+    }
+
+    const pressure = executionPressureStatement.get(now.toISOString());
+    if (!pressure) {
+      throw new Error('Execution pressure query did not return a snapshot');
+    }
+
+    return {
+      ready: pressure.ready,
+      delayed: pressure.delayed,
+      active: pressure.active,
+      expiredLeases: pressure.expired_leases,
+      retryQueued: pressure.retry_queued,
+      exhausted: pressure.exhausted,
+      oldestReadyAgeMs: getExecutionMetricAgeMs(
+        pressure.oldest_ready_at,
+        now.getTime()
+      ),
+      oldestActiveAgeMs: getExecutionMetricAgeMs(
+        pressure.oldest_active_at,
+        now.getTime()
+      ),
+      byStatus,
+      byKind
+    };
   };
 
   const parseBrowserAuditArtifact = (
@@ -1362,6 +1523,9 @@ export const createSqliteJobRepository = ({
         .all()
         .map(parseExecutionJob)
         .filter((job): job is ExecutionJob => job !== null);
+    },
+    getExecutionQueueMetrics(now = new Date()) {
+      return buildExecutionQueueMetrics(now);
     },
     claimExecutionJob(input, now = new Date()) {
       const leaseExpiresAt = getLeaseExpiresAt(input, now);

@@ -68,6 +68,7 @@ The reference deployment files are under
 | `GET` | `/health` | Public | Minimal process health |
 | `GET` | `/v1/regional-capabilities` | Public | Protocol, region, limits, provenance |
 | `GET` | `/openapi/regional-runtime.json` | Public | oRPC-derived OpenAPI document |
+| `GET` | `/v1/runtime-metrics` | Regional bearer | Queue, lease, and topology snapshot |
 | `POST` | `/v1/regional-executions` | Regional bearer + body HMAC | Submit or retry a batch |
 | `GET` | `/v1/regional-executions/:idempotencyKey` | Regional bearer | Poll signed status |
 | `DELETE` | `/v1/regional-executions/:idempotencyKey` | Regional bearer | Cancel non-terminal work |
@@ -77,6 +78,12 @@ that carry an otherwise valid self-host administrator token.
 
 Regional responses use `Cache-Control: no-store`. Managed ingress must preserve
 that policy and must not cache execution status.
+
+The metrics response is provider-neutral. It reports ready/delayed work, live
+and expired leases, retry/exhaustion pressure, retained status counts, and the
+single-concurrency topology. Provider CPU, RAM, egress, cost, deploy/undeploy,
+and warm-capacity policy remain managed-control-plane concerns. See
+[Runtime metrics](../users/runtime-metrics.md).
 
 ## Submit semantics
 
@@ -170,7 +177,9 @@ Regional Runtime v1 requires:
 The single-replica requirement is deliberate. Separate pods have independent
 SQLite databases and cannot safely serve the same idempotency key. A future
 shared-state protocol revision is required before horizontal replicas can be
-enabled.
+enabled. `/v1/runtime-metrics` therefore reports
+`capacity.horizontalScalingSafe=false`; backlog is not permission to enable
+provider autoscaling.
 
 Providers that colocate several containers in one network namespace use the
 machine-readable

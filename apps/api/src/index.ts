@@ -38,6 +38,7 @@ import type {
   RegionalExecutionResult,
   RegionalExecutionTargetResult,
   ReportExportFormat,
+  RuntimeMetrics,
   ExportResource,
   ExportListResponse,
   ExecutionJob,
@@ -101,6 +102,10 @@ import {
   regionalRuntimeMaxDeadlineMs,
   regionalRuntimeProtocolVersion,
   regionalRuntimeReplayWindowSeconds,
+  runtimeMetricsSchema,
+  runtimeMetricsSchemaVersion,
+  executorConcurrency,
+  runtimeTopology,
   webhookDeliveryExecutionPayloadSchema,
   jobListResponseSchema,
   listQuerySchema,
@@ -306,6 +311,25 @@ const buildProcessHealthPayload = () => ({
   service: 'webperf-api',
   ok: true
 });
+
+const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
+  const observedAt = new Date();
+  return runtimeMetricsSchema.parse({
+    schemaVersion: runtimeMetricsSchemaVersion,
+    observedAt: observedAt.toISOString(),
+    runtimeMode: runtime.runtimeMode,
+    runtimeLocation: runtime.runtimeLocation,
+    executions: repository.getExecutionQueueMetrics(observedAt),
+    capacity: {
+      topology: runtimeTopology,
+      executorConcurrency,
+      horizontalScalingSafe: false
+    },
+    retention: {
+      terminalCountsBoundedDays: runtime.retentionDays
+    }
+  });
+};
 
 const buildPublicCapabilitiesPayload = () => ({
   deploymentModel: 'selfhost' as const,
@@ -888,6 +912,10 @@ const routeRequest = async (request: Request) => {
 
     if (pathname === '/v1/health') {
       return json(buildHealthPayload());
+    }
+
+    if (pathname === '/v1/runtime-metrics' && request.method === 'GET') {
+      return json(buildRuntimeMetricsPayload());
     }
 
     if (pathname === '/v1/regions' && request.method === 'GET') {
@@ -1489,6 +1517,13 @@ const isRegionalRuntimeSurface = (pathname: string) =>
   || pathname === '/openapi/regional-runtime.json'
   || regionalExecutionPathPattern.test(pathname);
 
+const isRegionalRuntimeResponseSurface = (pathname: string) =>
+  isRegionalRuntimeSurface(pathname)
+  || (
+    runtime.runtimeMode === 'regional-runtime'
+    && pathname === '/v1/runtime-metrics'
+  );
+
 const isRegionalInternalExecutionSurface = (pathname: string, method: string) => {
   if (method !== 'POST') {
     return false;
@@ -1518,6 +1553,7 @@ const isRuntimeSurfaceAllowed = (pathname: string, method: string) => {
   if (
     pathname === '/health'
     || pathname === '/v1/regional-capabilities'
+    || pathname === '/v1/runtime-metrics'
     || pathname === '/openapi/regional-runtime.json'
   ) {
     return method === 'GET';
@@ -1553,7 +1589,7 @@ export const server = Bun.serve({
     try {
       routedResponse = await routeRequest(request);
     } catch (error) {
-      if (!isRegionalRuntimeSurface(pathname)) {
+      if (!isRegionalRuntimeResponseSurface(pathname)) {
         throw error;
       }
       const incidentId = logRegionalRuntimeResponseFailure(error);
@@ -1567,12 +1603,15 @@ export const server = Bun.serve({
     }
     const response = (
       isExecutionTransportPath(pathname)
-      || isRegionalRuntimeSurface(pathname)
+      || isRegionalRuntimeResponseSurface(pathname)
       || (request.method === 'GET' && browserAuditArtifactDownloadPathPattern.test(pathname))
     )
       ? routedResponse
       : await redactJsonResponse(routedResponse);
-    const cacheBoundedResponse = isRegionalRuntimeSurface(pathname)
+    const cacheBoundedResponse = (
+      pathname === '/v1/runtime-metrics'
+      || isRegionalRuntimeResponseSurface(pathname)
+    )
       ? withNoStore(response)
       : response;
     return addCompatibilityDeprecationHeaders(request, cacheBoundedResponse);
@@ -4623,6 +4662,7 @@ const requesterIpFromContext = (context: OrpcContext) =>
 
 const controlRouter = control.router({
   health: control.health.handler(async () => buildHealthPayload()),
+  runtimeMetrics: control.runtimeMetrics.handler(async () => buildRuntimeMetricsPayload()),
   regions: control.regions.handler(async () => ({
     runtimeLocation: getRuntimeLocationReport()
   })),
@@ -5121,7 +5161,8 @@ const appRouter = appApi.router({
     health: appApi.system.health.handler(async () => buildHealthPayload()),
     regions: appApi.system.regions.handler(async () => ({
       runtimeLocation: getRuntimeLocationReport()
-    }))
+    })),
+    metrics: appApi.system.metrics.handler(async () => buildRuntimeMetricsPayload())
   },
   properties: {
     list: appApi.properties.list.handler(async ({ input }): Promise<PropertyListResponse> =>
@@ -5360,7 +5401,8 @@ const opsRouter = opsApi.router({
     health: opsApi.system.health.handler(async () => buildHealthPayload()),
     regions: opsApi.system.regions.handler(async () => ({
       runtimeLocation: getRuntimeLocationReport()
-    }))
+    })),
+    metrics: opsApi.system.metrics.handler(async () => buildRuntimeMetricsPayload())
   },
   scheduler: {
     dispatch: opsApi.scheduler.dispatch.handler(async ({ input }): Promise<SchedulerDispatchResponse> => {

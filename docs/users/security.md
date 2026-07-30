@@ -13,7 +13,8 @@ Only these API discovery endpoints are intentionally unauthenticated:
 - `GET /openapi/public.json` — public API description.
 
 `GET /v1/health` is deliberately protected because it carries operational
-detail. Every other data or execution REST/RPC route requires
+detail. `GET /v1/runtime-metrics` is also protected because queue pressure and
+retained work counts are operational data. Every other data or execution REST/RPC route requires
 `SELFHOST_ADMIN_TOKEN`. Scheduler, executor, lease, and artifact-grant routes
 require `SELFHOST_INTERNAL_SECRET`.
 

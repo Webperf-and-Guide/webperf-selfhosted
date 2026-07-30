@@ -7,7 +7,7 @@ installation.
 
 1. [Install](./install.md) a tagged, digest-pinned release bundle.
 2. [Configure](./configure.md) secrets, storage, network origins, and limits.
-3. Connect [Regions](./regions.md) to real probe runtimes.
+3. Configure the deployment's fixed [runtime location](./regions.md).
 4. Build reusable [Checks](./checks.md).
 5. Enable and observe [Scheduling](./scheduling.md).
 6. Optionally enable [Browser Audits](./browser-audits.md) and manage
@@ -19,6 +19,7 @@ installation.
 - [Reverse proxy and remote access](./reverse-proxy.md)
 - [Backup and restore](./backup-restore.md)
 - [Upgrade](./upgrade.md)
+- [Runtime metrics](./runtime-metrics.md)
 - [Troubleshooting](./troubleshooting.md)
 - [Self-hosted vs WebPerf Cloud](./cloud-vs-self-hosted.md)
 

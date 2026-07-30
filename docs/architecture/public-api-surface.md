@@ -37,12 +37,14 @@ Treat this document as the current freeze line:
 - `GET /v1/browser-audits/:id/artifacts/:artifactId`
 - `GET /v1/regions`
 - `GET /v1/capabilities`
+- `GET /v1/runtime-metrics` — protected provider-neutral queue/lease snapshot
 
 ### Regional runtime handoff (v1 boundary decision)
 
 When `SELFHOST_RUNTIME_MODE=regional-runtime`, the API additionally exposes:
 
 - `GET /v1/regional-capabilities` — runtime capabilities for Cloud dispatch
+- `GET /v1/runtime-metrics` — protected queue pressure and topology snapshot
 - `POST /v1/regional-executions` — idempotent execution request (HMAC-signed)
 - `GET /v1/regional-executions/:idempotencyKey` — status poll
 - `DELETE /v1/regional-executions/:idempotencyKey` — cancellation
@@ -59,6 +61,8 @@ Authentication boundary:
   `GET /openapi/regional-runtime.json` unauthenticated for discovery.
 - `GET /v1/health`, artifact downloads, and every data or execution endpoint
   require the appropriate administrator or internal-service bearer token.
+- `GET /v1/runtime-metrics` accepts the administrator token in full mode and
+  the regional-runtime token in regional mode.
 
 Request boundary:
 

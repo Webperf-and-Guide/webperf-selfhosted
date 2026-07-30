@@ -185,11 +185,34 @@ describe('api service monitoring expansion', () => {
         bodySampleTiming: false,
         tlsMetadata: false
       });
+      const controlMetrics = await client.runtimeMetrics();
+      expect(controlMetrics).toMatchObject({
+        schemaVersion: 1,
+        runtimeMode: 'full',
+        capacity: {
+          topology: 'single-replica-sqlite',
+          executorConcurrency: 1,
+          horizontalScalingSafe: false
+        }
+      });
+      expect((await appClient.system.metrics()).runtimeMode).toBe('full');
+      expect((await opsClient.system.metrics()).runtimeMode).toBe('full');
 
       const unauthorizedSitesResponse = await nativeFetch(`${harness.baseUrl}/v1/sites`);
       expect(unauthorizedSitesResponse.status).toBe(401);
       expect(unauthorizedSitesResponse.headers.get('www-authenticate')).toContain('Bearer');
       expect((await nativeFetch(`${harness.baseUrl}/v1/capabilities`)).status).toBe(200);
+      expect((await nativeFetch(`${harness.baseUrl}/v1/runtime-metrics`)).status).toBe(401);
+      const runtimeMetricsResponse = await fetch(`${harness.baseUrl}/v1/runtime-metrics`);
+      expect(runtimeMetricsResponse.status).toBe(200);
+      expect(runtimeMetricsResponse.headers.get('cache-control')).toBe('no-store');
+      expect(await runtimeMetricsResponse.json()).toMatchObject({
+        schemaVersion: controlMetrics.schemaVersion,
+        runtimeMode: controlMetrics.runtimeMode,
+        runtimeLocation: controlMetrics.runtimeLocation,
+        capacity: controlMetrics.capacity,
+        retention: controlMetrics.retention
+      });
       const publicHealth = await (await nativeFetch(`${harness.baseUrl}/health`)).json();
       expect(publicHealth).toEqual({ service: 'webperf-api', ok: true });
       expect((await nativeFetch(`${harness.baseUrl}/openapi/public.json`)).status).toBe(200);
@@ -367,6 +390,9 @@ describe('api service monitoring expansion', () => {
       const openApi = await openApiResponse.json();
       expect(openApi.info?.title).toBe('Webperf Control API');
       expect(openApi.paths?.['/v1/jobs']).toBeTruthy();
+      expect(openApi.paths?.['/v1/runtime-metrics']?.get?.summary).toBe(
+        'Get provider-neutral runtime metrics'
+      );
 
       const publicOpenApiResponse = await fetch(`${harness.baseUrl}/openapi/public.json`);
       expect(publicOpenApiResponse.ok).toBe(true);

@@ -33,6 +33,7 @@ import {
   updateRouteSetSchema
 } from './public-api';
 import { controlHealthSchema } from './control-contract';
+import { runtimeMetricsSchema } from './runtime-metrics';
 
 const idSchema = z.object({
   id: z.string().min(1)
@@ -70,6 +71,14 @@ export const appContract = populateContractRouterPaths(
           method: 'GET',
           path: '/v1/regions',
           summary: 'App region catalog'
+        }),
+      metrics: oc
+        .input(orpcType<void>())
+        .output(runtimeMetricsSchema)
+        .route({
+          method: 'GET',
+          path: '/v1/runtime-metrics',
+          summary: 'Get provider-neutral runtime metrics'
         })
     },
     properties: {

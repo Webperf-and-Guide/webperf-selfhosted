@@ -3,21 +3,23 @@ import { boundedJobIdSchema } from './identifiers';
 
 export const executionJobIdSchema = boundedJobIdSchema;
 
-export const executionJobKindSchema = z.enum([
+export const executionJobKindValues = [
   'network_probe',
   'browser_audit',
   'webhook_delivery'
-]);
+] as const;
+export const executionJobKindSchema = z.enum(executionJobKindValues);
 export type ExecutionJobKind = z.infer<typeof executionJobKindSchema>;
 
-export const executionJobStatusSchema = z.enum([
+export const executionJobStatusValues = [
   'queued',
   'leased',
   'running',
   'succeeded',
   'failed',
   'cancelled'
-]);
+] as const;
+export const executionJobStatusSchema = z.enum(executionJobStatusValues);
 export type ExecutionJobStatus = z.infer<typeof executionJobStatusSchema>;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };

@@ -25,6 +25,7 @@ describe('single-organization API authentication', () => {
     expect(authorizeApiRequest(request('/openapi/regional-runtime.json'), secrets)).toBeNull();
     expect(authorizeApiRequest(request('/openapi/control.json'), secrets)?.status).toBe(401);
     expect(authorizeApiRequest(request('/v1/health'), secrets)?.status).toBe(401);
+    expect(authorizeApiRequest(request('/v1/runtime-metrics'), secrets)?.status).toBe(401);
   });
 
   test('accepts current and next admin tokens on protected API routes', () => {
@@ -67,6 +68,21 @@ describe('single-organization API authentication', () => {
     )?.status).toBe(401);
     expect(authorizeApiRequest(
       request('/v1/regional-executions/execution-1', secrets.internalSecret),
+      secrets
+    )?.status).toBe(401);
+  });
+
+  test('allows operators and managed runtimes to read the shared metrics surface', () => {
+    expect(authorizeApiRequest(
+      request('/v1/runtime-metrics', secrets.adminToken),
+      secrets
+    )).toBeNull();
+    expect(authorizeApiRequest(
+      request('/v1/runtime-metrics', secrets.regionalRuntimeSecret),
+      secrets
+    )).toBeNull();
+    expect(authorizeApiRequest(
+      request('/v1/runtime-metrics', secrets.internalSecret),
       secrets
     )?.status).toBe(401);
   });

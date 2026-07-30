@@ -7,7 +7,8 @@ import type {
   BrowserAuditWorkerRequest,
   ComparisonResource,
   CreateAnalysisInput,
-  CreateComparisonInput
+  CreateComparisonInput,
+  LatencyJobDetail
 } from '@webperf/contracts';
 import {
   analysisResourceSchema,
@@ -72,6 +73,33 @@ const testProbeSecret = 'test-probe-shared-secret';
 const defaultBrowserAuditSecret = 'test-browser-audit-shared-secret';
 const nativeFetch = globalThis.fetch;
 const apiCredentialsByOrigin = new Map<string, { adminToken: string; internalSecret: string }>();
+
+const createHistoricalListJob = (): LatencyJobDetail => ({
+  id: 'job_historical_filter',
+  url: 'https://example.com/historical',
+  status: 'succeeded',
+  note: 'Migrated beta job',
+  request: { method: 'GET', headers: [], body: null },
+  monitorPolicy: {
+    monitorType: 'latency',
+    successRule: 'status_2xx_3xx',
+    latencyThresholdMs: null
+  },
+  requestedAt: '2026-07-29T00:00:00.000Z',
+  startedAt: '2026-07-29T00:00:01.000Z',
+  completedAt: '2026-07-29T00:00:02.000Z',
+  requesterIp: null,
+  region: 'historical-multi-region',
+  historicalRegions: ['tokyo', 'singapore'],
+  targets: [],
+  evaluation: null,
+  summary: {
+    total: 0,
+    succeeded: 0,
+    failed: 0,
+    inflight: 0
+  }
+});
 const fetch = Object.assign((
   input: Parameters<typeof globalThis.fetch>[0],
   init?: Parameters<typeof globalThis.fetch>[1]
@@ -400,6 +428,26 @@ describe('api service monitoring expansion', () => {
       expect(publicOpenApi.info?.title).toBe('Webperf Public API');
       expect(publicOpenApi.paths?.['/v1/sites']).toBeTruthy();
       expect(publicOpenApi.paths?.['/v1/checks']).toBeTruthy();
+
+      harness.repository.saveJob(createHistoricalListJob());
+      const historicalJobListResponse = await fetch(
+        `${harness.baseUrl}/v1/jobs?pageSize=5&filter=singapore`
+      );
+      const historicalJobList = await historicalJobListResponse.json() as {
+        jobs: Array<{ id: string; historicalRegions?: string[] }>;
+        pageInfo: { totalCount: number; filter: string | null };
+      };
+      expect(historicalJobListResponse.status).toBe(200);
+      expect(historicalJobList.pageInfo).toMatchObject({
+        totalCount: 1,
+        filter: 'singapore'
+      });
+      expect(historicalJobList.jobs).toEqual([
+        expect.objectContaining({
+          id: 'job_historical_filter',
+          historicalRegions: ['tokyo', 'singapore']
+        })
+      ]);
 
       const property = await createProperty(harness.baseUrl);
       const routeSet = await createRouteSet(harness.baseUrl, property.id);

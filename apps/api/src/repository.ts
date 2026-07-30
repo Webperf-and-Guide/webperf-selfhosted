@@ -185,7 +185,10 @@ export type JobRepository = {
   }, now?: Date): ExecutionJob[] | null;
   getExecutionJob(id: string): ExecutionJob | null;
   listExecutionJobs(): ExecutionJob[];
-  getExecutionQueueMetrics(now?: Date): RuntimeExecutionQueueMetrics;
+  getExecutionQueueMetrics(
+    now: Date,
+    terminalCountsBoundedDays: number
+  ): RuntimeExecutionQueueMetrics;
   claimExecutionJob(input: ExecutionJobClaimInput, now?: Date): ExecutionJob | null;
   markExecutionJobRunning(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
   renewExecutionJobLease(input: ExecutionJobLeaseInput & { id: string }, now?: Date): ExecutionJob | null;
@@ -256,6 +259,7 @@ type ExecutionJobRow = {
   payload_json: string;
   error_json: string | null;
   created_at: string;
+  started_at: string | null;
   updated_at: string;
   completed_at: string | null;
 };
@@ -560,9 +564,11 @@ export const createSqliteJobRepository = ({
     FROM execution_jobs
     ORDER BY created_at DESC, id DESC
   `);
-  const executionMetricCountsStatement = db.query<ExecutionMetricCountRow, []>(`
+  const executionMetricCountsStatement = db.query<ExecutionMetricCountRow, [string]>(`
     SELECT kind, status, COUNT(*) AS count
     FROM execution_jobs
+    WHERE status NOT IN ('succeeded', 'failed', 'cancelled')
+      OR completed_at >= ?
     GROUP BY kind, status
     ORDER BY kind, status
   `);
@@ -625,7 +631,7 @@ export const createSqliteJobRepository = ({
       MIN(CASE
         WHEN status IN ('leased', 'running')
           AND lease_expires_at > metric_clock.now
-        THEN updated_at
+        THEN COALESCE(started_at, created_at)
         ELSE NULL
       END) AS oldest_active_at
     FROM execution_jobs
@@ -667,6 +673,7 @@ export const createSqliteJobRepository = ({
     string,
     string,
     string,
+    string,
     string | null,
     string | null,
     string,
@@ -677,6 +684,7 @@ export const createSqliteJobRepository = ({
         lease_owner = ?,
         lease_expires_at = ?,
         attempt_count = attempt_count + 1,
+        started_at = ?,
         updated_at = ?,
         completed_at = NULL
     WHERE id = (
@@ -739,6 +747,7 @@ export const createSqliteJobRepository = ({
     SET status = ?,
         lease_owner = NULL,
         lease_expires_at = NULL,
+        started_at = NULL,
         available_at = ?,
         error_json = ?,
         completed_at = ?,
@@ -873,12 +882,24 @@ export const createSqliteJobRepository = ({
   };
 
   const buildExecutionQueueMetrics = (
-    now: Date
+    now: Date,
+    terminalCountsBoundedDays: number
   ): RuntimeExecutionQueueMetrics => {
+    if (
+      !Number.isSafeInteger(terminalCountsBoundedDays)
+      || terminalCountsBoundedDays <= 0
+    ) {
+      throw new Error('Execution metric retention days must be a positive integer');
+    }
+
     const byStatus = createEmptyStatusCounts();
     const byKind = createEmptyKindCounts();
+    const terminalCutoff = new Date(now);
+    terminalCutoff.setUTCDate(
+      terminalCutoff.getUTCDate() - terminalCountsBoundedDays
+    );
 
-    for (const row of executionMetricCountsStatement.all()) {
+    for (const row of executionMetricCountsStatement.all(terminalCutoff.toISOString())) {
       const kind = executionJobKindValues.find((candidate) => candidate === row.kind);
       const status = executionJobStatusValues.find((candidate) => candidate === row.status);
       if (!kind || !status) {
@@ -1525,8 +1546,8 @@ export const createSqliteJobRepository = ({
         .map(parseExecutionJob)
         .filter((job): job is ExecutionJob => job !== null);
     },
-    getExecutionQueueMetrics(now = new Date()) {
-      return buildExecutionQueueMetrics(now);
+    getExecutionQueueMetrics(now, terminalCountsBoundedDays) {
+      return buildExecutionQueueMetrics(now, terminalCountsBoundedDays);
     },
     claimExecutionJob(input, now = new Date()) {
       const leaseExpiresAt = getLeaseExpiresAt(input, now);
@@ -1560,6 +1581,7 @@ export const createSqliteJobRepository = ({
         return claimExecutionJobStatement.get(
           input.leaseOwner,
           leaseExpiresAt,
+          nowIso,
           nowIso,
           executionKind,
           executionKind,

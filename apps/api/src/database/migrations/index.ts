@@ -4,6 +4,7 @@ import { browserAuditArtifactsMigration } from './20260722_003_browser_audit_art
 import { initialSchemaMigration } from './20260722_000_initial_schema';
 import { regionalExecutionTargetsMigration } from './20260729_004_regional_execution_targets';
 import { singleRegionStoredDataMigration } from './20260730_005_single_region_stored_data';
+import { executionJobStartedAtMigration } from './20260730_006_execution_job_started_at';
 
 export const sqliteMigrations = [
   initialSchemaMigration,
@@ -11,7 +12,8 @@ export const sqliteMigrations = [
   executionJobsMigration,
   browserAuditArtifactsMigration,
   regionalExecutionTargetsMigration,
-  singleRegionStoredDataMigration
+  singleRegionStoredDataMigration,
+  executionJobStartedAtMigration
 ] as const;
 
 export type { SqliteMigration, SqliteMigrationContext } from './types';

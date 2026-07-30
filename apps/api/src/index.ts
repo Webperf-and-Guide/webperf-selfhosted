@@ -319,7 +319,10 @@ const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
     observedAt: observedAt.toISOString(),
     runtimeMode: runtime.runtimeMode,
     runtimeLocation: runtime.runtimeLocation,
-    executions: repository.getExecutionQueueMetrics(observedAt),
+    executions: repository.getExecutionQueueMetrics(
+      observedAt,
+      runtime.retentionDays
+    ),
     capacity: {
       topology: runtimeTopology,
       executorConcurrency,
@@ -447,7 +450,8 @@ const buildJobListResponse = (query?: ListQuery): JobListResponse =>
       job.status,
       job.note,
       job.requesterIp,
-      job.region
+      job.region,
+      ...(job.historicalRegions ?? [])
     ]).items,
     pageInfo: applyListQuery(repository.listJobs(), query, (job) => [
       job.id,
@@ -455,7 +459,8 @@ const buildJobListResponse = (query?: ListQuery): JobListResponse =>
       job.status,
       job.note,
       job.requesterIp,
-      job.region
+      job.region,
+      ...(job.historicalRegions ?? [])
     ]).pageInfo
   });
 

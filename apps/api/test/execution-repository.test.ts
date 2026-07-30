@@ -163,6 +163,14 @@ describe('durable execution repository', () => {
       },
       new Date('2026-07-22T00:00:01.000Z')
     );
+    repository.renewExecutionJobLease(
+      {
+        id: 'exec_metrics_active',
+        leaseOwner: 'metrics-active',
+        leaseDurationMs: 3_600_000
+      },
+      new Date('2026-07-22T00:04:00.000Z')
+    );
 
     enqueue('exec_metrics_expired', 'network_probe', '2026-07-22T00:01:00.000Z');
     repository.claimExecutionJob(
@@ -206,7 +214,10 @@ describe('durable execution repository', () => {
     );
 
     expect(
-      repository.getExecutionQueueMetrics(new Date('2026-07-22T00:05:00.000Z'))
+      repository.getExecutionQueueMetrics(
+        new Date('2026-07-22T00:05:00.000Z'),
+        30
+      )
     ).toEqual({
       ready: 3,
       delayed: 1,
@@ -215,7 +226,7 @@ describe('durable execution repository', () => {
       retryQueued: 1,
       exhausted: 1,
       oldestReadyAgeMs: 219_000,
-      oldestActiveAgeMs: 299_000,
+      oldestActiveAgeMs: 300_000,
       byStatus: {
         queued: 3,
         leased: 2,
@@ -251,6 +262,43 @@ describe('durable execution repository', () => {
         }
       }
     });
+
+    repository.close();
+  });
+
+  test('bounds terminal execution metric counts by the configured retention window', () => {
+    const repository = createRepository(createTempDatabasePath());
+    const complete = (id: string, at: string) => {
+      const timestamp = new Date(at);
+      repository.enqueueExecutionJob({
+        id,
+        kind: 'network_probe',
+        resourceId: `resource_${id}`,
+        maxAttempts: 3,
+        payload: { fixture: id }
+      }, timestamp);
+      repository.claimExecutionJob(
+        { leaseOwner: `owner_${id}`, leaseDurationMs: 60_000 },
+        timestamp
+      );
+      repository.completeExecutionJob(
+        { id, leaseOwner: `owner_${id}` },
+        timestamp
+      );
+    };
+
+    complete('exec_metrics_old_terminal', '2026-05-01T00:00:00.000Z');
+    complete('exec_metrics_recent_terminal', '2026-07-21T00:00:00.000Z');
+
+    const metrics = repository.getExecutionQueueMetrics(
+      new Date('2026-07-22T00:00:00.000Z'),
+      30
+    );
+
+    expect(metrics.byStatus.succeeded).toBe(1);
+    expect(metrics.byKind.network_probe.succeeded).toBe(1);
+    expect(metrics.ready).toBe(0);
+    expect(metrics.active).toBe(0);
 
     repository.close();
   });

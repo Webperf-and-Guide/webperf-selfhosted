@@ -217,7 +217,11 @@ describe('sqlite control repository', () => {
     const databasePath = createTempDatabasePath();
     const storageCrypto = createStorageCrypto({ currentSecret: testEncryptionSecret });
     const database = openSqliteDatabase(databasePath);
-    const historicalMigrations = sqliteMigrations.slice(0, -1);
+    const migrationIndex = sqliteMigrations.findIndex(
+      (migration) => migration.id === '20260730_005_single_region_stored_data'
+    );
+    expect(migrationIndex).toBeGreaterThanOrEqual(0);
+    const historicalMigrations = sqliteMigrations.slice(0, migrationIndex);
 
     database.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -443,7 +447,11 @@ describe('sqlite control repository', () => {
   test('requires an explicit runtime region before migrating legacy saved Checks', () => {
     const storageCrypto = createStorageCrypto({ currentSecret: testEncryptionSecret });
     const database = openSqliteDatabase(':memory:');
-    const historicalMigrations = sqliteMigrations.slice(0, -1);
+    const migrationIndex = sqliteMigrations.findIndex(
+      (migration) => migration.id === '20260730_005_single_region_stored_data'
+    );
+    expect(migrationIndex).toBeGreaterThanOrEqual(0);
+    const historicalMigrations = sqliteMigrations.slice(0, migrationIndex);
     for (const migration of historicalMigrations) {
       migration.up(database, { storageCrypto });
     }
@@ -463,7 +471,7 @@ describe('sqlite control repository', () => {
     );
 
     expect(() => {
-      sqliteMigrations.at(-1)!.up(database, { storageCrypto });
+      sqliteMigrations[migrationIndex]!.up(database, { storageCrypto });
     }).toThrow('SELFHOST_REGION_ID is required');
     database.close();
   });

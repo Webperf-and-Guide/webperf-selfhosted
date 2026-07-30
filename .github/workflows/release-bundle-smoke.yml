@@ -244,6 +244,7 @@ jobs:
 
   upgrade:
     name: Published bundle v0.2.1 upgrade drill
+    if: ${{ inputs.version != '0.2.1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

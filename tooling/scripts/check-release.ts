@@ -283,6 +283,7 @@ for (const requiredFragment of [
 
 for (const requiredFragment of [
   'Published bundle v0.2.1 upgrade drill',
+  "if: ${{ inputs.version != '0.2.1' }}",
   'LEGACY_VERSION: 0.2.1',
   'WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:',
   'WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:',

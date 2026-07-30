@@ -16,6 +16,12 @@ Audit records, copies SQLite plus artifact bytes outside an isolated Compose
 volume, deletes that test volume, restores both halves, runs `migrate` and
 `doctor`, and verifies the original records and artifact digest. Formal release
 smoke also runs the same drill against the downloaded digest-pinned bundle.
+The release gate separately starts the public `v0.2.1` bundle, creates its
+legacy multi-region records, replaces the runtime with the candidate published
+bundle on the same named volume, and verifies the stored-data migration. That
+cross-version drill proves the earliest supported public beta can reach the
+current single-region model without silently reassigning historical locations
+or scheduled Checks.
 This is destructive only to its uniquely named `webperf-recovery-*` test
 project; operators must follow the stopped-writer procedure below and must
 never reuse the drill as a production backup command.

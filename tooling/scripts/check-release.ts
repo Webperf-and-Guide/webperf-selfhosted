@@ -64,6 +64,28 @@ try {
 } catch {
   violations.push('tooling/scripts/smoke-compose.sh: script is missing or unreadable');
 }
+let composeUpgradeDrillScript: string | undefined;
+let composeUpgradeFixtureScript: string | undefined;
+try {
+  composeUpgradeDrillScript = readFileSync(
+    join(root, 'tooling/scripts/drill-compose-upgrade.sh'),
+    'utf8'
+  );
+} catch {
+  violations.push(
+    'tooling/scripts/drill-compose-upgrade.sh: script is missing or unreadable'
+  );
+}
+try {
+  composeUpgradeFixtureScript = readFileSync(
+    join(root, 'tooling/scripts/compose-upgrade-fixture.ts'),
+    'utf8'
+  );
+} catch {
+  violations.push(
+    'tooling/scripts/compose-upgrade-fixture.ts: script is missing or unreadable'
+  );
+}
 let releaseTagScript: string | undefined;
 try {
   releaseTagScript = readFileSync(join(root, 'tooling/scripts/release-tag.sh'), 'utf8');
@@ -273,6 +295,42 @@ for (const requiredFragment of [
 ]) {
   if (releaseBundleSmokeWorkflow !== undefined && !releaseBundleSmokeWorkflow.includes(requiredFragment)) {
     violations.push(`release-bundle-smoke.yml: missing published-bundle smoke invariant ${requiredFragment}`);
+  }
+}
+
+for (const requiredFragment of [
+  'Published bundle v0.2.1 upgrade drill',
+  'LEGACY_VERSION: 0.2.1',
+  'WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:',
+  'WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:',
+  'WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE: \'false\'',
+  'bash tooling/scripts/drill-compose-upgrade.sh'
+]) {
+  if (
+    releaseBundleSmokeWorkflow !== undefined
+    && !releaseBundleSmokeWorkflow.includes(requiredFragment)
+  ) {
+    violations.push(
+      `release-bundle-smoke.yml: missing cross-version upgrade invariant ${requiredFragment}`
+    );
+  }
+}
+
+const composeUpgradeSurface = [
+  composeUpgradeDrillScript ?? '',
+  composeUpgradeFixtureScript ?? ''
+].join('\n');
+for (const requiredFragment of [
+  'SELFHOST_MIGRATION_BACKUP',
+  'historical-multi-region',
+  'compose-version-upgrade',
+  'Legacy data volume disappeared during the non-destructive upgrade',
+  'locationMigration'
+]) {
+  if (!composeUpgradeSurface.includes(requiredFragment)) {
+    violations.push(
+      `compose upgrade drill: missing stored-data invariant ${requiredFragment}`
+    );
   }
 }
 

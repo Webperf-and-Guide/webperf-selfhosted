@@ -4,6 +4,15 @@ Treat an upgrade as a data migration, not only an image pull. The release
 Compose file is digest-pinned, the API applies ordered SQLite migrations, and
 an older binary refuses a database containing unknown newer migrations.
 
+Every formal release runs `bun run drill:compose:upgrade` against two public,
+checksum-verified bundles. The gate creates real multi-region Job and scheduled
+Check records with `v0.2.1`, retains that release's named data volume, starts
+the candidate release, and verifies the pre-migration backup, SQLite doctor,
+historical region provenance, disabled unsafe schedule, explicit migration
+acknowledgement, and retired Region Set surface. This automates the earliest
+supported public-beta upgrade path; it does not replace an operator backup or a
+staging rehearsal for custom deployments.
+
 ## 1. Prepare
 
 1. Read the GitHub Release notes and `CHANGELOG.md`.
@@ -14,7 +23,8 @@ an older binary refuses a database containing unknown newer migrations.
    names with the new `.env.example`. Preserve all current/next secrets.
 
 Do not replace `SELFHOST_INTERNAL_SECRET` during an upgrade. It is part of the
-database encryption boundary.
+database encryption boundary. The automated drill intentionally keeps this
+secret unchanged across both versions; a production upgrade must do the same.
 
 ### Phase 1 of issue #14: convert the region configuration before startup
 

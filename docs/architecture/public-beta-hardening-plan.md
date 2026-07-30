@@ -193,6 +193,8 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Keep scheduler limited to authenticated due-check dispatch.
 - [x] Add init/migrate/backup/restore/doctor/maintenance commands.
 - [x] Add restart-recovery and scheduler-dispatch integration tests.
+- [x] Add a destructive isolated-volume backup/restore drill and a published
+  `v0.2.1`-to-current cross-version upgrade drill to formal release smoke.
 - [x] Add a Sampo changeset for durable execution; extend it with database
   operations before this phase closes.
 
@@ -258,6 +260,9 @@ The exact diff will stay small within each phase, but the expected surface is:
 ## Completion gates
 
 - [x] A clean host can install a tagged, digest-pinned Compose bundle.
+- [x] A checksum-verified `v0.2.1` bundle can retain its named volume and
+  migrate stored multi-region records into the single-region model without
+  losing historical provenance or silently retaining an unsafe schedule.
 - [x] Default host exposure is console-only on loopback.
 - [x] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.

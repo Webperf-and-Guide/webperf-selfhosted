@@ -31,6 +31,7 @@ const MAX_HEADER_NAME_BYTES: usize = 120;
 const MAX_HEADER_VALUE_BYTES: usize = 4_000;
 const MAX_BODY_CONTENT_TYPE_BYTES: usize = 120;
 const MAX_BODY_VALUE_CODE_UNITS: usize = 10_000;
+const MAX_RUNTIME_VERSION_CODE_UNITS: usize = 120;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
@@ -48,7 +49,9 @@ pub enum ConfigError {
         "REGION_ID must contain 1-64 lowercase ASCII letters, digits, or hyphens and start and end with a letter or digit"
     )]
     InvalidRegionId,
-    #[error("WEBPERF_PROBE_VERSION must contain between 1 and 120 bytes when configured")]
+    #[error(
+        "WEBPERF_PROBE_VERSION must contain between 1 and 120 UTF-16 code units when configured"
+    )]
     InvalidRuntimeVersion,
     #[error("WEBPERF_PROBE_IMAGE_DIGEST must be a lowercase sha256 digest when configured")]
     InvalidImageDigest,
@@ -117,7 +120,7 @@ impl Config {
             Ok(value) if value.trim().is_empty() => None,
             Ok(value) => {
                 let value = value.trim().to_string();
-                if value.len() > 120 {
+                if !is_runtime_version_valid(&value) {
                     return Err(ConfigError::InvalidRuntimeVersion);
                 }
                 Some(value)
@@ -378,6 +381,10 @@ fn is_request_config_contract_valid(request: &RequestConfig) -> bool {
 
 fn utf16_code_units(value: &str) -> usize {
     value.encode_utf16().count()
+}
+
+fn is_runtime_version_valid(value: &str) -> bool {
+    (1..=MAX_RUNTIME_VERSION_CODE_UNITS).contains(&utf16_code_units(value))
 }
 
 fn is_http_token_byte(byte: u8) -> bool {
@@ -737,6 +744,20 @@ mod tests {
         assert!(!is_sha256_digest(&format!("sha256:{}", "A".repeat(64))));
         assert!(!is_sha256_digest("sha256:abc"));
         assert!(!is_sha256_digest(&format!("sha512:{}", "0".repeat(64))));
+    }
+
+    #[test]
+    fn validates_runtime_versions_with_public_contract_semantics() {
+        assert!(is_runtime_version_valid(
+            &"a".repeat(MAX_RUNTIME_VERSION_CODE_UNITS)
+        ));
+        assert!(is_runtime_version_valid(
+            &"😀".repeat(MAX_RUNTIME_VERSION_CODE_UNITS / 2)
+        ));
+        assert!(!is_runtime_version_valid(""));
+        assert!(!is_runtime_version_valid(
+            &"😀".repeat(MAX_RUNTIME_VERSION_CODE_UNITS / 2 + 1)
+        ));
     }
 
     #[test]

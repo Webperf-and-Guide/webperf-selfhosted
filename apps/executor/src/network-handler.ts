@@ -47,9 +47,26 @@ export type NetworkHandlerOptions = {
 };
 
 export const probeTransportResponseTimeoutMs = probeMeasurementTimeoutMs + 5_000;
+const maximumProbeRetryAfterSeconds = Math.ceil(probeMeasurementTimeoutMs / 1_000);
 const requestProbeHttp = createPinnedHttpRequest({
   requestTimeoutMs: probeTransportResponseTimeoutMs
 });
+
+export const probeRetryDelayMs = (
+  retryAfter: string | null,
+  attemptCount: number,
+  random = Math.random
+) => {
+  const fallback = retryDelayMs(attemptCount, random);
+  const value = retryAfter?.trim() ?? '';
+  if (!/^[1-9]\d{0,2}$/.test(value)) {
+    return fallback;
+  }
+  const seconds = Number(value);
+  return seconds <= maximumProbeRetryAfterSeconds
+    ? seconds * 1_000
+    : fallback;
+};
 
 export const parseProbeBaseUrl = (
   baseUrl: string,
@@ -227,7 +244,12 @@ const processNetworkJob = async ({
             'probe_temporarily_unavailable',
             'Network probe is temporarily unavailable',
             true,
-            retryDelayMs(executionJob.attemptCount)
+            response.status === 429
+              ? probeRetryDelayMs(
+                  response.headers.get('retry-after'),
+                  executionJob.attemptCount
+                )
+              : retryDelayMs(executionJob.attemptCount)
           );
         }
 

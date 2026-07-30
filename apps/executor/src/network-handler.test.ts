@@ -10,6 +10,7 @@ import type { ExecutorApiClient } from './client';
 import {
   createNetworkExecutionHandler,
   parseProbeBaseUrl,
+  probeRetryDelayMs,
   probeTransportResponseTimeoutMs
 } from './network-handler';
 import { OutboundHttpPolicyError } from './outbound-http';
@@ -125,6 +126,12 @@ describe('network execution handler', () => {
     expect(probeTransportResponseTimeoutMs).toBeGreaterThan(probeMeasurementTimeoutMs);
   });
 
+  test('honors a bounded probe capacity retry delay', () => {
+    expect(probeRetryDelayMs('40', 1, () => 0.5)).toBe(40_000);
+    expect(probeRetryDelayMs('41', 1, () => 0.5)).toBe(1_000);
+    expect(probeRetryDelayMs('invalid', 2, () => 0.5)).toBe(2_000);
+  });
+
   test('persists measuring and terminal states around a signed probe request', async () => {
     const savedResults: ExecutionResourceResultRequest[] = [];
     let probeRequest: Request | null = null;
@@ -217,6 +224,42 @@ describe('network execution handler', () => {
       errorCode: 'probe_http_503'
     });
     expect(JSON.stringify(savedResults)).not.toContain('raw-sensitive-probe-error');
+  });
+
+  test('defers a saturated probe retry for the advertised capacity window', async () => {
+    const savedResults: ExecutionResourceResultRequest[] = [];
+    const handler = createNetworkExecutionHandler({
+      client: createClient({ savedResults }),
+      leaseOwner: 'executor-network',
+      probeSharedSecret: 'network-handler-probe-secret',
+      probeBaseUrl: 'http://probe.test:8080',
+      allowInsecureProbeHttp: true,
+      requestImpl: async () => new Response(null, {
+        status: 429,
+        headers: { 'retry-after': '40' }
+      })
+    });
+
+    let error: unknown;
+    try {
+      await handler(executionJob, new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ExecutionFailure);
+    expect((error as ExecutionFailure).retryable).toBe(true);
+    expect((error as ExecutionFailure).retryDelayMs).toBe(40_000);
+    expect(savedResults.at(-1)?.result).toMatchObject({
+      kind: 'network_probe',
+      jobs: [{
+        targets: [{
+          status: 'queued',
+          errorClass: 'retryable',
+          errorCode: 'probe_http_429'
+        }]
+      }]
+    });
   });
 
   test('rejects a probe response attributed to a different region', async () => {

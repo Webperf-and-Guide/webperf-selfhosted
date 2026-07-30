@@ -386,6 +386,96 @@ const hasLegacyChecksInBatches = ({
   return found;
 };
 
+const hasLegacyJobsInBatches = ({
+  database,
+  parse
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  parse: (payload: string) => unknown;
+}) => {
+  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
+    SELECT rowid, payload_json
+    FROM jobs
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
+    SELECT rowid, payload_json
+    FROM jobs
+    WHERE rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  let found = false;
+  visitPayloadRowsInBatches({
+    readFirstBatch,
+    readNextBatch,
+    parse,
+    visit(_row, value) {
+      const selectedRegions = isRecord(value)
+        ? toStringArray(value.selectedRegions)
+        : null;
+      if (selectedRegions && selectedRegions.length > 0) {
+        found = true;
+        return false;
+      }
+      return true;
+    }
+  });
+  return found;
+};
+
+const hasUnfinishedLegacyBrowserAuditsInBatches = ({
+  database,
+  parse
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  parse: (payload: string) => unknown;
+}) => {
+  const readFirstBatch = database.query<PersistedPayloadRow, []>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'browser_audit'
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  const readNextBatch = database.query<PersistedPayloadRow, [number]>(`
+    SELECT rowid, payload_json
+    FROM saved_entities
+    WHERE kind = 'browser_audit' AND rowid > ?
+    ORDER BY rowid
+    LIMIT ${migrationBatchSize}
+  `);
+  let found = false;
+  visitPayloadRowsInBatches({
+    readFirstBatch,
+    readNextBatch,
+    parse,
+    visit(_row, value) {
+      const audit = browserAuditResourceSchema.safeParse(value);
+      if (
+        audit.success
+        && !['succeeded', 'failed', 'cancelled'].includes(audit.data.status)
+      ) {
+        found = true;
+        return false;
+      }
+      return true;
+    }
+  });
+  return found;
+};
+
+const requiresRuntimeRegionForMigration = ({
+  database,
+  parse
+}: {
+  database: Parameters<SqliteMigration['up']>[0];
+  parse: (payload: string) => unknown;
+}) => hasLegacyChecksInBatches({ database, parse })
+  || hasLegacyJobsInBatches({ database, parse })
+  || hasUnfinishedLegacyBrowserAuditsInBatches({ database, parse });
+
 const rewriteCheckRowsInBatches = ({
   database,
   runtimeRegionId,
@@ -701,9 +791,12 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
     const stringify = (value: unknown) => context.storageCrypto.stringify(value);
 
     const runtimeRegionId = context.runtimeRegionId;
-    if (!runtimeRegionId && hasLegacyChecksInBatches({ database, parse })) {
+    if (
+      !runtimeRegionId
+      && requiresRuntimeRegionForMigration({ database, parse })
+    ) {
       throw new Error(
-        'SELFHOST_REGION_ID is required to migrate saved Checks from legacy Region Sets'
+        'SELFHOST_REGION_ID is required to migrate legacy location-bound Jobs, Checks, or Browser Audits'
       );
     }
 

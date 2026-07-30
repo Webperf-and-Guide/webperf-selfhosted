@@ -995,6 +995,76 @@ describe('sqlite control repository', () => {
     database.close();
   });
 
+  test('requires runtime identity for legacy Jobs and unfinished Browser Audits', () => {
+    const migrationIndex = sqliteMigrations.findIndex(
+      (migration) => migration.id === '20260730_005_single_region_stored_data'
+    );
+    expect(migrationIndex).toBeGreaterThanOrEqual(0);
+    const historicalMigrations = sqliteMigrations.slice(0, migrationIndex);
+    const timestamp = '2026-07-29T00:00:00.000Z';
+    const legacyJob = createJob({
+      id: 'job_legacy_runtime_bound',
+      status: 'queued',
+      startedAt: null,
+      completedAt: null
+    });
+    const {
+      region: _removedRegion,
+      historicalRegions: _removedHistoricalRegions,
+      ...legacyJobWithoutRegion
+    } = legacyJob;
+
+    for (const seed of [
+      (database: Database, storageCrypto: ReturnType<typeof createStorageCrypto>) => {
+        database.query(`
+          INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          legacyJob.id,
+          legacyJob.url,
+          legacyJob.status,
+          legacyJob.requestedAt,
+          timestamp,
+          storageCrypto.stringify({
+            ...legacyJobWithoutRegion,
+            selectedRegions: ['singapore']
+          })
+        );
+      },
+      (database: Database, storageCrypto: ReturnType<typeof createStorageCrypto>) => {
+        const audit = createBrowserAudit({
+          id: 'audit_legacy_runtime_bound',
+          region: null,
+          status: 'queued'
+        });
+        database.query(`
+          INSERT INTO saved_entities (kind, id, created_at, updated_at, payload_json)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          'browser_audit',
+          audit.id,
+          timestamp,
+          timestamp,
+          storageCrypto.stringify(audit)
+        );
+      }
+    ]) {
+      const storageCrypto = createStorageCrypto({
+        currentSecret: testEncryptionSecret
+      });
+      const database = openSqliteDatabase(':memory:');
+      for (const migration of historicalMigrations) {
+        migration.up(database, { storageCrypto });
+      }
+      seed(database, storageCrypto);
+
+      expect(() => {
+        sqliteMigrations[migrationIndex]!.up(database, { storageCrypto });
+      }).toThrow('SELFHOST_REGION_ID is required');
+      database.close();
+    }
+  });
+
   test('encrypts persisted payloads and supports key rotation', () => {
     const databasePath = createTempDatabasePath();
     const secretValue = 'Bearer must-not-appear-in-sqlite';

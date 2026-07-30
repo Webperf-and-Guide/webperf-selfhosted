@@ -10,9 +10,12 @@ use reqwest::{
 };
 use std::{
     net::{IpAddr, SocketAddr},
-    time::{Duration, Instant},
+    time::Duration,
 };
-use tokio::{net::lookup_host, time::timeout};
+use tokio::{
+    net::lookup_host,
+    time::{Instant, timeout_at},
+};
 use tracing::debug;
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_millis(PROBE_REQUEST_TIMEOUT_MS);
@@ -24,30 +27,19 @@ pub async fn measure_url(
     request_config: Option<&RequestConfig>,
 ) -> ProbeMeasurement {
     let started_at = Instant::now();
-    match timeout(
-        MEASUREMENT_TIMEOUT,
-        measure_url_inner(region, target, request_config),
-    )
-    .await
-    {
-        Ok(measurement) => measurement,
-        Err(_) => ProbeMeasurement::failure(
-            region,
-            target,
-            None,
-            0,
-            base_timings(started_at.elapsed(), None, None),
-            "measurement timeout",
-        ),
-    }
+    let deadline = started_at
+        .checked_add(MEASUREMENT_TIMEOUT)
+        .unwrap_or(started_at);
+    measure_url_inner(region, target, request_config, started_at, deadline).await
 }
 
 async fn measure_url_inner(
     region: &str,
     target: &str,
     request_config: Option<&RequestConfig>,
+    started_at: Instant,
+    deadline: Instant,
 ) -> ProbeMeasurement {
-    let started_at = Instant::now();
     let parsed = match Url::parse(target) {
         Ok(url) => url,
         Err(_) => {
@@ -80,9 +72,9 @@ async fn measure_url_inner(
 
     loop {
         let dns_started_at = Instant::now();
-        let resolved_addresses = match resolve_public_host(&current).await {
-            Ok(addresses) => addresses,
-            Err(message) => {
+        let resolved_addresses = match timeout_at(deadline, resolve_public_host(&current)).await {
+            Ok(Ok(addresses)) => addresses,
+            Ok(Err(message)) => {
                 return ProbeMeasurement::failure(
                     region,
                     target,
@@ -94,6 +86,17 @@ async fn measure_url_inner(
                         last_ttfb_ms,
                     ),
                     message,
+                );
+            }
+            Err(_) => {
+                return timeout_measurement(
+                    region,
+                    target,
+                    &current,
+                    redirect_count,
+                    started_at,
+                    elapsed_millis(dns_started_at),
+                    last_ttfb_ms,
                 );
             }
         };
@@ -131,9 +134,9 @@ async fn measure_url_inner(
                 );
             }
         };
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(error) => {
+        let response = match timeout_at(deadline, request.send()).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
                 return ProbeMeasurement::failure(
                     region,
                     target,
@@ -145,6 +148,17 @@ async fn measure_url_inner(
                         elapsed_millis(request_started_at),
                     ),
                     error.without_url().to_string(),
+                );
+            }
+            Err(_) => {
+                return timeout_measurement(
+                    region,
+                    target,
+                    &current,
+                    redirect_count,
+                    started_at,
+                    last_dns_ms,
+                    elapsed_millis(request_started_at),
                 );
             }
         };
@@ -235,6 +249,25 @@ async fn measure_url_inner(
 
 fn exceeds_redirect_limit(redirect_count: u32) -> bool {
     u64::from(redirect_count) > PROBE_MAX_REDIRECTS
+}
+
+fn timeout_measurement(
+    region: &str,
+    target: &str,
+    current: &Url,
+    redirect_count: u32,
+    started_at: Instant,
+    dns_ms: Option<u64>,
+    ttfb_ms: Option<u64>,
+) -> ProbeMeasurement {
+    ProbeMeasurement::failure(
+        region,
+        target,
+        Some(display_url(current)),
+        redirect_count,
+        base_timings(started_at.elapsed(), dns_ms, ttfb_ms),
+        "measurement timeout",
+    )
 }
 
 fn build_pinned_client(url: &Url, addresses: &[SocketAddr]) -> Result<Client, String> {
@@ -353,8 +386,9 @@ fn display_url(url: &Url) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{PROBE_MAX_REDIRECTS, display_url, exceeds_redirect_limit};
+    use super::{PROBE_MAX_REDIRECTS, display_url, exceeds_redirect_limit, timeout_measurement};
     use reqwest::Url;
+    use tokio::time::Instant;
 
     #[test]
     fn follows_four_redirects_before_rejecting_the_fifth() {
@@ -381,5 +415,31 @@ mod tests {
             Url::parse("https://example.com:8443/?token=secret").expect("test URL should parse");
 
         assert_eq!(display_url(&target), "https://example.com:8443");
+    }
+
+    #[test]
+    fn lifecycle_timeout_preserves_current_redirect_state() {
+        let started_at = Instant::now();
+        let current =
+            Url::parse("https://redirected.example.com/path?secret=value").expect("valid URL");
+
+        let measurement = timeout_measurement(
+            "tokyo",
+            "https://example.com",
+            &current,
+            2,
+            started_at,
+            Some(3),
+            Some(7),
+        );
+
+        assert_eq!(
+            measurement.final_url.as_deref(),
+            Some("https://redirected.example.com/path")
+        );
+        assert_eq!(measurement.redirect_count, 2);
+        assert_eq!(measurement.timings.dns_ms, Some(3));
+        assert_eq!(measurement.timings.ttfb_ms, Some(7));
+        assert_eq!(measurement.error.as_deref(), Some("measurement timeout"));
     }
 }

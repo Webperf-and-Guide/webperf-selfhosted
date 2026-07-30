@@ -9,4 +9,7 @@ and admission limit, echoes correlation identifiers in measurement responses,
 rejects mismatched regions, and fails fast with `429` when its configurable
 in-flight guard is exhausted. Its Rust wire format rejects explicit null
 request configurations and its documented four-hop redirect allowance now
-follows all four redirects before rejecting a fifth.
+follows all four redirects before rejecting a fifth. Request buffering is
+admitted through a separate fixed memory budget with a bounded body-read
+deadline, and lifecycle timeouts retain the last validated redirect URL and
+redirect count for managed-service diagnostics.

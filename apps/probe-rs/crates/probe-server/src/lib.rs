@@ -25,17 +25,23 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::Semaphore};
 use tower_http::trace::TraceLayer;
-use tracing::{Level, info};
+use tracing::{Level, debug, info, warn};
 
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 const HEALTH_STATUS_PREFIX: &[u8] = b"HTTP/1.1 200";
 const HEALTH_STATUS_PREFIX_ALT: &[u8] = b"HTTP/1.0 200";
 const HEALTHCHECK_STATUS_PREFIX_BYTES: usize = HEALTH_STATUS_PREFIX.len();
+const REQUEST_BUFFER_BUDGET_BYTES: usize = 64 * 1_024 * 1_024;
+const MAX_REQUEST_BODY_SLOTS: usize =
+    REQUEST_BUFFER_BUDGET_BYTES / PROBE_TRANSPORT_MAX_PAYLOAD_BYTES;
+const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(8);
 const _: () = assert!(HEALTH_STATUS_PREFIX.len() == HEALTH_STATUS_PREFIX_ALT.len());
+const _: () = assert!(MAX_REQUEST_BODY_SLOTS > 0);
 
 #[derive(Clone)]
 pub struct AppState {
     config: Arc<Config>,
+    request_body_slots: Arc<Semaphore>,
     measurement_slots: Arc<Semaphore>,
 }
 
@@ -45,9 +51,13 @@ impl AppState {
             (1..=MAX_CONFIGURED_INFLIGHT).contains(&config.max_inflight),
             "max_inflight must be within the public configuration bounds"
         );
+        let request_body_slots = Arc::new(Semaphore::new(
+            config.max_inflight.min(MAX_REQUEST_BODY_SLOTS),
+        ));
         let measurement_slots = Arc::new(Semaphore::new(config.max_inflight));
         Self {
             config: Arc::new(config),
+            request_body_slots,
             measurement_slots,
         }
     }
@@ -154,15 +164,36 @@ async fn handle_capabilities(State(state): State<AppState>) -> impl IntoResponse
 }
 
 async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -> Response {
-    let body_bytes = match to_bytes(request.into_body(), PROBE_TRANSPORT_MAX_PAYLOAD_BYTES).await {
-        Ok(body) => body,
-        Err(_) => return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body"),
+    let request_body_slot = match state.request_body_slots.clone().try_acquire_owned() {
+        Ok(slot) => slot,
+        Err(_) => return capacity_exhausted_response(),
+    };
+    let body_bytes = match tokio::time::timeout(
+        REQUEST_BODY_TIMEOUT,
+        to_bytes(request.into_body(), PROBE_TRANSPORT_MAX_PAYLOAD_BYTES),
+    )
+    .await
+    {
+        Ok(Ok(body)) => body,
+        Ok(Err(_)) => {
+            debug!("probe request body read failed");
+            return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body");
+        }
+        Err(_) => {
+            warn!(
+                timeout_ms = REQUEST_BODY_TIMEOUT.as_millis(),
+                "probe request body read timed out"
+            );
+            return plain_text_response(StatusCode::REQUEST_TIMEOUT, "request body timeout");
+        }
     };
 
     let body = match serde_json::from_slice::<MeasureRequest>(&body_bytes) {
         Ok(body) => body,
         Err(_) => return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body"),
     };
+    // MeasureRequest owns its fields, so release the raw buffer before validation and execution.
+    drop(body_bytes);
 
     if !body.is_contract_valid() {
         return plain_text_response(StatusCode::BAD_REQUEST, "invalid request body");
@@ -188,22 +219,11 @@ async fn handle_measure(State(state): State<AppState>, request: Request<Body>) -
     if body.region != state.config.region_id {
         return plain_text_response(StatusCode::BAD_REQUEST, "region does not match probe");
     }
+    drop(request_body_slot);
 
     let _measurement_slot = match state.measurement_slots.clone().try_acquire_owned() {
         Ok(slot) => slot,
-        Err(_) => {
-            let mut response = (
-                StatusCode::TOO_MANY_REQUESTS,
-                [(CONTENT_TYPE, "text/plain; charset=utf-8")],
-                "probe capacity exhausted",
-            )
-                .into_response();
-            response.headers_mut().insert(
-                RETRY_AFTER,
-                (PROBE_MEASUREMENT_TIMEOUT_MS / 1_000).max(1).into(),
-            );
-            return response;
-        }
+        Err(_) => return capacity_exhausted_response(),
     };
 
     let measurement = measure_url(&state.config.region_id, &body.url, body.request.as_ref()).await;
@@ -241,10 +261,24 @@ fn plain_text_response(status: StatusCode, body: &'static str) -> Response {
     (status, body).into_response()
 }
 
+fn capacity_exhausted_response() -> Response {
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "probe capacity exhausted",
+    )
+        .into_response();
+    response.headers_mut().insert(
+        RETRY_AFTER,
+        (PROBE_MEASUREMENT_TIMEOUT_MS / 1_000).max(1).into(),
+    );
+    response
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AppState, run_local_healthcheck};
-    use probe_core::Config;
+    use super::{AppState, MAX_REQUEST_BODY_SLOTS, run_local_healthcheck};
+    use probe_core::{Config, MAX_CONFIGURED_INFLIGHT};
     use std::{
         io::{BufRead, BufReader, Read, Write},
         net::TcpListener as StdTcpListener,
@@ -315,5 +349,41 @@ mod tests {
 
         drop(first);
         assert!(state.measurement_slots.clone().try_acquire_owned().is_ok());
+    }
+
+    #[test]
+    fn request_body_slots_have_a_fixed_memory_budget() {
+        let state = AppState::new(Config {
+            listen_addr: "127.0.0.1:0".to_string(),
+            region_id: "local".to_string(),
+            shared_secret: "test-probe-secret".to_string(),
+            shared_secret_next: None,
+            max_inflight: MAX_CONFIGURED_INFLIGHT,
+            runtime_version: None,
+            image_digest: None,
+        });
+        let permits = state
+            .request_body_slots
+            .clone()
+            .try_acquire_many_owned(
+                u32::try_from(MAX_REQUEST_BODY_SLOTS)
+                    .expect("request body slot limit should fit in u32"),
+            )
+            .expect("the fixed request body budget should be available");
+
+        assert!(
+            state
+                .request_body_slots
+                .clone()
+                .try_acquire_owned()
+                .is_err()
+        );
+        assert_eq!(
+            state.measurement_slots.available_permits(),
+            MAX_CONFIGURED_INFLIGHT
+        );
+
+        drop(permits);
+        assert!(state.request_body_slots.clone().try_acquire_owned().is_ok());
     }
 }

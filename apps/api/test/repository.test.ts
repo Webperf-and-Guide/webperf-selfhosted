@@ -242,6 +242,143 @@ const createBrowserAudit = (
 });
 
 describe('sqlite control repository', () => {
+  test('cancels unfinished retired Regional Runtime jobs without touching standalone work', () => {
+    const storageCrypto = createStorageCrypto({ currentSecret: testEncryptionSecret });
+    const database = openSqliteDatabase(':memory:');
+    const migrationIndex = sqliteMigrations.findIndex(
+      (migration) => migration.id === '20260730_007_retired_regional_execution_jobs'
+    );
+    expect(migrationIndex).toBeGreaterThanOrEqual(0);
+
+    for (const migration of sqliteMigrations.slice(0, migrationIndex)) {
+      migration.up(database, { storageCrypto, runtimeRegionId: 'local' });
+    }
+
+    const timestamp = '2026-07-30T00:00:00.000Z';
+    const insertExecution = database.query(`
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at, started_at
+      ) VALUES (?, 'network_probe', ?, ?, ?, ?, 0, 3, ?, ?, NULL, ?, ?, ?, ?)
+    `);
+    insertExecution.run(
+      'exec_regional_queued',
+      'job_regional_queued',
+      'queued',
+      null,
+      null,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp,
+      null,
+      null
+    );
+    insertExecution.run(
+      'exec_regional_running',
+      'job_regional_running',
+      'running',
+      'retired-runtime',
+      '2099-07-30T00:00:00.000Z',
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp,
+      null,
+      timestamp
+    );
+    insertExecution.run(
+      'exec_regional_succeeded',
+      'job_regional_succeeded',
+      'succeeded',
+      null,
+      null,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp,
+      timestamp,
+      timestamp
+    );
+    insertExecution.run(
+      'exec_standalone_queued',
+      'job_standalone_queued',
+      'queued',
+      null,
+      null,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp,
+      null,
+      null
+    );
+    insertExecution.finalize();
+
+    const linkTarget = database.query(`
+      INSERT INTO regional_execution_targets (
+        regional_execution_id, execution_job_id, job_id
+      ) VALUES (?, ?, ?)
+    `);
+    for (const suffix of ['queued', 'running', 'succeeded']) {
+      linkTarget.run(
+        `regional_${suffix}`,
+        `exec_regional_${suffix}`,
+        `job_regional_${suffix}`
+      );
+    }
+    linkTarget.finalize();
+
+    sqliteMigrations[migrationIndex]!.up(database, {
+      storageCrypto,
+      runtimeRegionId: 'local'
+    });
+
+    const rows = database.query<{
+      id: string;
+      status: string;
+      lease_owner: string | null;
+      lease_expires_at: string | null;
+      completed_at: string | null;
+    }, []>(`
+      SELECT id, status, lease_owner, lease_expires_at, completed_at
+      FROM execution_jobs
+      ORDER BY id
+    `).all();
+    expect(rows).toEqual([
+      {
+        id: 'exec_regional_queued',
+        status: 'cancelled',
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: expect.any(String)
+      },
+      {
+        id: 'exec_regional_running',
+        status: 'cancelled',
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: expect.any(String)
+      },
+      {
+        id: 'exec_regional_succeeded',
+        status: 'succeeded',
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: timestamp
+      },
+      {
+        id: 'exec_standalone_queued',
+        status: 'queued',
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: null
+      }
+    ]);
+    database.close();
+  });
+
   test('migrates published beta multi-region data without rewriting historical target provenance', () => {
     const databasePath = createTempDatabasePath();
     const storageCrypto = createStorageCrypto({ currentSecret: testEncryptionSecret });

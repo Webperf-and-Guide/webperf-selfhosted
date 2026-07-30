@@ -394,6 +394,9 @@ export class ChecksController {
             } else {
               this.resetProfileForm();
             }
+            throw new Error(
+              'The runtime location changed, so the saved check was reloaded. Review the current location and acknowledge it again.'
+            );
           }
           throw new Error(
             payload.error ?? `Failed to ${this.state.editingProfileId ? 'update' : 'create'} saved check.`

@@ -93,7 +93,7 @@ const resolveArtifactsPath = () => resolve(
 );
 
 const parsePositiveInteger = (value: string | undefined, fallback: number, label: string) => {
-  if (value == null) {
+  if (value === undefined) {
     return fallback;
   }
 
@@ -127,7 +127,7 @@ const requireStorageCrypto = () => {
 
 const resolveMigrationRuntimeRegionId = () => {
   const configured = process.env.SELFHOST_REGION_ID;
-  if (configured == null || configured.trim() === '') {
+  if (configured === undefined || configured.trim() === '') {
     return undefined;
   }
   return runtimeRegionIdSchema.parse(configured);

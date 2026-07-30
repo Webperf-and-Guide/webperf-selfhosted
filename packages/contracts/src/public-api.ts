@@ -352,6 +352,8 @@ export type CheckProfileLocationMigrationReason = z.infer<
 
 export const checkProfileLocationMigrationSchema = z.object({
   sourceRegionPackId: z.string().min(1),
+  // Empty is intentional when a published-beta Check references a region
+  // pack that is no longer present in the restored database.
   sourceRegions: z.array(runtimeRegionIdSchema).max(4),
   runtimeRegionId: runtimeRegionIdSchema,
   status: z.enum(['applied', 'requires_review', 'accepted']),

@@ -12,10 +12,19 @@ use_current_dev_override="${WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE:-true}"
 docker_config="${WEBPERF_UPGRADE_DOCKER_CONFIG:-}"
 compose_project="webperf-upgrade-$$"
 temp_root="$(mktemp -d)"
-cleanup_temp_root() {
+
+cleanup() {
+  if \
+    [[ "$compose_project" == webperf-upgrade-* ]] \
+    && declare -F bounded_compose_down >/dev/null \
+    && declare -F current >/dev/null \
+    && declare -F legacy >/dev/null; then
+    bounded_compose_down current >/dev/null 2>&1 || true
+    bounded_compose_down legacy >/dev/null 2>&1 || true
+  fi
   rm -rf "$temp_root"
 }
-trap cleanup_temp_root EXIT
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -81,14 +90,6 @@ current() {
   compose_with "$current_env" "${files[@]}" "$@"
 }
 
-cleanup() {
-  if [[ "$compose_project" == webperf-upgrade-* ]]; then
-    bounded_compose_down current >/dev/null 2>&1 || true
-    bounded_compose_down legacy >/dev/null 2>&1 || true
-  fi
-  rm -rf "$temp_root"
-}
-
 bounded_compose_down() {
   local runner="$1"
   local down_pid
@@ -124,10 +125,6 @@ bounded_compose_down() {
   rm -f "$watchdog_stop"
   return "$status"
 }
-
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 generate_secret() {
   local value
@@ -266,10 +263,15 @@ current run --rm --no-deps --entrypoint bun api \
   /app/tooling/scripts/selfhost-database.ts doctor \
   --database /data/webperf.sqlite > "$doctor_output_path"
 bun -e '
-  const payload = JSON.parse(await Bun.file(process.argv[1]).text());
   const fail = (message) => {
     throw new Error(`Upgraded database doctor verification failed: ${message}`);
   };
+  let payload;
+  try {
+    payload = JSON.parse(await Bun.file(process.argv[1]).text());
+  } catch {
+    fail("doctor output was not valid JSON");
+  }
   if (payload?.ok !== true) fail("ok is not true");
   if (payload?.command !== "doctor") fail("command is not doctor");
   if (payload?.integrity?.ok !== true) fail("integrity.ok is not true");

@@ -237,6 +237,9 @@ const verifyCurrent = async (
   if (job.region !== 'historical-multi-region') {
     throw new Error('Migrated multi-region Job lost its explicit aggregate identity');
   }
+  if (!Array.isArray(job.historicalRegions)) {
+    throw new Error('Migrated Job is missing its historical region list');
+  }
   if (JSON.stringify(job.historicalRegions) !== JSON.stringify(manifest.sourceRegions)) {
     throw new Error('Migrated Job lost its historical region list');
   }
@@ -279,8 +282,7 @@ const verifyCurrent = async (
       headers: {
         'content-type': 'application/json'
       },
-      body: '{}',
-      signal: AbortSignal.timeout(20_000)
+      body: '{}'
     }
   );
   await blockedRun.body?.cancel();

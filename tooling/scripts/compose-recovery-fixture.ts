@@ -196,16 +196,12 @@ const downloadArtifactSha256 = async (
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(30_000)
       });
-    } catch (error) {
+    } catch {
       if (attempt < 4) {
         await Bun.sleep(Math.min(1_000 * 2 ** attempt, 8_000));
         continue;
       }
-      throw new Error(
-        `Artifact download failed before receiving a response: ${
-          error instanceof Error ? error.message : 'unknown transport error'
-        }`
-      );
+      break;
     }
     if (!response.ok) {
       await response.body?.cancel();
@@ -213,13 +209,16 @@ const downloadArtifactSha256 = async (
         await Bun.sleep(Math.min(1_000 * 2 ** attempt, 8_000));
         continue;
       }
+      if (response.status >= 500) {
+        break;
+      }
       throw new Error(`Artifact download failed with ${response.status}`);
     }
     return createHash('sha256')
       .update(new Uint8Array(await response.arrayBuffer()))
       .digest('hex');
   }
-  throw new Error('Artifact download exhausted its retry budget');
+  throw new Error('Artifact download exhausted its retry budget after transient failures');
 };
 
 const parseArtifact = (audit: Record<string, unknown>) => {

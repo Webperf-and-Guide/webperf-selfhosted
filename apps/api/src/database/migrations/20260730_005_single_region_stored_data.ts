@@ -131,7 +131,7 @@ const finishLegacyMultiRegionJob = (
   return {
     value: changed
       ? {
-          ...parsed.data,
+          ...rewritten,
           status: terminalStatus,
           completedAt: migrationTimestamp,
           targets,

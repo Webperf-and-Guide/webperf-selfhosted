@@ -55,7 +55,7 @@ import {
   InvalidEncryptedPayloadEnvelopeError,
   UnencryptedPersistedPayloadError
 } from './storage-crypto';
-import { redactUrlQuery } from './redaction';
+import { redactSensitiveData, redactUrlQuery } from './redaction';
 import {
   cleanupSqliteRetention,
   createSqliteBackupFromConnection,
@@ -1148,12 +1148,18 @@ export const createSqliteJobRepository = ({
             evaluation: null,
             summary: summarizeTargets(targets)
           });
-        } catch {
+        } catch (error) {
           console.warn(JSON.stringify({
             service: 'webperf-api',
             warning: 'network_probe_terminal_sync_failed',
             executionJobId: executionJob.id,
-            jobId
+            jobId,
+            diagnostic: redactSensitiveData({
+              errorType: error instanceof Error ? error.name : typeof error,
+              message: error instanceof Error
+                ? error.message.slice(0, 500)
+                : 'Unknown terminal resource synchronization failure'
+            })
           }));
         }
       }

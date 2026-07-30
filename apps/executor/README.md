@@ -15,8 +15,9 @@ bun run dev:executor
 
 Copy environment values from `apps/executor/.env.example`. The internal secret
 must match the API and scheduler value. The probe secret must match the Rust
-probe, and `SELFHOST_PROBE_BASE_URLS_JSON` maps public region codes to internal
-probe service origins. Non-loopback probe origins require HTTPS unless
+probe, `SELFHOST_REGION_ID` must match the probe's `REGION_ID`, and
+`SELFHOST_PROBE_BASE_URL` selects the one probe origin used by this deployment.
+Non-loopback probe origins require HTTPS unless
 `SELFHOST_EXECUTOR_ALLOW_INSECURE_PROBE_HTTP=true` explicitly marks an isolated,
 trusted service network such as the default Compose bridge.
 

@@ -216,7 +216,7 @@
     <div class="guide-grid">
       <div>
         <span>Definition</span>
-        <strong>site + route group + region set</strong>
+        <strong>site + route group + runtime location</strong>
       </div>
       <div>
         <span>Execution</span>

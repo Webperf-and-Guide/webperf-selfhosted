@@ -11,7 +11,7 @@ The current console grew into one mixed page that tries to be:
 - resource admin
 - saved check builder
 - report and comparison browser
-- region catalog
+- runtime-location reference
 
 That makes the screen feel noisy even when each individual feature is useful.
 
@@ -23,7 +23,7 @@ The console should optimize for this operator loop:
 2. define reusable resources
 3. save a repeatable check
 4. inspect comparisons, exports, and recent run history
-5. review the active region corridor only when needed
+5. review the deployment's fixed runtime location only when needed
 
 That means the UI should be organized around workflow, not around every internal entity at once.
 
@@ -37,7 +37,6 @@ Current first-pass section split:
 - `Resources`
   - sites
   - route groups
-  - region sets
 - `Checks`
   - saved check editor
   - saved check browser
@@ -47,7 +46,7 @@ Current first-pass section split:
   - exports
   - analyses
 - `Regions`
-  - reference catalog for the active corridor
+  - fixed runtime id and operator label
 
 ## Route Split
 
@@ -60,7 +59,6 @@ The console now exposes the workflow split as real routes:
 - `/resources`
   - sites
   - route groups
-  - region sets
 - `/checks`
   - saved check builder and browser
 - `/reports`
@@ -68,7 +66,7 @@ The console now exposes the workflow split as real routes:
   - exports
   - analyses
 - `/regions`
-  - active corridor and reference catalog
+  - this deployment's fixed runtime location
 
 The current implementation uses a shared workspace component underneath those routes so the
 operator split is real at the URL level without forking the data-fetching or control action logic.
@@ -78,5 +76,5 @@ operator split is real at the URL level without forking the data-fetching or con
 1. Keep breaking the shared workspace component into smaller route-scoped components instead of one large script.
 2. Preserve the shared route loader so the route split does not duplicate control-plane fetch logic.
 3. Keep the homepage reduced to operator-critical surfaces only.
-4. Keep the region catalog as a reference surface, not the center of the product.
+4. Keep runtime-location provenance visible without turning it into a selectable catalog.
 5. Pull more report and run-detail rendering into dedicated presentational components.

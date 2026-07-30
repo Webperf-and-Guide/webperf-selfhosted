@@ -57,9 +57,9 @@ const selfhostEnvKeys = [
   'SELFHOST_INTERNAL_SECRET_NEXT',
   'PROBE_SHARED_SECRET',
   'PROBE_SHARED_SECRET_NEXT',
-  'SELFHOST_ACTIVE_REGION_CODES_JSON',
-  'SELFHOST_REGION_IDS_JSON',
-  'SELFHOST_PROBE_BASE_URLS_JSON',
+  'SELFHOST_REGION_ID',
+  'SELFHOST_REGION_LABEL',
+  'SELFHOST_PROBE_BASE_URL',
   'SELFHOST_MAX_TARGET_ATTEMPTS',
   'BROWSER_AUDIT_SHARED_SECRET',
   'BROWSER_AUDIT_SHARED_SECRET_NEXT',
@@ -1417,9 +1417,9 @@ const startSelfhostHarness = async (
   process.env.SELFHOST_ADMIN_TOKEN_NEXT = '';
   process.env.SELFHOST_INTERNAL_SECRET = testInternalSecret;
   process.env.SELFHOST_INTERNAL_SECRET_NEXT = '';
-  process.env.SELFHOST_ACTIVE_REGION_CODES_JSON = '["tokyo"]';
-  process.env.SELFHOST_REGION_IDS_JSON = '{"tokyo":"JP"}';
-  process.env.SELFHOST_PROBE_BASE_URLS_JSON = `{"tokyo":"http://127.0.0.1:${probePort}"}`;
+  process.env.SELFHOST_REGION_ID = 'local';
+  process.env.SELFHOST_REGION_LABEL = 'Local test runtime';
+  process.env.SELFHOST_PROBE_BASE_URL = `http://127.0.0.1:${probePort}`;
   process.env.SELFHOST_MAX_TARGET_ATTEMPTS = '1';
 
   if (options?.browserAuditBaseUrl) {

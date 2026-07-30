@@ -60,6 +60,42 @@ const banned = [
 ];
 
 const targets = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'package.json', '.github', 'apps', 'packages', 'docs', 'infra', 'tooling'];
+const singleRegionCopyTargets = [
+  'apps/console/src/lib/components/workspace',
+  'apps/api/README.md',
+  'apps/executor/README.md',
+  'docs/console-ia.md',
+  'docs/users/troubleshooting.md'
+];
+const retiredSingleRegionEnv = [
+  {
+    pattern: /SELFHOST_ACTIVE_REGION_CODES_JSON/,
+    message: 'use SELFHOST_REGION_ID for the deployment runtime identity'
+  },
+  {
+    pattern: /SELFHOST_REGION_IDS_JSON/,
+    message: 'use SELFHOST_REGION_LABEL for the optional operator label'
+  },
+  {
+    pattern: /SELFHOST_PROBE_BASE_URLS_JSON/,
+    message: 'use the single SELFHOST_PROBE_BASE_URL origin'
+  }
+];
+const retiredSingleRegionCopy = [
+  {
+    pattern: /\bregion sets?\b/i,
+    message: 'describe the fixed runtime location instead of a selectable Region Set'
+  },
+  ...retiredSingleRegionEnv,
+  {
+    pattern: /missing_probe_region/,
+    message: 'use the current missing_probe_origin or probe_region_mismatch diagnostics'
+  }
+];
+const singleRegionEnvTargets = [
+  'apps/api/test/http.test.ts',
+  'apps/api/test/restart-recovery.test.ts'
+];
 
 const collectFiles = (target: string): string[] => {
   const absoluteTarget = join(root, target);
@@ -109,6 +145,32 @@ for (const target of targets) {
 
     for (const rule of banned) {
       if (content.includes(rule.pattern)) {
+        violations.push(`${rel}: ${rule.message}`);
+      }
+    }
+  }
+}
+
+for (const target of singleRegionCopyTargets) {
+  for (const filePath of collectFiles(target)) {
+    const rel = relative(root, filePath);
+    const content = readFileSync(filePath, 'utf8');
+
+    for (const rule of retiredSingleRegionCopy) {
+      if (rule.pattern.test(content)) {
+        violations.push(`${rel}: ${rule.message}`);
+      }
+    }
+  }
+}
+
+for (const target of singleRegionEnvTargets) {
+  for (const filePath of collectFiles(target)) {
+    const rel = relative(root, filePath);
+    const content = readFileSync(filePath, 'utf8');
+
+    for (const rule of retiredSingleRegionEnv) {
+      if (rule.pattern.test(content)) {
         violations.push(`${rel}: ${rule.message}`);
       }
     }

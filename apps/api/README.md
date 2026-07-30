@@ -11,9 +11,10 @@ Implemented today:
 - `POST /v1/jobs`
 - `GET /v1/jobs/:id`
 - `GET /v1/jobs/:id/stream`
-- saved configuration CRUD for properties, route sets, region packs, and check profiles
+- saved configuration CRUD for Sites, Route Groups, and Checks
+- one fixed runtime location exposed through `GET /v1/regions`
 - baseline pinning and run comparison endpoints
-- scheduled dispatch endpoint
+- embedded scheduling plus an authenticated external dispatch endpoint
 - SQLite-backed persistence for runs and saved configuration
 - custom request replay
 - latency and uptime monitor policies
@@ -47,8 +48,9 @@ Useful defaults:
 - `SELFHOST_DATABASE_PATH=./data/webperf.sqlite`
 - `SELFHOST_RETENTION_DAYS=30`
 - `SELFHOST_MIGRATION_BACKUP=false`
-- `SELFHOST_ACTIVE_REGION_CODES_JSON=["tokyo"]`
-- `SELFHOST_PROBE_BASE_URLS_JSON={"tokyo":"http://127.0.0.1:8080"}`
+- `SELFHOST_REGION_ID=local`
+- `SELFHOST_REGION_LABEL=`
+- `SELFHOST_PROBE_BASE_URL=http://127.0.0.1:8080`
 
 Required secrets have no defaults:
 
@@ -74,5 +76,5 @@ The Compose bundle lives at:
 infra/docker-compose/compose.yml
 ```
 
-The polling scheduler lives in `apps/scheduler` and calls the dispatch endpoint on
-its own interval.
+The API runs the scheduler in embedded mode by default. `apps/scheduler` remains
+available for the explicit external-scheduler deployment mode.

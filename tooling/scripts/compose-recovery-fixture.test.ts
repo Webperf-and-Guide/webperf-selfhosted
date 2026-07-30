@@ -6,7 +6,11 @@ describe('Compose recovery fixture compatibility', () => {
     expect(resolveRecoveryJobRegions({ region: 'tokyo' })).toEqual(['tokyo']);
     expect(resolveRecoveryJobRegions({
       selectedRegions: ['tokyo', 'singapore', 'frankfurt', 'new-york']
-    })).toEqual(['tokyo', 'singapore', 'frankfurt', 'new-york']);
+    })).toEqual(['frankfurt', 'new-york', 'singapore', 'tokyo']);
+    expect(resolveRecoveryJobRegions({
+      region: 'historical-multi-region',
+      historicalRegions: ['singapore', 'tokyo', 'singapore']
+    })).toEqual(['singapore', 'tokyo']);
   });
 
   test('rejects jobs without a usable current or legacy region field', () => {

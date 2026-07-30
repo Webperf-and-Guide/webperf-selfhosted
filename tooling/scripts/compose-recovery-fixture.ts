@@ -146,13 +146,16 @@ const requireStringArray = (value: unknown, label: string) => {
   ) {
     throw new Error(`${label} must be a non-empty string array`);
   }
-  return value as string[];
+  return [...new Set(value as string[])].sort();
 };
 
 export const resolveRecoveryJobRegions = (
   job: Record<string, unknown>,
   label = 'job'
 ) => {
+  if (job.historicalRegions !== undefined) {
+    return requireStringArray(job.historicalRegions, `${label}.historicalRegions`);
+  }
   if (typeof job.region === 'string' && job.region.length > 0) {
     return [job.region];
   }

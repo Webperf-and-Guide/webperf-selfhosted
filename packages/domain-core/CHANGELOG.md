@@ -1,5 +1,20 @@
 # @webperf/domain-core
 
+## 0.4.0 — 2026-07-30
+
+### Minor changes
+
+- [79c7400](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/79c740035b3cfa83fd849bef14b23b919facf3e8) Remove the superseded Regional Runtime API, contracts, execution mode, and
+  deployment profile. WebPerf Self-hosted remains a complete single-location
+  application, while WebPerf & Guide Managed orchestrates the
+  versioned stateless `webperf-probe` image through its private control plane.
+  Released SQLite migrations and retention cleanup remain compatible with
+  databases created by WebPerf 0.3.0. — Thanks @imjlk!
+
+### Patch changes
+
+- Updated dependencies: contracts@0.4.0
+
 ## 0.3.0 — 2026-07-30
 
 ### Minor changes

@@ -4,6 +4,16 @@ All notable WebPerf self-hosted changes are recorded here. Package-level
 versioning and changelogs are generated from
 [Sampo](https://github.com/bruits/sampo) changesets.
 
+## [0.4.0] — 2026-07-30
+
+### Changes
+
+- Remove the superseded Regional Runtime API, contracts, execution mode, and deployment profile. WebPerf Self-hosted remains a complete single-location application, while WebPerf & Guide Managed orchestrates the versioned stateless `webperf-probe` image through its private control plane. Released SQLite migrations and retention cleanup remain compatible with databases created by WebPerf 0.3.0.
+- Make the default self-host deployment a true two-container stack: one supervised `webperf` container for the console, API, embedded scheduler, and durable executor, plus the separate Rust `webperf-probe` trust boundary. The optional Lighthouse Browser Audit runner remains a third profile container, and split `webperf` roles remain available for development and maintenance. The standalone supervisor launches the public console, API, and executor under distinct non-root UIDs with only the capabilities needed to set those identities and stop its children. It keeps the API and console available while waiting for the separate probe to become healthy, then starts the executor so routine stack startups do not exhaust queued work attempts. Database maintenance and recovery commands continue to run as the persistent data owner rather than inheriting the supervisor identity. Custom-Compose upgrade guidance now states the exact supervisor identity, capability, and `no-new-privileges` boundary required by the standalone role, migrates copied internal API origins from the retired `api` service to `webperf`, stages restore snapshots through the data owner identity, and starts the separate probe before waiting on standalone health in the cross-version drill.
+- Publish the stateless `webperf-probe` capability contract used by both self-hosted WebPerf and WebPerf & Guide Managed. The Rust probe now reports its configured region, immutable runtime provenance, transport limits, and admission limit, echoes correlation identifiers in measurement responses, rejects mismatched regions, and fails fast with `429` when its configurable in-flight guard is exhausted. Its Rust wire format rejects explicit null request configurations and its documented four-hop redirect allowance now follows all four redirects before rejecting a fifth. Request buffering is admitted through a separate fixed memory budget with a bounded body-read deadline, and lifecycle timeouts retain the last validated redirect URL and redirect count for managed-service diagnostics. The self-host executor verifies echoed job and target correlation identifiers when present while continuing to accept legacy probe responses that omit them.
+
+<!-- webperf-release: from=0.3.0; changesets=sha256:6fb05e253923c6f0314a3c353f683383e6ccd56fa95ec9f7edcab5ae8ffbf484 -->
+
 ## [0.3.0] — 2026-07-30
 
 ### Changes
@@ -70,3 +80,4 @@ First public-beta release of the complete self-hosted runtime.
 [0.2.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.2.0
 [0.2.1]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.2.1
 [0.3.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.3.0
+[0.4.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.4.0

@@ -17,8 +17,14 @@ const apiPort = parsePort(process.env.SELFHOST_API_PORT, 8788);
 const apiOrigin = `http://127.0.0.1:${apiPort}`;
 const startupTimeoutMs = 300_000;
 const startupPollMs = 250;
+const healthDiagnosticIntervalMs = 20_000;
+const healthDiagnosticEveryN = Math.max(
+  1,
+  Math.round(healthDiagnosticIntervalMs / startupPollMs)
+);
 const childShutdownGraceMs = 60_000;
 const forcedExitObservationMs = 5_000;
+const exitTimedOut = Symbol('exit-timed-out');
 
 const children = new Map<ChildName, Child>();
 let shutdownSignal: Signal | null = null;
@@ -153,7 +159,13 @@ try {
   emit('startup_failed', {
     reason: error instanceof Error ? error.message : 'unknown startup failure'
   });
-  await stopStandalone();
+  try {
+    await stopStandalone();
+  } catch (stopError) {
+    emit('stop_failed', {
+      reason: stopError instanceof Error ? stopError.message : 'unknown stop failure'
+    });
+  }
   process.exit(1);
 }
 
@@ -183,7 +195,7 @@ async function waitForApi(apiChild: Child, healthUrl: string) {
       // Connection refusal is expected while the API binds. Emit a bounded,
       // secret-safe diagnostic periodically so persistent startup failures are
       // still distinguishable from a slow first migration.
-      if (attempt === 1 || attempt % 80 === 0) {
+      if (attempt === 1 || attempt % healthDiagnosticEveryN === 0) {
         emit('api_health_waiting', {
           attempt,
           errorType: error instanceof Error ? error.name : typeof error,
@@ -206,14 +218,19 @@ function stopStandalone() {
 async function performStop() {
   // Stop ingress and claiming first. The API remains available while the
   // executor aborts or records its active lease outcome.
-  signalChild('console', 'SIGTERM');
-  signalChild('executor', 'SIGTERM');
+  for (const name of ['console', 'executor'] as const) {
+    if (!signalChild(name, 'SIGTERM')) {
+      emit('child_graceful_signal_failed', { child: name });
+    }
+  }
   await Promise.all([
     observeExit('console'),
     observeExit('executor')
   ]);
 
-  signalChild('api', 'SIGTERM');
+  if (!signalChild('api', 'SIGTERM')) {
+    emit('child_graceful_signal_failed', { child: 'api' });
+  }
   await observeExit('api');
   emit('stopped');
 }
@@ -226,24 +243,28 @@ async function observeExit(name: ChildName) {
 
   let code = await Promise.race([
     child.exited,
-    Bun.sleep(childShutdownGraceMs).then(() => null)
+    Bun.sleep(childShutdownGraceMs).then(() => exitTimedOut)
   ]);
-  if (code === null) {
+  if (code === exitTimedOut) {
     emit('child_force_kill_requested', {
       child: name,
       graceMs: childShutdownGraceMs
     });
-    signalChild(name, 'SIGKILL');
+    if (!signalChild(name, 'SIGKILL')) {
+      throw new Error(`Failed to force-stop child ${name}`);
+    }
     code = await Promise.race([
       child.exited,
-      Bun.sleep(forcedExitObservationMs).then(() => null)
+      Bun.sleep(forcedExitObservationMs).then(() => exitTimedOut)
     ]);
   }
 
-  emit(code === null ? 'child_exit_unobserved' : 'child_stopped', {
-    child: name,
-    code
-  });
+  if (code === exitTimedOut) {
+    emit('child_exit_unobserved', { child: name });
+    throw new Error(`Child ${name} did not exit after SIGKILL`);
+  }
+
+  emit('child_stopped', { child: name, code });
 }
 
 function parsePort(raw: string | undefined, fallback: number) {

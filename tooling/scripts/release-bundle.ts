@@ -527,6 +527,18 @@ export function renderReleaseBundle({
     compose = compose.replace(dynamicReference, () => entry.reference);
   }
   compose = compose.replace(/\$\{WEBPERF_VERSION:[^}]+\}/g, version);
+  const probeMetadata = metadata.find((entry) => entry.name === 'probe');
+  if (!probeMetadata) {
+    throw new Error('Release metadata must include the probe image');
+  }
+  const probeDigestEnvironment = 'WEBPERF_PROBE_IMAGE_DIGEST: "${WEBPERF_PROBE_IMAGE_DIGEST:-}"';
+  if (!compose.includes(probeDigestEnvironment)) {
+    throw new Error('Compose does not contain the probe digest environment placeholder');
+  }
+  compose = compose.replace(
+    probeDigestEnvironment,
+    `WEBPERF_PROBE_IMAGE_DIGEST: "${probeMetadata.digest}"`
+  );
   validateReleaseComposeImages(compose);
   writeFileSync(join(outputDirectory, 'compose.yml'), compose);
 
@@ -545,7 +557,10 @@ export function renderReleaseBundle({
 
   const readReleaseEnvExample = (path: string) => readFileSync(path, 'utf8')
     .split('\n')
-    .filter((line) => !line.startsWith('WEBPERF_VERSION='))
+    .filter((line) => (
+      !line.startsWith('WEBPERF_VERSION=')
+      && !line.startsWith('WEBPERF_PROBE_IMAGE_DIGEST=')
+    ))
     .join('\n');
   const envExample = readReleaseEnvExample(
     join(repositoryRoot, 'infra/docker-compose/.env.example')

@@ -308,6 +308,14 @@ npm/@webperf/contracts: patch
     expect(result.sourceCommit).toBe(sourceCommit);
     expect(compose).not.toContain('WEBPERF_VERSION');
     expect(compose).toContain(`WEBPERF_RUNTIME_VERSION: "${version}"`);
+    const probeMetadata = runtimeMetadata.images.find(
+      (entry: { name: string }) => entry.name === 'probe'
+    );
+    expect(probeMetadata).toBeDefined();
+    expect(compose).toContain(
+      `WEBPERF_PROBE_IMAGE_DIGEST: "${probeMetadata.digest}"`
+    );
+    expect(compose).not.toContain('${WEBPERF_PROBE_IMAGE_DIGEST');
     // webperf + optional scheduler + probe + browser-audit + 2 debug
     // services produce six digest-pinned image references.
     expect(validateReleaseComposeImages(compose)).toHaveLength(6);
@@ -333,9 +341,9 @@ npm/@webperf/contracts: patch
         file: `webperf-${version}-linux-arm64.spdx.json`
       }
     ]);
-    expect(readFileSync(join(output, '.env.example'), 'utf8')).not.toContain(
-      'WEBPERF_VERSION='
-    );
+    const releaseEnvironment = readFileSync(join(output, '.env.example'), 'utf8');
+    expect(releaseEnvironment).not.toContain('WEBPERF_VERSION=');
+    expect(releaseEnvironment).not.toContain('WEBPERF_PROBE_IMAGE_DIGEST=');
     expect(readFileSync(join(output, 'SHA256SUMS'), 'utf8')).toContain(
       'runtime-metadata.json'
     );

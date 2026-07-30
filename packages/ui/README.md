@@ -32,8 +32,9 @@ This package is the source of truth for both:
 - `webperf.and.guide/apps/console`
 - `webperf.and.guide/apps/marketing`
 
-During local cross-repo development, the cloud repo should consume this package through sibling
-`file:` dependencies instead of `bun link`. That keeps installs deterministic and matches CI.
+During local cross-repo development, the WebPerf & Guide managed-service repo
+should consume this package through sibling `file:` dependencies instead of
+`bun link`. That keeps installs deterministic and matches CI.
 
 The preferred screen-level import style is:
 

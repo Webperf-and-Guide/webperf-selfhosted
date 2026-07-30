@@ -320,7 +320,7 @@ export type UpdateRouteSetInput = z.infer<typeof updateRouteSetSchema>;
 
 // Region Packs were removed in Phase 1 of issue #14. One standalone
 // deployment owns a single runtime location and no longer fans out across a
-// selectable region set. The managed Cloud product may keep its own
+// selectable region set. The WebPerf & Guide managed service may keep its own
 // managed-region catalog, but that belongs outside this public contract.
 
 export const checkProfileScheduleSchema = z.object({

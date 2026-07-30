@@ -19,9 +19,9 @@ source-SHA development channels only after required checks pass. The
 [release workflow](../../.github/workflows/release.yml) publishes versioned
 images, SBOMs, provenance, and digest-bearing runtime metadata.
 
-The managed product consumes `runtime-metadata.json` from a specific GitHub
-Release. Managed orchestration stays in the cloud repository; reusable runtime
-sources and Dockerfiles stay here.
+The WebPerf & Guide managed service consumes `runtime-metadata.json` from a
+specific GitHub Release. Managed orchestration stays in the separate service
+repository; reusable runtime sources and Dockerfiles stay here.
 
 For installation and local-build commands, see
 [runtime images and releases](../../docs/quickstart/runtime-images.md) and the

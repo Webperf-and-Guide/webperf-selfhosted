@@ -56,34 +56,13 @@ export const selfhostApiEnvSchema = z.object({
   SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: z.preprocess(
     (value) => value ?? '60',
     z.coerce.number().int().positive().max(86_400)
-  ),
-  // Phase 4 of issue #14: a deployment can serve as a regional runtime for
-  // the managed Cloud. 'full' is the default self-host product mode;
-  // 'regional-runtime' restricts the API to the regional handoff surface.
-  SELFHOST_RUNTIME_MODE: z.enum(['full', 'regional-runtime']).default('full'),
-  REGIONAL_RUNTIME_SHARED_SECRET: emptyStringToUndefined(z.string().trim().min(16)),
-  REGIONAL_RUNTIME_SHARED_SECRET_NEXT: emptyStringToUndefined(z.string().trim().min(16)),
-  WEBPERF_RUNTIME_VERSION: emptyStringToUndefined(z.string().trim().min(1).max(120)),
-  WEBPERF_RUNTIME_IMAGE_DIGEST: emptyStringToUndefined(
-    z.string().trim().regex(/^sha256:[a-f0-9]{64}$/)
-  ),
-  WEBPERF_PROBE_IMAGE_DIGEST: emptyStringToUndefined(
-    z.string().trim().regex(/^sha256:[a-f0-9]{64}$/)
   )
 }).superRefine((config, context) => {
-  if (config.SELFHOST_RUNTIME_MODE === 'full' && !config.SELFHOST_ADMIN_TOKEN) {
+  if (!config.SELFHOST_ADMIN_TOKEN) {
     context.addIssue({
       code: 'custom',
-      message: 'Full self-host mode requires an administrator token',
+      message: 'Self-hosted mode requires an administrator token',
       path: ['SELFHOST_ADMIN_TOKEN']
-    });
-  }
-
-  if (config.SELFHOST_RUNTIME_MODE === 'regional-runtime' && !config.REGIONAL_RUNTIME_SHARED_SECRET) {
-    context.addIssue({
-      code: 'custom',
-      message: 'Regional runtime mode requires a dedicated shared secret',
-      path: ['REGIONAL_RUNTIME_SHARED_SECRET']
     });
   }
 
@@ -165,11 +144,5 @@ export const parseSelfhostApiVars = (
     SELFHOST_BROWSER_AUDIT_BASE_URL: input.SELFHOST_BROWSER_AUDIT_BASE_URL,
     SELFHOST_MAX_TARGET_ATTEMPTS: input.SELFHOST_MAX_TARGET_ATTEMPTS,
     SELFHOST_SCHEDULER_MODE: input.SELFHOST_SCHEDULER_MODE,
-    SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: input.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS,
-    SELFHOST_RUNTIME_MODE: input.SELFHOST_RUNTIME_MODE,
-    REGIONAL_RUNTIME_SHARED_SECRET: input.REGIONAL_RUNTIME_SHARED_SECRET,
-    REGIONAL_RUNTIME_SHARED_SECRET_NEXT: input.REGIONAL_RUNTIME_SHARED_SECRET_NEXT,
-    WEBPERF_RUNTIME_VERSION: input.WEBPERF_RUNTIME_VERSION,
-    WEBPERF_RUNTIME_IMAGE_DIGEST: input.WEBPERF_RUNTIME_IMAGE_DIGEST,
-    WEBPERF_PROBE_IMAGE_DIGEST: input.WEBPERF_PROBE_IMAGE_DIGEST
+    SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS: input.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   });

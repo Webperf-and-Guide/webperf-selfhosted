@@ -49,7 +49,6 @@ export type RuntimeExecutionQueueMetrics = z.infer<
 export const runtimeMetricsSchema = z.object({
   schemaVersion: z.literal(runtimeMetricsSchemaVersion),
   observedAt: z.string().datetime(),
-  runtimeMode: z.enum(['full', 'regional-runtime']),
   runtimeLocation: runtimeLocationSchema,
   executions: runtimeExecutionQueueMetricsSchema,
   capacity: z.object({

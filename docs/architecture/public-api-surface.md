@@ -39,30 +39,13 @@ Treat this document as the current freeze line:
 - `GET /v1/capabilities`
 - `GET /v1/runtime-metrics` — protected provider-neutral queue/lease snapshot
 
-### Regional runtime handoff (v1 boundary decision)
-
-When `SELFHOST_RUNTIME_MODE=regional-runtime`, the API additionally exposes:
-
-- `GET /v1/regional-capabilities` — runtime capabilities for Cloud dispatch
-- `GET /v1/runtime-metrics` — protected queue pressure and topology snapshot
-- `POST /v1/regional-executions` — idempotent execution request (HMAC-signed)
-- `GET /v1/regional-executions/:idempotencyKey` — status poll
-- `DELETE /v1/regional-executions/:idempotencyKey` — cancellation
-
-These routes are **not** part of the self-host product surface. They exist
-only when the deployment is configured as a regional runtime for managed
-Cloud orchestration. See [Regional runtime handoff](./regional-runtime-handoff.md).
-
 Authentication boundary:
 
 - `GET /health` is the unauthenticated, minimal process health probe.
 - `GET /v1/capabilities` and `GET /openapi/public.json` are unauthenticated.
-- Regional mode also leaves `GET /v1/regional-capabilities` and
-  `GET /openapi/regional-runtime.json` unauthenticated for discovery.
 - `GET /v1/health`, artifact downloads, and every data or execution endpoint
   require the appropriate administrator or internal-service bearer token.
-- `GET /v1/runtime-metrics` accepts the administrator token in full mode and
-  the regional-runtime token in regional mode.
+- `GET /v1/runtime-metrics` requires the administrator token.
 
 Request boundary:
 
@@ -141,6 +124,5 @@ The API serves:
 
 - `GET /openapi/public.json`
 - `GET /openapi/control.json`
-- `GET /openapi/regional-runtime.json` in regional mode
 
 Those documents are generated from the checked-in contracts and should reflect the frozen v1 surface above.

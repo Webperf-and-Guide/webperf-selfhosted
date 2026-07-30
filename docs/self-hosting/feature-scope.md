@@ -2,7 +2,8 @@
 
 This repository is the self-hosted/open-core WebPerf product.
 
-It should remain useful on its own for release verification without requiring the managed cloud product at `webperf.and.guide`.
+It should remain useful on its own for release verification without requiring
+the WebPerf & Guide managed service at `webperf.and.guide`.
 
 ## Included
 
@@ -15,7 +16,6 @@ It should remain useful on its own for release verification without requiring th
 - Docker Compose deployment
 - public-safe contracts, schemas, and reporting logic
 - portable execution flow with vendor-neutral extension points
-- provider-neutral Regional Runtime Protocol and deployment profile
 
 ## Allowed But Optional
 

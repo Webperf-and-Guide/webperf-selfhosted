@@ -136,10 +136,10 @@ This repository is the public source of truth for self-host contracts, schemas,
 domain models, report logic, console/API behavior, deployment examples, and
 runtime images. It intentionally excludes billing, multi-tenancy, managed
 fleet orchestration, private provider credentials, and AI analyst product
-features. It also publishes the provider-neutral
-[Regional Runtime Protocol](docs/architecture/regional-runtime-handoff.md) and
-three-container deployment profile used by managed orchestrators. See
-[Cloud vs self-hosted](docs/users/cloud-vs-self-hosted.md).
+features. The WebPerf & Guide managed service consumes the versioned
+`webperf-probe` image and orchestrates its own private regional fleet without
+turning the self-hosted application into a managed worker. See
+[Managed service vs self-hosted](docs/users/managed-service-vs-self-hosted.md).
 
 ## Upgrade and backup
 

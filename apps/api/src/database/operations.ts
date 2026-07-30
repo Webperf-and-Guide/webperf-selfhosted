@@ -82,6 +82,9 @@ const deleteRowsInBatches = (deleteBatch: () => unknown) => {
   throw new SqliteRetentionBatchLimitError('general');
 };
 
+// Regional Runtime is no longer an active product surface. Keep this cleanup
+// path for databases that were upgraded through the short-lived v0.3.0 schema;
+// removing it would strand encrypted legacy rows and target links.
 const cleanupRegionalExecutionGroups = (
   database: Database,
   cutoffIso: string

@@ -3,8 +3,6 @@ import type {
   CustomRequestConfig,
   ListQuery,
   PageInfo,
-  RegionalExecutionRequest,
-  RegionalExecutionResult,
   RequestHeader,
   RuntimeLocation,
   RuntimeRegionId,
@@ -198,27 +196,6 @@ const canonicalizeRequestConfig = (request: CustomRequestConfig | undefined) => 
   };
 };
 
-/**
- * Normalize a Cloud-to-runtime request without changing header array order.
- *
- * Repeated HTTP headers can be order-sensitive, so Regional Runtime signatures,
- * idempotency digests, and persisted jobs must all use the same ordered
- * representation. Header names and surrounding OWS are normalized to the form
- * that is sent by the probe, but literal values (including `[REDACTED]`) are
- * never interpreted as console masking placeholders.
- */
-export const normalizeRegionalRequestConfig = (
-  request: CustomRequestConfig | undefined
-): CustomRequestConfig => {
-  const normalized = request ?? defaultCustomRequestConfig();
-
-  return {
-    method: normalized.method,
-    headers: (normalized.headers ?? []).map(normalizeRequestHeader),
-    body: normalizeRequestBody(normalized.body)
-  };
-};
-
 export type ProbeSignatureRequest = Omit<SignedProbeMeasurementRequest, 'signature'>;
 
 export const toProbeSignaturePayload = (request: ProbeSignatureRequest) =>
@@ -237,92 +214,6 @@ export const createProbeSignature = async (
 ) => {
   return createHmacSha256(sharedSecret, toProbeSignaturePayload(request));
 };
-
-export type RegionalExecutionSignatureRequest = Omit<RegionalExecutionRequest, 'signature'>;
-export type RegionalResultSignatureRequest = Omit<RegionalExecutionResult, 'signature'>;
-
-const canonicalizeRegionalTargets = (
-  targets: RegionalExecutionSignatureRequest['targets']
-) => targets.map((target) => ({
-  targetId: target.targetId,
-  url: target.url,
-  request: normalizeRegionalRequestConfig(target.request)
-}));
-
-export const toRegionalExecutionSignaturePayload = (
-  request: RegionalExecutionSignatureRequest
-) =>
-  stableStringify({
-    idempotencyKey: request.idempotencyKey,
-    runnerType: request.runnerType,
-    targets: canonicalizeRegionalTargets(request.targets),
-    deadlineMs: request.deadlineMs,
-    maxAttempts: request.maxAttempts,
-    timestamp: request.timestamp,
-    keyVersion: request.keyVersion
-  });
-
-export const toRegionalResultSignaturePayload = (
-  result: RegionalResultSignatureRequest
-) =>
-  stableStringify({
-    idempotencyKey: result.idempotencyKey,
-    status: result.status,
-    targets: result.targets,
-    provenance: result.provenance,
-    acceptedAt: result.acceptedAt,
-    completedAt: result.completedAt,
-    keyVersion: result.keyVersion
-  });
-
-/**
- * Stable semantic digest used for idempotency conflict detection.
- *
- * Timestamp, key version, and signature are transport metadata, so a caller
- * may safely retry the same execution with a fresh timestamp and rotated key.
- */
-export const createRegionalExecutionRequestDigest = async (
-  request: RegionalExecutionSignatureRequest
-) =>
-  createSha256(
-    stableStringify({
-      idempotencyKey: request.idempotencyKey,
-      runnerType: request.runnerType,
-      targets: canonicalizeRegionalTargets(request.targets),
-      deadlineMs: request.deadlineMs,
-      maxAttempts: request.maxAttempts
-    })
-  );
-
-export const createRegionalExecutionSignature = async (
-  sharedSecret: string,
-  request: RegionalExecutionSignatureRequest
-) => createHmacSha256(sharedSecret, toRegionalExecutionSignaturePayload(request));
-
-export const verifyRegionalExecutionSignature = async (
-  sharedSecret: string,
-  request: RegionalExecutionSignatureRequest,
-  signature: string
-) => verifyHmacSha256(
-  sharedSecret,
-  toRegionalExecutionSignaturePayload(request),
-  signature
-);
-
-export const createRegionalResultSignature = async (
-  sharedSecret: string,
-  result: RegionalResultSignatureRequest
-) => createHmacSha256(sharedSecret, toRegionalResultSignaturePayload(result));
-
-export const verifyRegionalResultSignature = async (
-  sharedSecret: string,
-  result: RegionalResultSignatureRequest,
-  signature: string
-) => verifyHmacSha256(
-  sharedSecret,
-  toRegionalResultSignaturePayload(result),
-  signature
-);
 
 const normalizeBrowserAuditHeaders = (headers: BrowserAuditWorkerRequest['customHeaders']) =>
   [...headers]
@@ -408,11 +299,6 @@ const verifyHmacSha256 = async (
     return false;
   }
 };
-
-const createSha256 = async (payload: string) =>
-  bytesToHex(new Uint8Array(
-    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
-  ));
 
 const bytesToHex = (value: Uint8Array) =>
   [...value].map((byte) => byte.toString(16).padStart(2, '0')).join('');

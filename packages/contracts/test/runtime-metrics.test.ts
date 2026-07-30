@@ -4,7 +4,6 @@ import { runtimeMetricsSchema } from '../src/runtime-metrics';
 const fixture = {
   schemaVersion: 1,
   observedAt: '2026-07-30T00:00:00.000Z',
-  runtimeMode: 'regional-runtime',
   runtimeLocation: {
     regionId: 'tokyo',
     label: 'Tokyo'

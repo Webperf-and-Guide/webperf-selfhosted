@@ -46,15 +46,6 @@ Execution details should stay behind a small boundary:
 - probe runtimes decide how to perform an individual measurement
 - optional runtimes can expose extra capabilities without forcing them into the default self-host stack
 
-## Regional runtime handoff
-
-One self-host deployment can also serve as a **regional runtime** for the
-managed Cloud control plane. In that role the deployment accepts signed,
-idempotent execution requests from the Cloud and returns results with
-provenance, without running a Console, self-host scheduler, Region Set, or
-any managed fleet logic. The protocol is defined in
-[Regional runtime handoff](./regional-runtime-handoff.md).
-
 ## Result Metadata
 
 Contracts may carry generic execution metadata such as:

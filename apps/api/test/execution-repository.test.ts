@@ -16,7 +16,6 @@ import {
   createSqliteJobRepository,
   executionExhaustionFinalizationBatchSize
 } from '../src/repository';
-import type { RegionalExecutionRecord } from '../src/regional-runtime-record';
 
 const tempDirs: string[] = [];
 const encryptionSecret = 'execution-repository-test-secret';
@@ -446,110 +445,7 @@ describe('durable execution repository', () => {
     second.close();
   });
 
-  test('rejects a regional completion after its accepted deadline', () => {
-    const databasePath = createTempDatabasePath();
-    const repository = createRepository(databasePath);
-    const acceptedAt = new Date('2026-07-22T00:00:00.000Z');
-    const deadlineAt = '2026-07-22T00:00:01.000Z';
-    const job = createLatencyJob('job_regional_deadline');
-    const record: RegionalExecutionRecord = {
-      id: 'regional_deadline:tokyo',
-      requestDigest: 'a'.repeat(64),
-      request: {
-        idempotencyKey: 'regional_deadline:tokyo',
-        runnerType: 'network_probe',
-        targets: [{
-          targetId: 'homepage',
-          url: job.url
-        }],
-        deadlineMs: 1_000,
-        maxAttempts: 1,
-        timestamp: acceptedAt.toISOString(),
-        signature: 'b'.repeat(64),
-        keyVersion: 'current'
-      },
-      provenance: {
-        regionId: 'tokyo',
-        runnerType: 'network_probe',
-        runtime: {
-          version: '0.3.0-test',
-          imageDigest: null
-        },
-        runner: {
-          id: 'probe-rs',
-          implementation: 'rust',
-          imageDigest: null
-        }
-      },
-      targetLinks: [{
-        targetId: 'homepage',
-        jobId: job.id,
-        executionJobId: 'exec_regional_deadline'
-      }],
-      acceptedAt: acceptedAt.toISOString(),
-      deadlineAt,
-      cancelledAt: null,
-      deadlineExceededAt: null,
-      createdAt: acceptedAt.toISOString(),
-      updatedAt: acceptedAt.toISOString()
-    };
-
-    repository.createRegionalExecution({
-      record,
-      resources: [{
-        executionJob: {
-          id: 'exec_regional_deadline',
-          kind: 'network_probe',
-          resourceId: job.id,
-          maxAttempts: 1,
-          payload: {
-            version: 'v1',
-            jobIds: [job.id],
-            checkId: null,
-            runId: null,
-            regionalExecutionId: record.id,
-            deadlineAt,
-            expectedProvenance: record.provenance
-          }
-        },
-        result: {
-          kind: 'network_probe',
-          jobs: [job],
-          run: null
-        }
-      }]
-    }, acceptedAt);
-    repository.claimExecutionJob(
-      { leaseOwner: 'regional-executor', leaseDurationMs: 10_000 },
-      acceptedAt
-    );
-    repository.markExecutionJobRunning(
-      {
-        id: 'exec_regional_deadline',
-        leaseOwner: 'regional-executor',
-        leaseDurationMs: 10_000
-      },
-      new Date('2026-07-22T00:00:00.100Z')
-    );
-
-    expect(repository.completeExecutionJob(
-      {
-        id: 'exec_regional_deadline',
-        leaseOwner: 'regional-executor'
-      },
-      new Date('2026-07-22T00:00:01.001Z')
-    )).toBeNull();
-    expect(repository.getExecutionJob('exec_regional_deadline')?.status)
-      .toBe('cancelled');
-    expect(repository.getRegionalExecution(record.id)).toMatchObject({
-      cancelledAt: null,
-      deadlineExceededAt: '2026-07-22T00:00:01.001Z'
-    });
-
-    repository.close();
-  });
-
-  test('scopes regional claims and exhausted finalization to network probes', () => {
+  test('scopes kind-filtered claims and exhausted finalization to network probes', () => {
     const databasePath = createTempDatabasePath();
     const repository = createRepository(databasePath);
     const queuedAt = new Date('2026-07-22T00:00:00.000Z');
@@ -582,10 +478,7 @@ describe('durable execution repository', () => {
           version: 'v1',
           jobIds: [networkJob.id],
           checkId: null,
-          runId: null,
-          regionalExecutionId: null,
-          deadlineAt: null,
-          expectedProvenance: null
+          runId: null
         }
       },
       result: {

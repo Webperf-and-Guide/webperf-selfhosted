@@ -24,10 +24,7 @@ const executionJob: ExecutionJob = {
     version: 'v1',
     jobIds: ['job_network'],
     checkId: null,
-    runId: null,
-    regionalExecutionId: null,
-    deadlineAt: null,
-    expectedProvenance: null
+    runId: null
   },
   error: null,
   createdAt: '2026-07-22T00:00:00.000Z',
@@ -89,10 +86,7 @@ const networkContext = (): ExecutionResourceContext => ({
     version: 'v1',
     jobIds: ['job_network'],
     checkId: null,
-    runId: null,
-    regionalExecutionId: null,
-    deadlineAt: null,
-    expectedProvenance: null
+    runId: null
   },
   jobs: [queuedJob()],
   check: null,
@@ -262,102 +256,6 @@ describe('network execution handler', () => {
       errorMessage: 'Network probe returned region "frankfurt" but expected "local"',
       measurement: null
     });
-  });
-
-  test('fails terminally before probing after a regional handoff deadline', async () => {
-    const savedResults: ExecutionResourceResultRequest[] = [];
-    const context = networkContext();
-    if (context.kind !== 'network_probe') {
-      throw new Error('Expected network context');
-    }
-    context.payload.deadlineAt = '2020-01-01T00:00:00.000Z';
-    const handler = createNetworkExecutionHandler({
-      client: createClient({ context, savedResults }),
-      leaseOwner: 'executor-network',
-      probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrl: 'https://probe.example.test',
-      requestImpl: async () => {
-        throw new Error('Probe must not run after the accepted deadline');
-      }
-    });
-
-    await expect(handler(executionJob, new AbortController().signal))
-      .rejects.toMatchObject({
-        code: 'regional_execution_deadline_exceeded',
-        retryable: false
-      });
-    expect(savedResults).toHaveLength(0);
-  });
-
-  test('refuses to resume regional work on a different runtime revision', async () => {
-    const savedResults: ExecutionResourceResultRequest[] = [];
-    const context = networkContext();
-    if (context.kind !== 'network_probe') {
-      throw new Error('Expected network context');
-    }
-    const expectedProvenance = {
-      regionId: 'tokyo',
-      runnerType: 'network_probe' as const,
-      runtime: {
-        version: '0.3.0',
-        imageDigest: `sha256:${'a'.repeat(64)}`
-      },
-      runner: {
-        id: 'probe-rs' as const,
-        implementation: 'rust' as const,
-        imageDigest: `sha256:${'b'.repeat(64)}`
-      }
-    };
-    context.payload.regionalExecutionId = 'regional_revision';
-    context.payload.expectedProvenance = expectedProvenance;
-    const handler = createNetworkExecutionHandler({
-      client: createClient({ context, savedResults }),
-      leaseOwner: 'executor-network',
-      probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrl: 'https://probe.example.test',
-      regionalExecutionProvenance: {
-        ...expectedProvenance,
-        runtime: {
-          ...expectedProvenance.runtime,
-          imageDigest: `sha256:${'c'.repeat(64)}`
-        }
-      },
-      requestImpl: async () => {
-        throw new Error('Probe must not run after a deployment revision change');
-      }
-    });
-
-    await expect(handler(executionJob, new AbortController().signal))
-      .rejects.toMatchObject({
-        code: 'regional_runtime_revision_changed',
-        retryable: false
-      });
-    expect(savedResults).toHaveLength(0);
-  });
-
-  test('classifies malformed regional handoff deadlines separately', async () => {
-    const savedResults: ExecutionResourceResultRequest[] = [];
-    const context = networkContext();
-    if (context.kind !== 'network_probe') {
-      throw new Error('Expected network context');
-    }
-    context.payload.deadlineAt = 'not-a-timestamp';
-    const handler = createNetworkExecutionHandler({
-      client: createClient({ context, savedResults }),
-      leaseOwner: 'executor-network',
-      probeSharedSecret: 'network-handler-probe-secret',
-      probeBaseUrl: 'https://probe.example.test',
-      requestImpl: async () => {
-        throw new Error('Probe must not run with an invalid accepted deadline');
-      }
-    });
-
-    await expect(handler(executionJob, new AbortController().signal))
-      .rejects.toMatchObject({
-        code: 'regional_execution_invalid_deadline',
-        retryable: false
-      });
-    expect(savedResults).toHaveLength(0);
   });
 
   test('validates the configured single probe origin as a credential-free HTTP(S) origin', () => {

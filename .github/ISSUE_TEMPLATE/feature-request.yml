@@ -9,7 +9,7 @@ body:
       value: |
         Please keep requests scoped to the self-hosted/open-core product.
 
-        If the request depends on multi-tenancy, billing, hosted orchestration, or other managed-only behavior, it may belong in the cloud product instead.
+        If the request depends on multi-tenancy, billing, hosted orchestration, or other managed-only behavior, it may belong in the WebPerf & Guide managed service instead.
   - type: textarea
     id: problem
     attributes:

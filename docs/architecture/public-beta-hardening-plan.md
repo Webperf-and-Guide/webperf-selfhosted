@@ -110,8 +110,7 @@ The exact diff will stay small within each phase, but the expected surface is:
   Comparison, Export, Analysis, and Browser Audit.
 - Canonical routes remain `/v1/sites`, `/v1/route-groups`, `/v1/checks`,
   nested check runs, run detail, comparisons, exports, analyses, browser
-  audits, and capabilities. Regional mode has a separate allowlisted handoff
-  surface documented in `regional-runtime-handoff.md`.
+  audits, capabilities, and the authenticated self-host runtime metrics.
 - `/v1/properties`, `/v1/route-sets`, and `/v1/check-profiles` remain tested
   compatibility aliases during beta, but will
   return deprecation and successor-link headers and will not receive new
@@ -250,7 +249,7 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Reorder README around Docker installation and operator outcomes.
 - [x] Add install, configure, regions, checks, scheduling, browser audits,
   artifacts, backup/restore, upgrade, security, troubleshooting, reverse proxy,
-  and cloud-vs-self-hosted user guides.
+  and managed-service-vs-self-hosted user guides.
 - [x] Move contributor setup below operator guidance.
 - [x] Remove local absolute paths and validate all documentation links.
 - [x] Document Browser sandboxing, trusted single-organization deployment, TLS,

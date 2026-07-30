@@ -217,15 +217,16 @@ describe('api service monitoring expansion', () => {
       const controlMetrics = await client.runtimeMetrics();
       expect(controlMetrics).toMatchObject({
         schemaVersion: 1,
-        runtimeMode: 'full',
         capacity: {
           topology: 'single-replica-sqlite',
           executorConcurrency: 1,
           horizontalScalingSafe: false
         }
       });
-      expect((await appClient.system.metrics()).runtimeMode).toBe('full');
-      expect((await opsClient.system.metrics()).runtimeMode).toBe('full');
+      expect((await appClient.system.metrics()).runtimeLocation.regionId.length)
+        .toBeGreaterThan(0);
+      expect((await opsClient.system.metrics()).runtimeLocation.regionId.length)
+        .toBeGreaterThan(0);
 
       const unauthorizedSitesResponse = await nativeFetch(`${harness.baseUrl}/v1/sites`);
       expect(unauthorizedSitesResponse.status).toBe(401);
@@ -237,7 +238,6 @@ describe('api service monitoring expansion', () => {
       expect(runtimeMetricsResponse.headers.get('cache-control')).toBe('no-store');
       expect(await runtimeMetricsResponse.json()).toMatchObject({
         schemaVersion: controlMetrics.schemaVersion,
-        runtimeMode: controlMetrics.runtimeMode,
         runtimeLocation: controlMetrics.runtimeLocation,
         capacity: controlMetrics.capacity,
         retention: controlMetrics.retention

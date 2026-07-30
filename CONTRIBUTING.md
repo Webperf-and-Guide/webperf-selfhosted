@@ -11,7 +11,7 @@ Start with [Contributor development](docs/contributors/development.md) and the
 - Keep core domain logic reusable through `packages/domain-core` and `packages/report-core`.
 - Prefer generic contracts and extension points over provider-specific assumptions.
 - Keep the console, API service, scheduler, and probe runnable on a small single-org installation.
-- Keep public package and runtime ownership clear so managed cloud code can consume this repo without forking it.
+- Keep public package and runtime ownership clear so WebPerf & Guide managed-service code can consume this repo without forking it.
 
 ## Local Checks
 

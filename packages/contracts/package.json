@@ -35,14 +35,6 @@
       "types": "./src/public-openapi.ts",
       "import": "./src/public-openapi.ts"
     },
-    "./regional-runtime-contract": {
-      "types": "./src/regional-runtime-contract.ts",
-      "import": "./src/regional-runtime-contract.ts"
-    },
-    "./regional-runtime-openapi": {
-      "types": "./src/regional-runtime-openapi.ts",
-      "import": "./src/regional-runtime-openapi.ts"
-    },
     "./public-api": {
       "types": "./src/public-api.ts",
       "import": "./src/public-api.ts"

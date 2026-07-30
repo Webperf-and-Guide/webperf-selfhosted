@@ -1,24 +1,21 @@
 # Runtime metrics
 
-WebPerf exposes one provider-neutral JSON snapshot for operators and managed
-regional-runtime consumers:
+WebPerf exposes one provider-neutral JSON snapshot for self-host operators:
 
 ```http
 GET /v1/runtime-metrics
 Authorization: Bearer <token>
 ```
 
-Use `SELFHOST_ADMIN_TOKEN` for a normal self-hosted installation. A regional
-runtime accepts its current or next `REGIONAL_RUNTIME_SHARED_SECRET` instead.
-The endpoint is protected, returns `Cache-Control: no-store` in regional mode,
-and is described by both the control and regional-runtime OpenAPI documents.
-Do not put credentials in a query string or monitoring URL.
+Use `SELFHOST_ADMIN_TOKEN`. The endpoint is protected and returns
+`Cache-Control: no-store`. Do not put credentials in a query string or
+monitoring URL.
 
 ## Snapshot fields
 
 The v1 response contains:
 
-- `observedAt`, `runtimeMode`, and the fixed `runtimeLocation`;
+- `observedAt` and the fixed `runtimeLocation`;
 - `executions.ready`: work an executor can claim now, including reclaimable
   expired leases that still have attempts left;
 - `executions.delayed`: queued retries or work whose `availableAt` is in the
@@ -42,7 +39,6 @@ Example:
 {
   "schemaVersion": 1,
   "observedAt": "2026-07-30T06:00:00.000Z",
-  "runtimeMode": "regional-runtime",
   "runtimeLocation": {
     "regionId": "tokyo",
     "label": "Tokyo"
@@ -118,25 +114,23 @@ your choice. Alert on trends rather than one sample:
 - compare failed and succeeded retained counts as deltas between snapshots,
   not as an unbounded counter ratio.
 
-The endpoint intentionally does not prescribe provider thresholds or
-deploy/undeploy policy. A managed control plane can combine it with provider
-CPU, memory, egress, readiness, and cost observations. A standalone operator
-can transform the JSON into Prometheus, OpenTelemetry, or another local format.
+The endpoint intentionally does not prescribe infrastructure thresholds.
+A standalone operator can transform the JSON into Prometheus, OpenTelemetry,
+or another local format.
 
 ## Horizontal scaling boundary
 
-Current regional runtimes use one SQLite database and one executor process.
-They must remain at exactly one application replica. Starting several provider
-replicas creates independent databases and breaks idempotent routing; the API
-therefore reports `horizontalScalingSafe: false`.
+The self-hosted application uses one SQLite database and one executor process.
+Starting independent application replicas without shared storage and lease
+coordination creates divergent databases, so the API reports
+`horizontalScalingSafe: false`.
 
 Use growing backlog to decide when to:
 
-1. keep an on-demand runtime warm;
-2. stagger schedules or reduce batch bursts;
-3. increase the runtime's CPU/memory allocation if platform data shows
+1. stagger schedules or reduce batch bursts;
+2. increase the runtime's CPU/memory allocation if platform data shows
    resource pressure;
-4. design a future shared-state protocol before enabling horizontal replicas.
+3. design a shared-state protocol before enabling horizontal replicas.
 
-Do not configure Bunny, Kubernetes, or another provider to autoscale this
-runtime above one replica based only on the JSON metrics.
+Do not configure an orchestrator to autoscale the full self-hosted application
+above one replica based only on the JSON metrics.

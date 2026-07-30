@@ -27,7 +27,7 @@ const requiredUserGuides = [
   'security',
   'troubleshooting',
   'reverse-proxy',
-  'cloud-vs-self-hosted'
+  'managed-service-vs-self-hosted'
 ].map((name) => `docs/users/${name}.md`);
 const requiredContributorGuides = [
   'docs/contributors/development.md',

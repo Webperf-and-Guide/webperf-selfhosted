@@ -8,7 +8,8 @@ This repository contains the self-hosted/open-core `WebPerf` product:
 - public contracts and deterministic reporting logic
 - optional Lighthouse Browser Audit reference runner
 
-Managed cloud orchestration and hosted operations live in the separate `webperf.and.guide` repo.
+WebPerf & Guide managed-service orchestration and hosted operations live in
+the separate `webperf.and.guide` repo.
 
 ## Reporting A Vulnerability
 

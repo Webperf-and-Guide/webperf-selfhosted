@@ -37,9 +37,8 @@ All other REST and RPC routes require
 authentication returns `401` and a Bearer challenge without reflecting the
 supplied token.
 
-`GET /v1/runtime-metrics` is shared by both deployment modes: a full
-self-hosted runtime accepts the administrator token, while a regional runtime
-accepts its dedicated current/next regional-runtime secret.
+`GET /v1/runtime-metrics` accepts the administrator token and never accepts
+probe or internal-service credentials.
 
 ## Persistence and display
 

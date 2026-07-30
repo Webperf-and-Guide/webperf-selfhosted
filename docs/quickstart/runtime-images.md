@@ -32,8 +32,6 @@ is pinned by OCI digest. It also contains:
 - `runtime-metadata.json`, with the version, source commit, image tags, and
   digests;
 - root `VERSION`;
-- the provider-neutral Regional Runtime Compose, environment template,
-  machine-readable multi-container profile, and deployment notes;
 - two SPDX JSON SBOMs per image, one for each Linux platform;
 - `browser-audit-seccomp.json`, kept beside `compose.yml` for the optional
   Chromium runtime;
@@ -41,8 +39,8 @@ is pinned by OCI digest. It also contains:
 - a generated `.env.example` with no default secrets.
 
 Official installation material never uses `:main` or `:latest`. A version tag
-is convenient for discovery, while the release Compose file and managed-cloud
-runtime handoff use the immutable digest recorded in the same release.
+is convenient for discovery, while the release Compose file and the WebPerf &
+Guide managed service use immutable image digests recorded in the same release.
 Docker resolves that digest to the host's matching native platform manifest.
 For compatibility, `images[].sbom` names the amd64 SBOM; releases that include
 both platforms also expose `images[].sboms`, which maps each platform manifest

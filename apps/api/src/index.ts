@@ -33,10 +33,6 @@ import type {
   ListQuery,
   Property,
   PropertyListResponse,
-  RegionalExecutionRequest,
-  RegionalExecutionProvenance,
-  RegionalExecutionResult,
-  RegionalExecutionTargetResult,
   ReportExportFormat,
   RuntimeMetrics,
   ExportResource,
@@ -93,15 +89,6 @@ import {
   defaultBrowserAuditArtifactContentTypes,
   browserAuditExecutionPayloadSchema,
   networkProbeExecutionPayloadSchema,
-  regionalExecutionPayloadMaxBytes,
-  regionalExecutionProvenanceSchema,
-  regionalExecutionRequestSchema,
-  regionalExecutionResultSchema,
-  regionalRuntimeCapabilitiesSchema,
-  regionalRuntimeMaxBatchSize,
-  regionalRuntimeMaxDeadlineMs,
-  regionalRuntimeProtocolVersion,
-  regionalRuntimeReplayWindowSeconds,
   runtimeMetricsSchema,
   runtimeMetricsSchemaVersion,
   executorConcurrency,
@@ -126,7 +113,6 @@ import {
 } from '@webperf/contracts';
 import { buildControlOpenApiDocument } from '@webperf/contracts/control-openapi';
 import { buildPublicOpenApiDocument } from '@webperf/contracts/public-openapi';
-import { buildRegionalRuntimeOpenApiDocument } from '@webperf/contracts/regional-runtime-openapi';
 import {
   JsonBodyEmptyError,
   JsonBodyTooLargeError,
@@ -137,13 +123,9 @@ import { RPCHandler } from '@orpc/server/fetch';
 import { isDeepStrictEqual } from 'node:util';
 import {
   applyListQuery,
-  createRegionalExecutionRequestDigest,
-  createRegionalResultSignature,
-  normalizeRegionalRequestConfig,
   parseListQueryFromSearchParams,
   resolveRuntimeLocation,
-  validateMeasurementUrl,
-  verifyRegionalExecutionSignature
+  validateMeasurementUrl
 } from '@webperf/domain-core';
 import { parseSelfhostApiVars } from '@webperf/config/selfhost';
 import {
@@ -165,7 +147,6 @@ import {
 } from './browser-audit-upload-token';
 import { authorizeApiRequest } from './auth';
 import { describeSafeError } from './diagnostics';
-import type { RegionalExecutionRecord } from './regional-runtime-record';
 import {
   describeSchedulerError,
   dispatchScheduledChecks,
@@ -199,12 +180,6 @@ type SelfhostRuntime = {
   maxTargetAttempts: number;
   schedulerMode: 'embedded' | 'external' | 'disabled';
   schedulerPollIntervalSeconds: number;
-  runtimeMode: 'full' | 'regional-runtime';
-  regionalRuntimeSecret?: string;
-  regionalRuntimeSecretNext?: string;
-  runtimeVersion?: string;
-  runtimeImageDigest?: string;
-  probeImageDigest?: string;
 };
 
 type MutableTarget = LatencyJobTarget;
@@ -223,9 +198,6 @@ const browserAuditArtifactUploadPathPattern =
   /^\/internal\/browser-audits\/([^/]+)\/artifacts$/;
 const browserAuditArtifactDownloadPathPattern =
   /^\/v1\/browser-audits\/([^/]+)\/artifacts\/([^/]+)$/;
-const regionalExecutionPathPattern = /^\/v1\/regional-executions\/([^/]+)$/;
-const regionalRetentionPruneIntervalMs = 60 * 60 * 1_000;
-let regionalRetentionPruneTimer: ReturnType<typeof setInterval> | null = null;
 type CreatedProfileJob = {
   routeId: string;
   routeLabel: string;
@@ -248,8 +220,8 @@ export const repository = createSqliteJobRepository({
 export const artifactStore = new LocalBrowserAuditArtifactStore(runtime.artifactsPath);
 
 const warnRetentionBatchLimit = (
-  component: 'retention' | 'regional-retention',
-  event: 'startup_retention_batch_limit_reached' | 'regional_retention_prune_batch_limit_reached',
+  component: 'retention',
+  event: 'startup_retention_batch_limit_reached',
   error: SqliteRetentionBatchLimitError
 ) => {
   console.warn(JSON.stringify({
@@ -273,7 +245,6 @@ await artifactStore.reconcile(new Set(repository.listBrowserAuditArtifactStorage
 const buildHealthPayload = () => ({
   service: 'webperf-api',
   ok: true,
-  runtimeMode: runtime.runtimeMode,
   runtimeLocation: runtime.runtimeLocation,
   probeBaseUrl: runtime.probeBaseUrl,
   maxTargetAttempts: runtime.maxTargetAttempts,
@@ -317,15 +288,8 @@ const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
   return runtimeMetricsSchema.parse({
     schemaVersion: runtimeMetricsSchemaVersion,
     observedAt: observedAt.toISOString(),
-    runtimeMode: runtime.runtimeMode,
     runtimeLocation: runtime.runtimeLocation,
-    executions: repository.getExecutionQueueMetrics(
-      observedAt,
-      runtime.retentionDays,
-      runtime.runtimeMode === 'regional-runtime'
-        ? 'network_probe'
-        : undefined
-    ),
+    executions: repository.getExecutionQueueMetrics(observedAt, runtime.retentionDays),
     capacity: {
       topology: runtimeTopology,
       executorConcurrency,
@@ -339,14 +303,13 @@ const buildRuntimeMetricsPayload = (): RuntimeMetrics => {
 
 const buildPublicCapabilitiesPayload = () => ({
   deploymentModel: 'selfhost' as const,
-  runtimeMode: runtime.runtimeMode,
   features: {
     managedRegions: false,
-    scheduledChecks: runtime.runtimeMode !== 'regional-runtime',
-    baselineCompare: runtime.runtimeMode !== 'regional-runtime',
-    reportExports: runtime.runtimeMode !== 'regional-runtime',
-    webhookAlerts: runtime.runtimeMode !== 'regional-runtime',
-    browserAuditDirectRun: runtime.runtimeMode !== 'regional-runtime' && Boolean(runtime.browserAuditBaseUrl),
+    scheduledChecks: true,
+    baselineCompare: true,
+    reportExports: true,
+    webhookAlerts: true,
+    browserAuditDirectRun: Boolean(runtime.browserAuditBaseUrl),
     aiAnalyses: false,
     openApi: true,
     appRpc: true,
@@ -364,38 +327,6 @@ const buildPublicCapabilitiesPayload = () => ({
     }
   }
 });
-
-const buildRegionalRuntimeMetadata = () => ({
-  runtime: {
-    version: runtime.runtimeVersion ?? null,
-    imageDigest: runtime.runtimeImageDigest ?? null
-  },
-  runner: {
-    id: 'probe-rs',
-    implementation: 'rust',
-    imageDigest: runtime.probeImageDigest ?? null
-  }
-});
-
-const buildRegionalRuntimeCapabilitiesPayload = () =>
-  regionalRuntimeCapabilitiesSchema.parse({
-    protocolVersion: regionalRuntimeProtocolVersion,
-    regionId: runtime.runtimeLocation.regionId,
-    regionLabel: runtime.runtimeLocation.label,
-    runnerTypes: ['network_probe'],
-    maxBatchSize: regionalRuntimeMaxBatchSize,
-    maxPayloadBytes: regionalExecutionPayloadMaxBytes,
-    maxDeadlineMs: regionalRuntimeMaxDeadlineMs,
-    maxAttempts: runtime.maxTargetAttempts,
-    ...buildRegionalRuntimeMetadata()
-  });
-
-const buildRegionalExecutionProvenance = () =>
-  regionalExecutionProvenanceSchema.parse({
-    regionId: runtime.runtimeLocation.regionId,
-    runnerType: 'network_probe',
-    ...buildRegionalRuntimeMetadata()
-  });
 
 const buildPropertyListResponse = (query?: ListQuery): PropertyListResponse =>
   propertyListResponseSchema.parse({
@@ -838,14 +769,6 @@ const routeRequest = async (request: Request) => {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    if (
-      pathname === '/openapi/regional-runtime.json'
-      && request.method === 'GET'
-      && runtime.runtimeMode === 'regional-runtime'
-    ) {
-      return json(await getRegionalRuntimeOpenApiDocument());
-    }
-
     if (pathname === '/openapi/control.json' && request.method === 'GET') {
       return json(await getControlOpenApiDocument());
     }
@@ -883,39 +806,6 @@ const routeRequest = async (request: Request) => {
 
     if (pathname === '/health') {
       return json(buildProcessHealthPayload());
-    }
-
-    if (
-      pathname === '/v1/regional-capabilities'
-      && request.method === 'GET'
-      && runtime.runtimeMode === 'regional-runtime'
-    ) {
-      return json(buildRegionalRuntimeCapabilitiesPayload());
-    }
-
-    if (
-      pathname === '/v1/regional-executions'
-      && request.method === 'POST'
-      && runtime.runtimeMode === 'regional-runtime'
-    ) {
-      return handleCreateRegionalExecution(request);
-    }
-
-    const regionalExecutionMatch = pathname.match(regionalExecutionPathPattern);
-    if (
-      regionalExecutionMatch?.[1]
-      && request.method === 'GET'
-      && runtime.runtimeMode === 'regional-runtime'
-    ) {
-      return handleGetRegionalExecution(decodePathSegment(regionalExecutionMatch[1]));
-    }
-
-    if (
-      regionalExecutionMatch?.[1]
-      && request.method === 'DELETE'
-      && runtime.runtimeMode === 'regional-runtime'
-    ) {
-      return handleCancelRegionalExecution(decodePathSegment(regionalExecutionMatch[1]));
     }
 
     if (pathname === '/v1/health') {
@@ -1511,78 +1401,11 @@ const routeRequest = async (request: Request) => {
     );
 };
 
-const decodePathSegment = (value: string) => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return '';
-  }
-};
-
-const isRegionalRuntimeSurface = (pathname: string) =>
-  pathname === '/v1/regional-capabilities'
-  || pathname === '/v1/regional-executions'
-  || pathname === '/openapi/regional-runtime.json'
-  || regionalExecutionPathPattern.test(pathname);
-
-const isRegionalRuntimeResponseSurface = (pathname: string) =>
-  isRegionalRuntimeSurface(pathname)
-  || (
-    runtime.runtimeMode === 'regional-runtime'
-    && pathname === '/v1/runtime-metrics'
-  );
-
-const isRegionalInternalExecutionSurface = (pathname: string, method: string) => {
-  if (method !== 'POST') {
-    return false;
-  }
-
-  if (pathname === '/internal/execution-jobs/claim') {
-    return true;
-  }
-
-  if (executionJobMutationPathPattern.test(pathname)) {
-    return true;
-  }
-
-  const resourceMatch = pathname.match(executionJobResourcePathPattern);
-  return resourceMatch?.[2] === 'context' || resourceMatch?.[2] === 'result';
-};
-
-const isRuntimeSurfaceAllowed = (pathname: string, method: string) => {
-  if (runtime.runtimeMode === 'full') {
-    return !isRegionalRuntimeSurface(pathname);
-  }
-
-  if (pathname.startsWith('/internal/')) {
-    return isRegionalInternalExecutionSurface(pathname, method);
-  }
-
-  if (
-    pathname === '/health'
-    || pathname === '/v1/regional-capabilities'
-    || pathname === '/v1/runtime-metrics'
-    || pathname === '/openapi/regional-runtime.json'
-  ) {
-    return method === 'GET';
-  }
-
-  if (pathname === '/v1/regional-executions') {
-    return method === 'POST';
-  }
-
-  return regionalExecutionPathPattern.test(pathname)
-    && (method === 'GET' || method === 'DELETE');
-};
-
 export const server = Bun.serve({
   hostname: runtime.host,
   port: runtime.port,
   async fetch(request) {
     const pathname = new URL(request.url).pathname;
-    if (!isRuntimeSurfaceAllowed(pathname, request.method)) {
-      return json({ error: 'Not found' }, { status: 404 });
-    }
     const usesScopedArtifactToken = request.method === 'POST'
       && browserAuditArtifactUploadPathPattern.test(pathname);
     const unauthorized = usesScopedArtifactToken
@@ -1593,32 +1416,15 @@ export const server = Bun.serve({
       return unauthorized;
     }
 
-    let routedResponse: Response;
-    try {
-      routedResponse = await routeRequest(request);
-    } catch (error) {
-      if (!isRegionalRuntimeResponseSurface(pathname)) {
-        throw error;
-      }
-      const incidentId = logRegionalRuntimeResponseFailure(error);
-      routedResponse = json(
-        {
-          error: 'Regional runtime request failed',
-          incidentId
-        },
-        { status: 500 }
-      );
-    }
+    const routedResponse = await routeRequest(request);
     const response = (
       isExecutionTransportPath(pathname)
-      || isRegionalRuntimeResponseSurface(pathname)
       || (request.method === 'GET' && browserAuditArtifactDownloadPathPattern.test(pathname))
     )
       ? routedResponse
       : await redactJsonResponse(routedResponse);
     const cacheBoundedResponse = (
       pathname === '/v1/runtime-metrics'
-      || isRegionalRuntimeResponseSurface(pathname)
     )
       ? withNoStore(response)
       : response;
@@ -1635,44 +1441,16 @@ console.log(
     databasePath: runtime.databasePath,
     artifactsPath: runtime.artifactsPath,
     retainedDays: runtime.retentionDays,
-    schedulerMode: runtime.schedulerMode,
-    runtimeMode: runtime.runtimeMode
+    schedulerMode: runtime.schedulerMode
   })
 );
-
-if (runtime.runtimeMode === 'regional-runtime') {
-  regionalRetentionPruneTimer = setInterval(() => {
-    try {
-      repository.pruneRetainedData(runtime.retentionDays);
-    } catch (error) {
-      if (error instanceof SqliteRetentionBatchLimitError) {
-        warnRetentionBatchLimit(
-          'regional-retention',
-          'regional_retention_prune_batch_limit_reached',
-          error
-        );
-        return;
-      }
-      console.error(JSON.stringify({
-        service: 'webperf-api',
-        component: 'regional-retention',
-        event: 'regional_retention_prune_failed',
-        error: describeSafeError(error)
-      }));
-    }
-  }, regionalRetentionPruneIntervalMs);
-  regionalRetentionPruneTimer.unref?.();
-}
 
 // Phase 3 of issue #14: when schedulerMode is 'embedded', run the scheduler
 // dispatch loop inside the API process so the default standalone topology
 // needs no separate scheduler container. The loop calls the same internal
 // dispatch endpoint as the standalone scheduler, using loopback origin and
 // the internal secret already present in the API process.
-// In regional-runtime mode the scheduler is always disabled — a regional
-// runtime only accepts Cloud-submitted execution requests, not self-host
-// scheduled Checks.
-if (runtime.schedulerMode === 'embedded' && runtime.runtimeMode !== 'regional-runtime') {
+if (runtime.schedulerMode === 'embedded') {
   const schedulerBaseLogFields = {
     service: 'webperf-api',
     component: 'embedded-scheduler'
@@ -1793,458 +1571,6 @@ async function handleCreateJob(request: Request) {
   );
 }
 
-async function handleCreateRegionalExecution(request: Request) {
-  const body = await parseJsonBody<RegionalExecutionRequest>(
-    request,
-    regionalExecutionPayloadMaxBytes
-  );
-
-  if (!body.ok) {
-    return body.response;
-  }
-
-  const parsed = regionalExecutionRequestSchema.safeParse(body.data);
-  if (!parsed.success) {
-    return json(
-      {
-        error: 'Invalid regional execution payload',
-        issues: parsed.error.flatten()
-      },
-      { status: 400 }
-    );
-  }
-
-  const timestampMs = Date.parse(parsed.data.timestamp);
-  if (!Number.isFinite(timestampMs)) {
-    return regionalRuntimeUnauthorized();
-  }
-  const replayWindowMs = regionalRuntimeReplayWindowSeconds * 1_000;
-  if (Math.abs(Date.now() - timestampMs) > replayWindowMs) {
-    return regionalRuntimeUnauthorized();
-  }
-
-  const signingSecret = parsed.data.keyVersion === 'current'
-    ? runtime.regionalRuntimeSecret
-    : runtime.regionalRuntimeSecretNext;
-  if (!signingSecret) {
-    return regionalRuntimeUnauthorized();
-  }
-
-  const { signature, ...unsignedRequest } = parsed.data;
-  if (!await verifyRegionalExecutionSignature(signingSecret, unsignedRequest, signature)) {
-    return regionalRuntimeUnauthorized();
-  }
-
-  const requestDigest = await createRegionalExecutionRequestDigest(unsignedRequest);
-  const existing = repository.getRegionalExecution(parsed.data.idempotencyKey);
-  if (existing) {
-    if (existing.requestDigest !== requestDigest) {
-      return regionalExecutionConflict();
-    }
-    const current = expireRegionalExecutionIfNeeded(existing);
-    return json(await buildSignedRegionalExecutionResult(current));
-  }
-
-  if (parsed.data.maxAttempts > runtime.maxTargetAttempts) {
-    return json(
-      {
-        error: `maxAttempts exceeds this runtime's limit of ${runtime.maxTargetAttempts}`
-      },
-      { status: 400 }
-    );
-  }
-
-  for (const target of parsed.data.targets) {
-    try {
-      validateMeasurementUrl(target.url);
-    } catch {
-      return json(
-        {
-          error: 'Regional execution contains a blocked or invalid target URL',
-          targetId: target.targetId
-        },
-        { status: 400 }
-      );
-    }
-  }
-
-  const acceptedAt = new Date().toISOString();
-  const deadlineAt = new Date(
-    Date.parse(acceptedAt) + parsed.data.deadlineMs
-  ).toISOString();
-  const provenance = buildRegionalExecutionProvenance();
-  const jobIdPrefix = `reg_${requestDigest.slice(0, 32)}`;
-  const jobs = parsed.data.targets.map((target, index) =>
-    createJobRecord({
-      id: `${jobIdPrefix}_${index}`,
-      url: target.url,
-      note: `Regional execution target ${target.targetId}`,
-      requestConfig: target.request,
-      requestSource: 'regional-runtime',
-      monitorPolicy: undefined,
-      requesterIp: null,
-      maxAttempts: parsed.data.maxAttempts
-    })
-  );
-  const resources: ReturnType<typeof buildNetworkExecutionResourceInput>[] = [];
-  const targetLinks: RegionalExecutionRecord['targetLinks'] = [];
-
-  for (const [index, job] of jobs.entries()) {
-    const executionJobId = `exec_${job.id}`;
-    resources.push(buildNetworkExecutionResourceInput([job], null, null, {
-      resourceId: parsed.data.idempotencyKey,
-      executionJobId,
-      deadlineAt,
-      regionalExecutionId: parsed.data.idempotencyKey,
-      expectedProvenance: provenance
-    }));
-    const requestTarget = parsed.data.targets[index];
-    if (!requestTarget) {
-      throw new Error('Regional execution target mapping is incomplete');
-    }
-    targetLinks.push({
-      targetId: requestTarget.targetId,
-      jobId: job.id,
-      executionJobId
-    });
-  }
-
-  const record: RegionalExecutionRecord = {
-    id: parsed.data.idempotencyKey,
-    requestDigest,
-    request: parsed.data,
-    provenance,
-    targetLinks,
-    acceptedAt,
-    deadlineAt,
-    cancelledAt: null,
-    deadlineExceededAt: null,
-    createdAt: acceptedAt,
-    updatedAt: acceptedAt
-  };
-
-  let persisted: ReturnType<typeof repository.createRegionalExecution>;
-  try {
-    persisted = repository.createRegionalExecution({ record, resources });
-  } catch (error) {
-    const incidentId = logRegionalExecutionCreationFailure(error, record.id);
-    return json(
-      {
-        error: 'Failed to queue regional execution',
-        incidentId
-      },
-      { status: 500 }
-    );
-  }
-
-  if (persisted.record.requestDigest !== requestDigest) {
-    return regionalExecutionConflict();
-  }
-
-  return json(
-    await buildSignedRegionalExecutionResult(
-      expireRegionalExecutionIfNeeded(persisted.record)
-    ),
-    { status: persisted.created ? 202 : 200 }
-  );
-}
-
-async function handleGetRegionalExecution(idempotencyKey: string) {
-  const record = repository.getRegionalExecution(idempotencyKey);
-  if (!record) {
-    return json({ error: 'Regional execution not found' }, { status: 404 });
-  }
-
-  return json(await buildSignedRegionalExecutionResult(
-    expireRegionalExecutionIfNeeded(record)
-  ));
-}
-
-async function handleCancelRegionalExecution(idempotencyKey: string) {
-  const stored = repository.getRegionalExecution(idempotencyKey);
-  if (!stored) {
-    return json({ error: 'Regional execution not found' }, { status: 404 });
-  }
-
-  const record = expireRegionalExecutionIfNeeded(stored);
-  const cancelled = repository.terminateRegionalExecution({
-    id: record.id,
-    reason: 'cancelled'
-  }) ?? record;
-  return json(await buildSignedRegionalExecutionResult(cancelled));
-}
-
-/**
- * Lazily enforces an accepted execution deadline.
- *
- * Regional runtimes do not run a scheduler, so status reads intentionally
- * persist deadline expiry and cancel any still-leased jobs. The executor also
- * enforces the same deadline while work is active.
- */
-function expireRegionalExecutionIfNeeded(record: RegionalExecutionRecord) {
-  if (
-    record.cancelledAt
-    || record.deadlineExceededAt
-    || Date.parse(record.deadlineAt) > Date.now()
-  ) {
-    return record;
-  }
-
-  return repository.terminateRegionalExecution({
-    id: record.id,
-    reason: 'deadline_exceeded'
-  }) ?? record;
-}
-
-async function buildSignedRegionalExecutionResult(
-  record: RegionalExecutionRecord
-): Promise<RegionalExecutionResult> {
-  const targets = record.targetLinks.map((link) =>
-    buildRegionalExecutionTargetResult(record, link)
-  );
-  const terminal = targets.every((target) =>
-    ['succeeded', 'failed', 'cancelled'].includes(target.status)
-  );
-  let status: RegionalExecutionResult['status'];
-  if (record.deadlineExceededAt) {
-    status = 'failed';
-  } else if (record.cancelledAt) {
-    status = 'cancelled';
-  } else if (targets.every((target) => target.status === 'succeeded')) {
-    status = 'succeeded';
-  } else if (terminal) {
-    status = 'failed';
-  } else if (targets.some((target) => target.status !== 'queued')) {
-    status = 'running';
-  } else {
-    status = 'queued';
-  }
-  const completionCandidates = targets
-    .map((target) => target.finishedAt)
-    .filter((value): value is string => value != null)
-    .sort();
-  const completedAt = ['succeeded', 'failed', 'cancelled'].includes(status)
-    ? record.cancelledAt
-      ?? record.deadlineExceededAt
-      ?? completionCandidates.at(-1)
-      ?? record.updatedAt
-    : null;
-  const unsignedResult = regionalExecutionResultSchema.omit({
-    signature: true
-  }).parse({
-    idempotencyKey: record.id,
-    status,
-    targets,
-    provenance: record.provenance,
-    acceptedAt: record.acceptedAt,
-    completedAt,
-    keyVersion:
-      record.request.keyVersion === 'next' && runtime.regionalRuntimeSecretNext
-        ? 'next'
-        : 'current'
-  });
-  const signingSecret = unsignedResult.keyVersion === 'next'
-    ? runtime.regionalRuntimeSecretNext
-    : runtime.regionalRuntimeSecret;
-  if (!signingSecret) {
-    throw new Error('Regional runtime signing secret is unavailable');
-  }
-
-  return regionalExecutionResultSchema.parse({
-    ...unsignedResult,
-    signature: await createRegionalResultSignature(signingSecret, unsignedResult)
-  });
-}
-
-function buildRegionalExecutionTargetResult(
-  record: RegionalExecutionRecord,
-  link: RegionalExecutionRecord['targetLinks'][number]
-): RegionalExecutionTargetResult {
-  const job = repository.getJob(link.jobId);
-  const target = job?.targets[0] ?? null;
-  const executionJob = repository.getExecutionJob(link.executionJobId);
-  let status: RegionalExecutionTargetResult['status'];
-  // Result persistence happens before the executor commits the terminal queue
-  // transition. Keep a finished measurement non-terminal until both records
-  // agree so Cloud never observes success that can later regress.
-  if (
-    executionJob?.status === 'succeeded'
-    && target?.status === 'succeeded'
-  ) {
-    status = 'succeeded';
-  } else if (
-    executionJob?.status === 'succeeded'
-    && target?.status === 'failed'
-  ) {
-    status = 'failed';
-  } else if (record.deadlineExceededAt) {
-    status = 'failed';
-  } else if (record.cancelledAt || executionJob?.status === 'cancelled') {
-    status = 'cancelled';
-  } else if (
-    executionJob?.status === 'failed'
-    || executionJob?.status === 'succeeded'
-  ) {
-    status = 'failed';
-  } else if (
-    target?.status === 'measuring'
-    || target?.status === 'succeeded'
-    || target?.status === 'failed'
-    || executionJob?.status === 'leased'
-    || executionJob?.status === 'running'
-  ) {
-    status = 'running';
-  } else {
-    status = 'queued';
-  }
-  const executionError = executionJob?.error;
-  const { errorCode, errorMessage } = resolveRegionalExecutionError({
-    deadlineExceeded: record.deadlineExceededAt != null,
-    status,
-    executionJobStatus: executionJob?.status,
-    targetStatus: target?.status,
-    targetErrorCode: target?.errorCode ?? null,
-    targetErrorMessage: target?.errorMessage ?? null,
-    executionErrorCode: executionError?.code ?? null,
-    executionErrorMessage: executionError?.message ?? null
-  });
-  const finishedAt = resolveRegionalTargetFinishedAt({
-    status,
-    cancelledAt: record.cancelledAt,
-    deadlineExceededAt: record.deadlineExceededAt,
-    targetFinishedAt: target?.finishedAt ?? null,
-    executionCompletedAt: executionJob?.completedAt ?? null
-  });
-
-  return {
-    targetId: link.targetId,
-    status,
-    region: record.provenance.regionId,
-    latencyMs: target?.latencyMs == null ? null : Math.round(target.latencyMs),
-    statusCode: target?.statusCode ?? null,
-    success: target?.success ?? null,
-    errorCode: errorCode?.slice(0, 120) ?? null,
-    errorMessage: errorMessage?.slice(0, 1_000) ?? null,
-    startedAt: target?.startedAt ?? null,
-    finishedAt
-  };
-}
-
-const resolveRegionalTargetFinishedAt = ({
-  status,
-  cancelledAt,
-  deadlineExceededAt,
-  targetFinishedAt,
-  executionCompletedAt
-}: {
-  status: RegionalExecutionTargetResult['status'];
-  cancelledAt: string | null;
-  deadlineExceededAt: string | null;
-  targetFinishedAt: string | null;
-  executionCompletedAt: string | null;
-}) => {
-  if (status === 'cancelled') {
-    return cancelledAt ?? executionCompletedAt ?? targetFinishedAt;
-  }
-  if (deadlineExceededAt && status === 'failed') {
-    return deadlineExceededAt;
-  }
-  if (targetFinishedAt) {
-    return targetFinishedAt;
-  }
-  return status === 'succeeded' || status === 'failed'
-    ? executionCompletedAt
-    : null;
-};
-
-const resolveRegionalExecutionError = ({
-  deadlineExceeded,
-  status,
-  executionJobStatus,
-  targetStatus,
-  targetErrorCode,
-  targetErrorMessage,
-  executionErrorCode,
-  executionErrorMessage
-}: {
-  deadlineExceeded: boolean;
-  status: RegionalExecutionTargetResult['status'];
-  executionJobStatus: ExecutionJob['status'] | undefined;
-  targetStatus: LatencyJobTarget['status'] | undefined;
-  targetErrorCode: string | null;
-  targetErrorMessage: string | null;
-  executionErrorCode: string | null;
-  executionErrorMessage: string | null;
-}) => {
-  if (deadlineExceeded && status === 'failed') {
-    return {
-      errorCode: 'regional_execution_deadline_exceeded',
-      errorMessage: 'Regional execution exceeded its accepted deadline'
-    };
-  }
-  if (
-    executionJobStatus === 'succeeded'
-    && targetStatus !== 'succeeded'
-    && targetStatus !== 'failed'
-  ) {
-    return {
-      errorCode: 'regional_result_missing',
-      errorMessage: 'Regional execution completed without a persisted measurement result'
-    };
-  }
-  if (status === 'failed') {
-    return {
-      errorCode: targetErrorCode ?? executionErrorCode ?? 'regional_execution_failed',
-      errorMessage: targetErrorMessage
-        ?? executionErrorMessage
-        ?? 'Regional execution failed before producing a measurement'
-    };
-  }
-  return {
-    errorCode: targetErrorCode,
-    errorMessage: targetErrorMessage
-  };
-};
-
-const regionalRuntimeUnauthorized = () => json(
-  { error: 'Unauthorized regional execution request' },
-  {
-    status: 401,
-    headers: {
-      'cache-control': 'no-store',
-      'www-authenticate': 'Bearer realm="webperf-regional-runtime"'
-    }
-  }
-);
-
-const regionalExecutionConflict = () => json(
-  { error: 'Idempotency key already belongs to a different regional execution' },
-  { status: 409 }
-);
-
-function logRegionalExecutionCreationFailure(error: unknown, resourceId: string) {
-  const incidentId = crypto.randomUUID();
-  console.error(JSON.stringify({
-    service: 'webperf-api',
-    event: 'regional_execution_creation_failed',
-    resourceId,
-    incidentId,
-    ...describeSafeError(error)
-  }));
-  return incidentId;
-}
-
-function logRegionalRuntimeResponseFailure(error: unknown) {
-  const incidentId = crypto.randomUUID();
-  console.error(JSON.stringify({
-    service: 'webperf-api',
-    event: 'regional_runtime_response_failed',
-    incidentId,
-    ...describeSafeError(error)
-  }));
-  return incidentId;
-}
-
 async function handleClaimExecutionJob(request: Request) {
   const body = await parseExecutionTransportBody(
     request,
@@ -2257,10 +1583,7 @@ async function handleClaimExecutionJob(request: Request) {
   }
 
   const executionJob = repository.claimExecutionJob({
-    ...body.data,
-    kind: runtime.runtimeMode === 'regional-runtime'
-      ? 'network_probe'
-      : undefined
+    ...body.data
   });
 
   if (!executionJob) {
@@ -2511,8 +1834,7 @@ function buildExecutionResourceContext(
 ): ExecutionResourceContext {
   if (executionJob.kind === 'network_probe') {
     const payload = networkProbeExecutionPayloadSchema.parse(executionJob.payload);
-    const expectedResourceId =
-      payload.runId ?? payload.regionalExecutionId ?? payload.jobIds[0];
+    const expectedResourceId = payload.runId ?? payload.jobIds[0];
 
     if (executionJob.resourceId !== expectedResourceId) {
       throw new Error('Network execution resource does not match its payload');
@@ -3908,8 +3230,7 @@ function createJobRecord({
   monitorPolicy,
   requesterIp,
   id,
-  maxAttempts,
-  requestSource = 'operator'
+  maxAttempts
 }: {
   url: string;
   note: string | null;
@@ -3918,7 +3239,6 @@ function createJobRecord({
   requesterIp: string | null;
   id?: string;
   maxAttempts?: number;
-  requestSource?: 'operator' | 'regional-runtime';
 }) {
   validateMeasurementUrl(url);
 
@@ -3963,9 +3283,7 @@ function createJobRecord({
     url,
     status: 'queued',
     note,
-    request: requestSource === 'regional-runtime'
-      ? normalizeRegionalRequestConfig(requestConfig)
-      : normalizeCustomRequestConfig(requestConfig),
+    request: normalizeCustomRequestConfig(requestConfig),
     monitorPolicy: normalizeMonitorPolicy(monitorPolicy),
     requestedAt: now,
     startedAt: null,
@@ -3993,14 +3311,7 @@ function createNetworkExecutionResource(
 function buildNetworkExecutionResourceInput(
   jobs: LatencyJobDetail[],
   run: CheckProfileRun | null,
-  checkId: string | null,
-  options: {
-    resourceId?: string;
-    executionJobId?: string;
-    deadlineAt?: string | null;
-    regionalExecutionId?: string | null;
-    expectedProvenance?: RegionalExecutionProvenance | null;
-  } = {}
+  checkId: string | null
 ) {
   const firstJob = jobs[0];
 
@@ -4008,7 +3319,7 @@ function buildNetworkExecutionResourceInput(
     throw new Error('Network execution requires at least one job');
   }
 
-  const resourceId = options.resourceId ?? run?.id ?? firstJob.id;
+  const resourceId = run?.id ?? firstJob.id;
   const attemptCounts = jobs.flatMap((job) =>
     job.targets.map((target) => target.maxAttempts)
   );
@@ -4022,15 +3333,12 @@ function buildNetworkExecutionResourceInput(
     version: 'v1',
     jobIds: jobs.map((job) => job.id),
     checkId,
-    runId: run?.id ?? null,
-    regionalExecutionId: options.regionalExecutionId ?? null,
-    deadlineAt: options.deadlineAt ?? null,
-    expectedProvenance: options.expectedProvenance ?? null
+    runId: run?.id ?? null
   });
 
   return {
     executionJob: {
-      id: options.executionJobId ?? `exec_${resourceId}`,
+      id: `exec_${resourceId}`,
       kind: 'network_probe' as const,
       resourceId,
       maxAttempts,
@@ -4497,13 +3805,7 @@ function parseRuntime(input: Record<string, string | undefined>): SelfhostRuntim
     probeBaseUrl: parsed.SELFHOST_PROBE_BASE_URL,
     maxTargetAttempts: parsed.SELFHOST_MAX_TARGET_ATTEMPTS,
     schedulerMode: parsed.SELFHOST_SCHEDULER_MODE,
-    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS,
-    runtimeMode: parsed.SELFHOST_RUNTIME_MODE,
-    regionalRuntimeSecret: parsed.REGIONAL_RUNTIME_SHARED_SECRET,
-    regionalRuntimeSecretNext: parsed.REGIONAL_RUNTIME_SHARED_SECRET_NEXT,
-    runtimeVersion: parsed.WEBPERF_RUNTIME_VERSION,
-    runtimeImageDigest: parsed.WEBPERF_RUNTIME_IMAGE_DIGEST,
-    probeImageDigest: parsed.WEBPERF_PROBE_IMAGE_DIGEST
+    schedulerPollIntervalSeconds: parsed.SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS
   };
 }
 
@@ -5539,7 +4841,6 @@ const opsRpcHandler = new RPCHandler<OrpcContext>(opsRouter as never);
 
 let controlOpenApiDocumentPromise: Promise<unknown> | undefined;
 let publicOpenApiDocumentPromise: Promise<unknown> | undefined;
-let regionalRuntimeOpenApiDocumentPromise: Promise<unknown> | undefined;
 
 const getControlOpenApiDocument = async () => {
   if (!controlOpenApiDocumentPromise) {
@@ -5573,22 +4874,6 @@ const getPublicOpenApiDocument = async () => {
   return await publicOpenApiDocumentPromise;
 };
 
-const getRegionalRuntimeOpenApiDocument = async () => {
-  if (!regionalRuntimeOpenApiDocumentPromise) {
-    regionalRuntimeOpenApiDocumentPromise = Promise.resolve(
-      buildRegionalRuntimeOpenApiDocument({
-        title: 'WebPerf Regional Runtime API',
-        version: `v${regionalRuntimeProtocolVersion}`,
-        description:
-          'Signed, idempotent network-probe handoff from a managed Cloud control plane to one fixed regional runtime.',
-        serverUrl: '/'
-      })
-    );
-  }
-
-  return await regionalRuntimeOpenApiDocumentPromise;
-};
-
 export type SelfhostControlServer = typeof server;
 
 let shutdownPromise: Promise<void> | undefined;
@@ -5598,10 +4883,6 @@ export const shutdown = (signal = 'manual') => {
     shutdownPromise = (async () => {
       console.log(JSON.stringify({ service: 'webperf-api', event: 'shutdown.started', signal }));
       embeddedSchedulerAbort?.abort(new Error(`Embedded scheduler shutdown on ${signal}`));
-      if (regionalRetentionPruneTimer !== null) {
-        clearInterval(regionalRetentionPruneTimer);
-        regionalRetentionPruneTimer = null;
-      }
       let forceStopTimer: ReturnType<typeof setTimeout> | undefined;
       const forceStop = new Promise<void>((resolve, reject) => {
         forceStopTimer = setTimeout(() => {

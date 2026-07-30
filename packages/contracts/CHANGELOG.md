@@ -1,5 +1,64 @@
 # @webperf/contracts
 
+## 0.3.0 — 2026-07-30
+
+### Minor changes
+
+- [1ad632a](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/1ad632a0a16f4ad62d102ed7cfc1c980ab51aefb) Add the regional runtime handoff protocol contracts. Define a
+  provider-neutral execution boundary (`regionalRuntimeCapabilitiesSchema`,
+  `regionalExecutionRequestSchema`, `regionalExecutionResultSchema`,
+  `regionalExecutionStatusSchema`) that a managed Cloud control plane can
+  call to submit signed, idempotent network-probe requests to one regional
+  runtime. The API now exposes contract-backed capabilities, create, status,
+  and cancel routes plus a dedicated OpenAPI document. It persists encrypted
+  idempotency records, atomically gives every target its own durable retry
+  budget, retains completed sibling results while a regional request can
+  still resume, enforces replay and execution deadlines, normalizes semantic
+  request defaults, supports current/next key rotation, and signs results
+  with distinct runtime/runner image provenance. Browser Audit is
+  intentionally deferred to a separate request variant. Tagged releases now
+  include the digest-pinned three-container Regional Runtime profile,
+  pre-populated provenance digests, synchronized source environment versions,
+  and a dedicated published-bundle smoke. No Cloud-only logic (billing,
+  tenancy, fleet) enters this repository. — Thanks @imjlk!
+- [71ed002](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/71ed0027219b52725c9b9f42a627959463677e17) Remove the legacy 41-city region catalog, Region Pack/Region Set resources,
+  and multi-region selection from the self-host product. One standalone
+  deployment now measures from one fixed runtime location identified by
+  `SELFHOST_REGION_ID` (default `local`) and optional `SELFHOST_REGION_LABEL`;
+  the executor reads one `SELFHOST_PROBE_BASE_URL` origin; and the Rust probe
+  reads `REGION_ID` instead of `REGION_CODE`. The `/v1/region-packs` and
+  `/v1/region-sets` routes return 410 Gone. `createLatencyJobSchema.regions`,
+  `checkProfileSchema.regionPackId`, `regionPackSchema`, `regionCodeSchema`,
+  the `regionCatalog`/`buildRegionAvailabilityList`/`resolveRequestedRegions`
+  helpers, and the Console region catalog UI are removed. Result provenance
+  keeps a single `region` field per job, target, and Browser Audit. This is a
+  breaking change for self-host installs that relied on the multi-region
+  SaaS fan-out model; there is no production data to migrate. — Thanks @imjlk!
+- [de7b47f](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/de7b47fca7d76ff49035b69f5c25379c3667d846) Add an authenticated, provider-neutral runtime metrics contract at
+  `GET /v1/runtime-metrics` for both full self-host installations and
+  restricted regional runtimes. The snapshot reports durable execution queue
+  pressure, status and runner-kind counts, retry and expired-lease signals,
+  oldest-work ages, retention context, and the current single-replica SQLite
+  capacity boundary without exposing targets or persisted payloads.
+  
+  Published release bundles now gate upgrades from the public `v0.2.1`
+  multi-region beta. The migration preserves historical target provenance,
+  requires explicit operator review before unsafe saved checks can run again,
+  creates a pre-migration backup, and is covered by automated backup, restore,
+  and cross-version Compose drills. Self-host documentation and console copy
+  now consistently describe one deployment as one fixed measurement location. — Thanks @imjlk!
+
+### Patch changes
+
+- [90350cf](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/90350cf9a9dfd8928459fab8431d01c9d86ef865) Add the generic runtime region identity foundation that one standalone
+  deployment will own, in parallel with the legacy 41-city enum and
+  SELFHOST_*_JSON maps. Introduces `runtimeRegionIdSchema`,
+  `runtimeRegionLabelSchema`, and `runtimeLocationSchema` in `@webperf/contracts`,
+  plus `SELFHOST_REGION_ID`, `SELFHOST_REGION_LABEL`, and
+  `SELFHOST_PROBE_BASE_URL` in `@webperf/config` (default region id `local`,
+  no unverified city claim). This is the foundation slice of issue #14
+  Phase 1; the legacy multi-region model is removed in a follow-up PR. — Thanks @imjlk!
+
 ## 0.2.0 — 2026-07-25
 
 ### Minor changes

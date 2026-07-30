@@ -1,5 +1,56 @@
 # @webperf/config
 
+## 0.3.0 — 2026-07-30
+
+### Minor changes
+
+- [ae8d021](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/ae8d02142eb7223a4f35d4a666bb0b396beb956c) Add `SELFHOST_RUNTIME_MODE` (`full` | `regional-runtime`, default `full`)
+  to the self-host API environment schema. When set to `regional-runtime`,
+  the deployment serves as a regional execution runtime for the managed
+  Cloud control plane and requires an isolated current/next handoff secret.
+  The `WEBPERF_ROLE=regional-runtime` dispatcher now forces the restricted
+  mode so role selection cannot accidentally expose the full self-host
+  surface, while optional immutable image metadata supports result
+  provenance. The restricted role no longer requires the unused self-host
+  administrator credential, and executors without a Browser Audit origin no
+  longer require an unused Browser Audit secret. — Thanks @imjlk!
+- [71ed002](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/71ed0027219b52725c9b9f42a627959463677e17) Remove the legacy 41-city region catalog, Region Pack/Region Set resources,
+  and multi-region selection from the self-host product. One standalone
+  deployment now measures from one fixed runtime location identified by
+  `SELFHOST_REGION_ID` (default `local`) and optional `SELFHOST_REGION_LABEL`;
+  the executor reads one `SELFHOST_PROBE_BASE_URL` origin; and the Rust probe
+  reads `REGION_ID` instead of `REGION_CODE`. The `/v1/region-packs` and
+  `/v1/region-sets` routes return 410 Gone. `createLatencyJobSchema.regions`,
+  `checkProfileSchema.regionPackId`, `regionPackSchema`, `regionCodeSchema`,
+  the `regionCatalog`/`buildRegionAvailabilityList`/`resolveRequestedRegions`
+  helpers, and the Console region catalog UI are removed. Result provenance
+  keeps a single `region` field per job, target, and Browser Audit. This is a
+  breaking change for self-host installs that relied on the multi-region
+  SaaS fan-out model; there is no production data to migrate. — Thanks @imjlk!
+- [f48c411](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/f48c4113489da9c6760cdb6cb43902b4d2e56464) Consolidate four Bun runtime images into one `webperf` image and embed the
+  scheduler in the API. The published GHCR image set changes from six images
+  (`webperf-console`, `webperf-api`, `webperf-scheduler`, `webperf-executor`,
+  `webperf-probe`, `webperf-browser-audit-lighthouse`) to three
+  (`webperf`, `webperf-probe`, `webperf-browser-audit-lighthouse`). Console,
+  API, scheduler, and executor are now runtime roles selected by the
+  `WEBPERF_ROLE` environment variable in the single `webperf` image. The
+  scheduler defaults to embedded mode inside the API process
+  (`SELFHOST_SCHEDULER_MODE=embedded`); external mode remains available.
+  This is a breaking change for consumers pinned to the old six-image
+  digest-pinned Compose bundle. — Thanks @imjlk!
+
+### Patch changes
+
+- [90350cf](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/90350cf9a9dfd8928459fab8431d01c9d86ef865) Add the generic runtime region identity foundation that one standalone
+  deployment will own, in parallel with the legacy 41-city enum and
+  SELFHOST_*_JSON maps. Introduces `runtimeRegionIdSchema`,
+  `runtimeRegionLabelSchema`, and `runtimeLocationSchema` in `@webperf/contracts`,
+  plus `SELFHOST_REGION_ID`, `SELFHOST_REGION_LABEL`, and
+  `SELFHOST_PROBE_BASE_URL` in `@webperf/config` (default region id `local`,
+  no unverified city claim). This is the foundation slice of issue #14
+  Phase 1; the legacy multi-region model is removed in a follow-up PR. — Thanks @imjlk!
+- Updated dependencies: contracts@0.3.0
+
 ## 0.2.1 — 2026-07-26
 
 ### Patch changes

@@ -255,16 +255,31 @@ const rewriteCheckRowsInBatches = ({
   const update = database.query<never, [string, number]>(
     'UPDATE saved_entities SET payload_json = ? WHERE rowid = ?'
   );
+  const regionPackCache = new Map<string, string[]>();
   const resolveRegionPack = (regionPackId: string) => {
+    const cached = regionPackCache.get(regionPackId);
+    if (cached) {
+      regionPackCache.delete(regionPackId);
+      regionPackCache.set(regionPackId, cached);
+      return cached;
+    }
+
     const row = readRegionPack.get(regionPackId);
-    if (!row) {
-      return [];
+    let regions: string[] = [];
+    if (row) {
+      const value = parse(row.payload_json);
+      if (isRecord(value)) {
+        regions = toStringArray(value.regions) ?? [];
+      }
     }
-    const value = parse(row.payload_json);
-    if (!isRecord(value)) {
-      return [];
+    regionPackCache.set(regionPackId, regions);
+    if (regionPackCache.size > migrationBatchSize) {
+      const oldestRegionPackId = regionPackCache.keys().next().value;
+      if (oldestRegionPackId !== undefined) {
+        regionPackCache.delete(oldestRegionPackId);
+      }
     }
-    return toStringArray(value.regions) ?? [];
+    return regions;
   };
 
   try {

@@ -282,8 +282,11 @@ for (const requiredFragment of [
 }
 
 for (const requiredFragment of [
+  'Published bundle upgrade eligibility',
   'Published bundle v0.2.1 upgrade drill',
-  "if: ${{ inputs.version != '0.2.1' }}",
+  'is-newer-than "$CURRENT_VERSION" "$LEGACY_VERSION"',
+  'needs: upgrade-eligibility',
+  "if: ${{ needs.upgrade-eligibility.outputs.required == 'true' }}",
   'LEGACY_VERSION: 0.2.1',
   'WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:',
   'WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:',

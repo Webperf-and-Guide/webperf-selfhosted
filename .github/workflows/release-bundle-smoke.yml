@@ -250,9 +250,35 @@ jobs:
             sudo tail -n 3000 /var/log/kern.log /var/log/syslog 2>/dev/null || true
           } | grep -E 'apparmor="(AUDIT|DENIED)"|audit:.*(SECCOMP|userns)' | tail -n 300 || true
 
+  upgrade-eligibility:
+    name: Published bundle upgrade eligibility
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.version.outputs.required }}
+    steps:
+      - name: Check out upgrade eligibility harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Compare the published version with the migration baseline
+        id: version
+        env:
+          CURRENT_VERSION: ${{ inputs.version }}
+          LEGACY_VERSION: 0.2.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(bun tooling/scripts/release-bundle.ts \
+            is-newer-than "$CURRENT_VERSION" "$LEGACY_VERSION")"
+          required="$(jq -er '.newer | if type == "boolean" then tostring else error("invalid") end' \
+            <<<"$result")"
+          echo "required=${required}" >> "$GITHUB_OUTPUT"
+
   upgrade:
     name: Published bundle v0.2.1 upgrade drill
-    if: ${{ inputs.version != '0.2.1' }}
+    needs: upgrade-eligibility
+    if: ${{ needs.upgrade-eligibility.outputs.required == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

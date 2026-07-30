@@ -32,8 +32,12 @@ key early can make existing rows unreadable.
   when using a reverse proxy.
 - `CONSOLE_PUBLIC_PORT` changes the loopback host port.
 - The default `standalone` supervisor pins console and executor API calls to
-  loopback inside the `webperf` container. Operators do not configure those
-  internal origins.
+  the configured API bind address inside the `webperf` container. Wildcard
+  binds use loopback for those child-process calls.
+- `WEBPERF_STANDALONE_STARTUP_TIMEOUT_MS=0` keeps waiting while the API process
+  remains alive, so long first-start migrations and artifact reconciliation
+  can finish. Set a positive millisecond deadline only when the operator
+  explicitly prefers fail-closed startup.
 - `SELFHOST_SCHEDULER_API_BASE_URL=http://webperf:8788` is only used by the
   optional `external-scheduler` profile.
 - Non-loopback plain HTTP for the executor API requires the explicit

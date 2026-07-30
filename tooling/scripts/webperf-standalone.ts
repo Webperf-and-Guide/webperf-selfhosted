@@ -1,4 +1,9 @@
-export {};
+import {
+  parseStandaloneStartupTimeoutMs,
+  resolveStandaloneApiBinding,
+  selectStandaloneSecrets,
+  takeStandaloneSecrets
+} from './webperf-standalone-config';
 
 /**
  * Runs the complete Bun self-host control surface in one container.
@@ -14,8 +19,11 @@ type ChildName = 'api' | 'console' | 'executor';
 type Child = ReturnType<typeof Bun.spawn>;
 
 const apiPort = parsePort(process.env.SELFHOST_API_PORT, 8788);
-const apiOrigin = `http://127.0.0.1:${apiPort}`;
-const startupTimeoutMs = 300_000;
+const apiBinding = resolveStandaloneApiBinding(process.env.SELFHOST_API_HOST, apiPort);
+const apiOrigin = apiBinding.origin;
+const startupTimeoutMs = parseStandaloneStartupTimeoutMs(
+  process.env.WEBPERF_STANDALONE_STARTUP_TIMEOUT_MS
+);
 const startupPollMs = 250;
 const healthDiagnosticIntervalMs = 20_000;
 const healthDiagnosticEveryN = Math.max(
@@ -26,6 +34,10 @@ const childShutdownGraceMs = 60_000;
 const forcedExitObservationMs = 5_000;
 const exitTimedOut = Symbol('exit-timed-out');
 
+// Capture service secrets once, remove them from the supervisor environment,
+// and pass only the required subset to each child.
+const standaloneSecrets = takeStandaloneSecrets(process.env);
+const childBaseEnvironment = { ...process.env };
 const children = new Map<ChildName, Child>();
 let shutdownSignal: Signal | null = null;
 let shutdownResolve: ((signal: Signal) => void) | undefined;
@@ -50,7 +62,7 @@ const spawnChild = (
   const child = Bun.spawn(argv, {
     stdio: ['inherit', 'inherit', 'inherit'],
     env: {
-      ...process.env,
+      ...childBaseEnvironment,
       ...env
     }
   });
@@ -107,7 +119,13 @@ const api = spawnChild(
   'api',
   ['bun', './apps/api/src/index.ts'],
   {
-    SELFHOST_API_HOST: process.env.SELFHOST_API_HOST?.trim() || '0.0.0.0',
+    ...selectStandaloneSecrets(standaloneSecrets, [
+      'SELFHOST_ADMIN_TOKEN',
+      'SELFHOST_ADMIN_TOKEN_NEXT',
+      'SELFHOST_INTERNAL_SECRET',
+      'SELFHOST_INTERNAL_SECRET_NEXT'
+    ]),
+    SELFHOST_API_HOST: apiBinding.bindHost,
     SELFHOST_API_PORT: String(apiPort),
     SELFHOST_SCHEDULER_MODE: process.env.SELFHOST_SCHEDULER_MODE?.trim() || 'embedded',
     SELFHOST_SCHEDULER_API_BASE_URL: apiOrigin
@@ -120,12 +138,25 @@ try {
   const consoleChild = spawnChild(
     'console',
     ['bun', './apps/console/build/index.js'],
-    { CONTROL_BASE_URL: apiOrigin }
+    {
+      ...selectStandaloneSecrets(standaloneSecrets, ['SELFHOST_ADMIN_TOKEN']),
+      CONTROL_BASE_URL: apiOrigin
+    }
   );
   const executor = spawnChild(
     'executor',
     ['bun', './apps/executor/src/index.ts'],
-    { SELFHOST_EXECUTOR_API_BASE_URL: apiOrigin }
+    {
+      // The executor is a client of these authenticated services and signs
+      // with current credentials only. Rotation keys belong to the receiving
+      // API/probe/runner and become current after the coordinated restart.
+      ...selectStandaloneSecrets(standaloneSecrets, [
+        'SELFHOST_INTERNAL_SECRET',
+        'PROBE_SHARED_SECRET',
+        'BROWSER_AUDIT_SHARED_SECRET'
+      ]),
+      SELFHOST_EXECUTOR_API_BASE_URL: apiOrigin
+    }
   );
 
   emit('ready', { apiOrigin });
@@ -170,10 +201,10 @@ try {
 }
 
 async function waitForApi(apiChild: Child, healthUrl: string) {
-  const deadline = Date.now() + startupTimeoutMs;
+  const deadline = startupTimeoutMs === 0 ? null : Date.now() + startupTimeoutMs;
   let attempt = 0;
 
-  while (Date.now() < deadline) {
+  while (deadline === null || Date.now() < deadline) {
     attempt += 1;
     if (shutdownSignal) {
       throw new Error('shutdown requested during startup');

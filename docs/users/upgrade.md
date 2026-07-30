@@ -103,18 +103,29 @@ maintenance topologies, but they are not the default release layout. The probe
 (`webperf-probe`) and optional Lighthouse runner
 (`webperf-browser-audit-lighthouse`) images are unchanged.
 
-## 2. Pull and stop
+## 2. Stop the old topology, then pull
 
-From the new release directory:
+First return to the **currently running release directory** and stop its
+services using its existing Compose file. `down` removes the old containers and
+networks but deliberately retains the named `webperf-data` volume because this
+command does not use `-v`:
+
+```sh
+docker compose --env-file .env --profile browser-audit -f compose.yml \
+  down --remove-orphans --timeout 30
+```
+
+Confirm that the old `console`, `api`, `executor`, and optional worker
+containers are no longer running. Then enter the new release directory,
+validate its copied `.env`, and pull the digest-pinned replacement:
 
 ```sh
 docker compose --env-file .env -f compose.yml config --quiet
 docker compose --env-file .env -f compose.yml pull
-docker compose --env-file .env --profile browser-audit -f compose.yml stop
 ```
 
-The fixed Compose project name keeps the existing `webperf-data` volume. Do not
-add `-v` to any stop or down command.
+The fixed Compose project name lets the new topology reattach the retained
+`webperf-data` volume. Never add `-v` to this upgrade command.
 
 ## 3. Migrate and diagnose
 

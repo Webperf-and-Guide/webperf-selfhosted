@@ -347,6 +347,74 @@ describe('sqlite control repository', () => {
       );
     }
 
+    const insertRun = database.query(`
+      INSERT INTO check_profile_runs (id, profile_id, created_at, payload_json)
+      VALUES (?, ?, ?, ?)
+    `);
+    for (const [runId, profileId] of [
+      ['run_global_pending', multiRegionProfile.id],
+      ['run_tokyo_pending', scheduledProfile.id]
+    ] as const) {
+      insertRun.run(
+        runId,
+        profileId,
+        timestamp,
+        storageCrypto.stringify(createCheckProfileRun({
+          id: runId,
+          profileId
+        }))
+      );
+    }
+    insertRun.finalize();
+    const insertExecution = database.query(`
+      INSERT INTO execution_jobs (
+        id, kind, resource_id, status, lease_owner, lease_expires_at,
+        attempt_count, max_attempts, available_at, payload_json, error_json,
+        created_at, updated_at, completed_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 3, ?, ?, NULL, ?, ?, NULL)
+    `);
+    insertExecution.run(
+      'exec_global_probe_pending',
+      'network_probe',
+      'run_global_pending',
+      'queued',
+      null,
+      null,
+      0,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp
+    );
+    insertExecution.run(
+      'exec_global_webhook_pending',
+      'webhook_delivery',
+      'run_global_pending',
+      'leased',
+      'legacy-executor',
+      '2026-07-29T00:10:00.000Z',
+      1,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp
+    );
+    insertExecution.run(
+      'exec_tokyo_probe_pending',
+      'network_probe',
+      'run_tokyo_pending',
+      'queued',
+      null,
+      null,
+      0,
+      timestamp,
+      storageCrypto.stringify({ version: 'v1' }),
+      timestamp,
+      timestamp
+    );
+    insertExecution.finalize();
+
     const currentJob = createJob({
       id: 'job_legacy_multi',
       targets: [
@@ -492,6 +560,24 @@ describe('sqlite control repository', () => {
         )
         .get()?.count
     ).toBe(3);
+    expect(
+      verifyDatabase
+        .query<{ id: string; status: string }, []>(`
+          SELECT id, status
+          FROM execution_jobs
+          WHERE id IN (
+            'exec_global_probe_pending',
+            'exec_global_webhook_pending',
+            'exec_tokyo_probe_pending'
+          )
+          ORDER BY id
+        `)
+        .all()
+    ).toEqual([
+      { id: 'exec_global_probe_pending', status: 'cancelled' },
+      { id: 'exec_global_webhook_pending', status: 'cancelled' },
+      { id: 'exec_tokyo_probe_pending', status: 'queued' }
+    ]);
     verifyDatabase.close();
   });
 

@@ -238,11 +238,13 @@ const hasLegacyChecksInBatches = ({
 const rewriteCheckRowsInBatches = ({
   database,
   runtimeRegionId,
+  migrationTimestamp,
   parse,
   stringify
 }: {
   database: Parameters<SqliteMigration['up']>[0];
   runtimeRegionId: string;
+  migrationTimestamp: string;
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
 }) => {
@@ -255,6 +257,21 @@ const rewriteCheckRowsInBatches = ({
   const update = database.query<never, [string, number]>(
     'UPDATE saved_entities SET payload_json = ? WHERE rowid = ?'
   );
+  const cancelActiveExecutions = database.query<never, [string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'cancelled',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE kind IN ('network_probe', 'webhook_delivery')
+      AND status NOT IN ('succeeded', 'failed', 'cancelled')
+      AND resource_id IN (
+        SELECT id
+        FROM check_profile_runs
+        WHERE profile_id = ?
+      )
+  `);
   const regionPackCache = new Map<string, string[]>();
   const resolveRegionPack = (regionPackId: string) => {
     const cached = regionPackCache.get(regionPackId);
@@ -290,6 +307,18 @@ const rewriteCheckRowsInBatches = ({
         const rewritten = rewriteLegacyCheck(value, runtimeRegionId, resolveRegionPack);
         if (rewritten !== value) {
           update.run(stringify(rewritten), row.rowid);
+          if (
+            isRecord(rewritten)
+            && typeof rewritten.id === 'string'
+            && isRecord(rewritten.locationMigration)
+            && rewritten.locationMigration.status === 'requires_review'
+          ) {
+            cancelActiveExecutions.run(
+              migrationTimestamp,
+              migrationTimestamp,
+              rewritten.id
+            );
+          }
         }
         return true;
       }
@@ -297,6 +326,7 @@ const rewriteCheckRowsInBatches = ({
   } finally {
     readRegionPack.finalize();
     update.finalize();
+    cancelActiveExecutions.finalize();
   }
 };
 
@@ -323,6 +353,7 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
       rewriteCheckRowsInBatches({
         database,
         runtimeRegionId,
+        migrationTimestamp: new Date().toISOString(),
         parse,
         stringify
       });

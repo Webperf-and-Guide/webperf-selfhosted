@@ -17,6 +17,14 @@ backup_database_path="$backup_dir/webperf.sqlite"
 backup_artifacts_path="$backup_dir/artifacts"
 volume_name="${compose_project}_webperf-data"
 backup_inside_volume="/data/recovery-drill-backup.sqlite"
+recovery_profiles=(--profile browser-audit --profile debug)
+
+for required_binary in awk bun curl docker grep openssl python3 tar; do
+  if ! command -v "$required_binary" >/dev/null 2>&1; then
+    echo "Required Compose recovery command is unavailable: $required_binary" >&2
+    exit 1
+  fi
+done
 
 if [[ "$use_dev_override" != 'true' && "$use_dev_override" != 'false' ]]; then
   printf 'WEBPERF_RECOVERY_USE_DEV_OVERRIDE must be true or false, got %q\n' "$use_dev_override" >&2
@@ -59,9 +67,36 @@ compose() {
     "$@"
 }
 
+bounded_compose_down() {
+  local down_pid
+  local watchdog_pid
+  local status
+
+  compose "${recovery_profiles[@]}" down -v --remove-orphans --timeout 30 &
+  down_pid=$!
+  (
+    sleep 60
+    if kill -0 "$down_pid" >/dev/null 2>&1; then
+      kill -TERM "$down_pid" >/dev/null 2>&1 || true
+      sleep 5
+      kill -KILL "$down_pid" >/dev/null 2>&1 || true
+    fi
+  ) &
+  watchdog_pid=$!
+
+  if wait "$down_pid"; then
+    status=0
+  else
+    status=$?
+  fi
+  kill "$watchdog_pid" >/dev/null 2>&1 || true
+  wait "$watchdog_pid" >/dev/null 2>&1 || true
+  return "$status"
+}
+
 cleanup() {
   if [[ "$compose_project" == webperf-recovery-* ]]; then
-    compose --profile browser-audit --profile debug down -v --remove-orphans >/dev/null 2>&1 || true
+    bounded_compose_down >/dev/null 2>&1 || true
   fi
   rm -rf "$temp_root"
 }
@@ -129,7 +164,7 @@ wait_for_api_debug() {
   local mapping
   local port
 
-  compose --profile browser-audit --profile debug up -d --build
+  compose "${recovery_profiles[@]}" up -d --build
   compose --profile debug up -d --no-deps api-debug
   mapping="$(compose --profile debug port api-debug 8789)"
   port="${mapping##*:}"
@@ -144,18 +179,19 @@ wait_for_api_debug() {
     fi
     sleep 2
   done
-  compose --profile browser-audit --profile debug logs --no-color --tail 160 >&2 || true
+  compose "${recovery_profiles[@]}" logs --no-color --tail 160 >&2 || true
   echo "API debug proxy failed to become ready at ${api_debug_url}" >&2
   exit 1
 }
 
 api_debug_url=""
 wait_for_api_debug
-bun "$root_dir/tooling/scripts/compose-recovery-fixture.ts" \
-  seed "$api_debug_url" "$admin_token" "$manifest_path"
+WEBPERF_RECOVERY_ADMIN_TOKEN="$admin_token" \
+  bun "$root_dir/tooling/scripts/compose-recovery-fixture.ts" \
+    seed "$api_debug_url" "$manifest_path"
 
 # Freeze every writer before copying SQLite and artifact bytes.
-compose --profile browser-audit --profile debug stop
+compose "${recovery_profiles[@]}" stop
 compose run --rm --no-deps --entrypoint bun api \
   /app/tooling/scripts/selfhost-database.ts backup \
   --database /data/webperf.sqlite \
@@ -174,7 +210,7 @@ if [[ "$compose_project" != webperf-recovery-* ]]; then
   echo "Refusing to delete a non-recovery Compose project: $compose_project" >&2
   exit 1
 fi
-compose --profile browser-audit --profile debug down -v --remove-orphans
+bounded_compose_down
 if docker volume inspect "$volume_name" >/dev/null 2>&1; then
   echo "Expected isolated recovery volume to be deleted: $volume_name" >&2
   exit 1
@@ -204,21 +240,32 @@ compose run --rm --no-deps --entrypoint bun api \
   /app/tooling/scripts/selfhost-database.ts migrate \
   --database /data/webperf.sqlite \
   --backup
-doctor_output="$(
-  compose run --rm --no-deps --entrypoint bun api \
-    /app/tooling/scripts/selfhost-database.ts doctor \
-    --database /data/webperf.sqlite
-)"
+doctor_output_path="$temp_root/doctor-output.log"
+compose run --rm --no-deps --entrypoint bun api \
+  /app/tooling/scripts/selfhost-database.ts doctor \
+  --database /data/webperf.sqlite > "$doctor_output_path"
 bun -e '
-  const lines = process.argv[1].trim().split(/\r?\n/);
-  const payload = JSON.parse(lines.at(-1));
+  const lines = (await Bun.file(process.argv[1]).text()).trim().split(/\r?\n/).reverse();
+  const payload = lines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .find((candidate) => candidate?.command === "doctor");
+  if (!payload) {
+    throw new Error("Recovery doctor did not emit a structured result");
+  }
   if (payload.ok !== true || payload.command !== "doctor") {
     throw new Error(`Recovery doctor failed: ${JSON.stringify(payload).slice(0, 2048)}`);
   }
-' "$doctor_output"
+' "$doctor_output_path"
 
 wait_for_api_debug
-bun "$root_dir/tooling/scripts/compose-recovery-fixture.ts" \
-  verify "$api_debug_url" "$admin_token" "$manifest_path"
+WEBPERF_RECOVERY_ADMIN_TOKEN="$admin_token" \
+  bun "$root_dir/tooling/scripts/compose-recovery-fixture.ts" \
+    verify "$api_debug_url" "$manifest_path"
 
 echo '{"ok":true,"drill":"compose-backup-restore","database":"verified","artifacts":"verified"}'

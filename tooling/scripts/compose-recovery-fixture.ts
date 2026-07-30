@@ -21,11 +21,31 @@ const terminalAuditStatuses = new Set(['succeeded', 'failed', 'cancelled']);
 const defaultTimeoutMs = 6 * 60 * 1_000;
 const minimumTimeoutMs = 30_000;
 const maximumTimeoutMs = 10 * 60 * 1_000;
+const localArtifactPathPattern =
+  /^\/v1\/browser-audits\/[A-Za-z0-9_-]+\/artifacts\/[A-Za-z0-9_-]+$/;
+
+class RecoveryRequestError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = 'RecoveryRequestError';
+    this.retryable = retryable;
+  }
+}
 
 const requireArgument = (index: number, label: string) => {
   const value = process.argv[index]?.trim();
   if (!value) {
     throw new Error(`Missing ${label}`);
+  }
+  return value;
+};
+
+const requireEnvironment = (name: string) => {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing ${name}`);
   }
   return value;
 };
@@ -67,24 +87,38 @@ const requestJson = async (
   path: string,
   init: RequestInit = {}
 ) => {
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...init.headers
-    },
-    signal: AbortSignal.timeout(20_000)
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...init.headers
+      },
+      signal: AbortSignal.timeout(20_000)
+    });
+  } catch (error) {
+    throw new RecoveryRequestError(
+      `${init.method ?? 'GET'} ${path} failed before receiving a response: ${
+        error instanceof Error ? error.message : 'unknown transport error'
+      }`,
+      true
+    );
+  }
   const body = await response.text();
   let payload: unknown;
   try {
     payload = body ? JSON.parse(body) : null;
   } catch {
-    throw new Error(`${init.method ?? 'GET'} ${path} returned invalid JSON (${response.status})`);
+    throw new RecoveryRequestError(
+      `${init.method ?? 'GET'} ${path} returned invalid JSON (${response.status})`,
+      response.status >= 500
+    );
   }
   if (!response.ok) {
-    throw new Error(
-      `${init.method ?? 'GET'} ${path} failed with ${response.status}: ${JSON.stringify(payload).slice(0, 2_048)}`
+    throw new RecoveryRequestError(
+      `${init.method ?? 'GET'} ${path} failed with ${response.status}: ${JSON.stringify(payload).slice(0, 2_048)}`,
+      response.status >= 500
     );
   }
   return payload;
@@ -122,7 +156,17 @@ const waitForResource = async ({
   const deadline = Date.now() + timeoutMs;
   let lastStatus = '';
   while (Date.now() < deadline) {
-    const payload = requireObject(await requestJson(baseUrl, token, path), label);
+    let rawPayload: unknown;
+    try {
+      rawPayload = await requestJson(baseUrl, token, path);
+    } catch (error) {
+      if (error instanceof RecoveryRequestError && error.retryable) {
+        await Bun.sleep(2_000);
+        continue;
+      }
+      throw error;
+    }
+    const payload = requireObject(rawPayload, label);
     const status = requireString(payload.status, `${label}.status`);
     lastStatus = status;
     if (terminalStatuses.has(status)) {
@@ -138,8 +182,8 @@ const downloadArtifactSha256 = async (
   token: string,
   artifactUrl: string
 ) => {
-  if (!artifactUrl.startsWith('/v1/browser-audits/')) {
-    throw new Error('Recovery fixture artifact URL must use the local Browser Audit API');
+  if (!localArtifactPathPattern.test(artifactUrl)) {
+    throw new Error('Recovery fixture artifact URL must be a canonical local Browser Audit API path');
   }
   const response = await fetch(`${baseUrl}${artifactUrl}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -262,10 +306,18 @@ const seed = async (
 };
 
 const parseManifest = async (path: string): Promise<RecoveryManifest> => {
-  const payload = requireObject(
-    JSON.parse(await Bun.file(resolve(path)).text()),
-    'recovery manifest'
-  );
+  const manifestPath = resolve(path);
+  let rawPayload: unknown;
+  try {
+    rawPayload = JSON.parse(await Bun.file(manifestPath).text());
+  } catch (error) {
+    throw new Error(
+      `Unable to parse recovery manifest ${manifestPath}: ${
+        error instanceof Error ? error.message : 'unknown error'
+      }`
+    );
+  }
+  const payload = requireObject(rawPayload, 'recovery manifest');
   if (payload.schemaVersion !== 1) {
     throw new Error('Recovery manifest schemaVersion must be 1');
   }
@@ -350,8 +402,8 @@ const verify = async (baseUrl: string, token: string, manifestPath: string) => {
 
 const command = requireArgument(2, 'command');
 const baseUrl = parseBaseUrl(requireArgument(3, 'base URL'));
-const token = requireArgument(4, 'administrator token');
-const manifestPath = requireArgument(5, 'manifest path');
+const token = requireEnvironment('WEBPERF_RECOVERY_ADMIN_TOKEN');
+const manifestPath = requireArgument(4, 'manifest path');
 
 switch (command) {
   case 'seed':

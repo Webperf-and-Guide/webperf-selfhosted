@@ -83,9 +83,9 @@ jobs:
             if ! curl -q --fail --silent --show-error --location \
               --retry 15 \
               --retry-all-errors \
-              --retry-max-time 45 \
+              --retry-max-time 300 \
               --connect-timeout 10 \
-              --max-time 20 \
+              --max-time 120 \
               -o "$destination" "$url"; then
               echo "Could not download public release asset: $url" >&2
               return 1
@@ -188,12 +188,12 @@ jobs:
           bundle_name="webperf-selfhosted-v${VERSION}"
           release_base="https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/download/v${VERSION}"
           curl -q --fail --silent --show-error --location \
-            --retry 15 --retry-all-errors --retry-max-time 45 \
-            --connect-timeout 10 --max-time 20 \
+            --retry 15 --retry-all-errors --retry-max-time 300 \
+            --connect-timeout 10 --max-time 120 \
             -o "${release_root}/SHA256SUMS" "${release_base}/SHA256SUMS"
           curl -q --fail --silent --show-error --location \
-            --retry 15 --retry-all-errors --retry-max-time 45 \
-            --connect-timeout 10 --max-time 20 \
+            --retry 15 --retry-all-errors --retry-max-time 300 \
+            --connect-timeout 10 --max-time 120 \
             -o "${release_root}/${bundle_name}.tar.gz" "${release_base}/${bundle_name}.tar.gz"
           (
             cd "$release_root"
@@ -201,11 +201,17 @@ jobs:
             tar -xzf "${bundle_name}.tar.gz"
           )
           bundle_dir="${release_root}/${bundle_name}"
+          test -f "${bundle_dir}/compose.yml"
+          test -f "${bundle_dir}/.env.example"
+          test -f "${bundle_dir}/compose.apparmor.yml"
+          test -f "${bundle_dir}/browser-audit.apparmor"
+          test -f "${bundle_dir}/runtime-metadata.json"
           (cd "$bundle_dir" && sha256sum --check SHA256SUMS)
           jq -e --arg version "$VERSION" --arg source_sha "$source_sha" '
             .version == $version
             and .tag == ("v" + $version)
             and .sourceCommit == $source_sha
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z-]+)?@sha256:[0-9a-f]{64}$")] | all)
           ' "${bundle_dir}/runtime-metadata.json" >/dev/null
           echo "directory=${bundle_dir}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0

@@ -64,6 +64,88 @@ const rewriteLegacyJob = (value: unknown) => {
   };
 };
 
+const finishLegacyMultiRegionJob = (
+  value: unknown,
+  migrationTimestamp: string
+) => {
+  const rewritten = rewriteLegacyJob(value);
+  const selectedRegions = isRecord(value)
+    ? toStringArray(value.selectedRegions)
+    : null;
+  if (
+    !isRecord(value)
+    || !isRecord(rewritten)
+    || !selectedRegions
+    || selectedRegions.length <= 1
+    || !Array.isArray(rewritten.targets)
+  ) {
+    return {
+      value: rewritten,
+      cancelledExecutionResourceId: null,
+      terminalStatus: null
+    };
+  }
+
+  let changed = false;
+  const targets = rewritten.targets.map((target) => {
+    if (
+      !isRecord(target)
+      || target.status === 'succeeded'
+      || target.status === 'failed'
+    ) {
+      return target;
+    }
+    changed = true;
+    return {
+      ...target,
+      status: 'failed',
+      latencyMs: null,
+      statusCode: null,
+      success: false,
+      probeImpl: null,
+      measurement: null,
+      slotId: null,
+      errorCode: 'single_region_upgrade_cancelled',
+      errorClass: 'terminal',
+      errorMessage:
+        'Unfinished multi-region execution was cancelled during the single-region upgrade',
+      finishedAt: migrationTimestamp,
+      updatedAt: migrationTimestamp
+    };
+  });
+  const terminalStatuses = targets
+    .filter(isRecord)
+    .map((target) => target.status);
+  const succeeded = terminalStatuses.filter((status) => status === 'succeeded').length;
+  const failed = terminalStatuses.filter((status) => status === 'failed').length;
+  const terminalStatus = succeeded > 0 && failed > 0
+    ? 'partial'
+    : succeeded > 0
+      ? 'succeeded'
+      : 'failed';
+
+  return {
+    value: changed
+      ? {
+          ...rewritten,
+          status: terminalStatus,
+          completedAt: migrationTimestamp,
+          targets,
+          evaluation: null,
+          summary: {
+            total: targets.length,
+            succeeded,
+            failed,
+            inflight: 0
+          }
+        }
+      : rewritten,
+    cancelledExecutionResourceId:
+      typeof rewritten.id === 'string' ? rewritten.id : null,
+    terminalStatus: changed ? terminalStatus : null
+  };
+};
+
 const rewriteLegacyCheck = (
   value: unknown,
   runtimeRegionId: string,
@@ -136,12 +218,12 @@ const visitPayloadRowsInBatches = ({
 
 const rewriteJobRowsInBatches = ({
   database,
-  rewrite,
+  migrationTimestamp,
   parse,
   stringify
 }: {
   database: Parameters<SqliteMigration['up']>[0];
-  rewrite: (value: unknown) => unknown;
+  migrationTimestamp: string;
   parse: (payload: string) => unknown;
   stringify: (value: unknown) => string;
 }) => {
@@ -162,6 +244,20 @@ const rewriteJobRowsInBatches = ({
   const update = database.query<never, [string, number]>(
     'UPDATE jobs SET payload_json = ? WHERE rowid = ?'
   );
+  const updateTerminalIndex = database.query<never, [string, string, number]>(
+    'UPDATE jobs SET status = ?, updated_at = ? WHERE rowid = ?'
+  );
+  const cancelActiveExecution = database.query<never, [string, string, string]>(`
+    UPDATE execution_jobs
+    SET status = 'cancelled',
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ?,
+        completed_at = ?
+    WHERE kind = 'network_probe'
+      AND resource_id = ?
+      AND status NOT IN ('succeeded', 'failed', 'cancelled')
+  `);
 
   try {
     visitPayloadRowsInBatches({
@@ -169,15 +265,34 @@ const rewriteJobRowsInBatches = ({
       readNextBatch,
       parse,
       visit(row, value) {
-        const rewritten = rewrite(value);
-        if (rewritten !== value) {
-          update.run(stringify(rewritten), row.rowid);
+        const rewritten = finishLegacyMultiRegionJob(
+          value,
+          migrationTimestamp
+        );
+        if (rewritten.value !== value) {
+          update.run(stringify(rewritten.value), row.rowid);
+        }
+        if (rewritten.terminalStatus) {
+          updateTerminalIndex.run(
+            rewritten.terminalStatus,
+            migrationTimestamp,
+            row.rowid
+          );
+        }
+        if (rewritten.cancelledExecutionResourceId) {
+          cancelActiveExecution.run(
+            migrationTimestamp,
+            migrationTimestamp,
+            rewritten.cancelledExecutionResourceId
+          );
         }
         return true;
       }
     });
   } finally {
     update.finalize();
+    updateTerminalIndex.finalize();
+    cancelActiveExecution.finalize();
   }
 };
 
@@ -343,9 +458,10 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
       );
     }
 
+    const migrationTimestamp = new Date().toISOString();
     rewriteJobRowsInBatches({
       database,
-      rewrite: rewriteLegacyJob,
+      migrationTimestamp,
       parse,
       stringify
     });
@@ -353,7 +469,7 @@ export const singleRegionStoredDataMigration: SqliteMigration = {
       rewriteCheckRowsInBatches({
         database,
         runtimeRegionId,
-        migrationTimestamp: new Date().toISOString(),
+        migrationTimestamp,
         parse,
         stringify
       });

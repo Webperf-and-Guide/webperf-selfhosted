@@ -778,6 +778,54 @@ describe('durable execution repository', () => {
     repository.close();
   });
 
+  test('keeps network resources aligned with cancelled queue outcomes', () => {
+    const repository = createRepository(createTempDatabasePath());
+    const queuedAt = new Date('2026-07-22T00:00:00.000Z');
+    const job = createLatencyJob('job_cancelled_network');
+
+    repository.createExecutionResource({
+      executionJob: {
+        id: 'exec_cancelled_network',
+        kind: 'network_probe',
+        resourceId: job.id,
+        maxAttempts: 3,
+        payload: {
+          version: 'v1',
+          jobIds: [job.id]
+        }
+      },
+      result: {
+        kind: 'network_probe',
+        jobs: [job],
+        run: null
+      }
+    }, queuedAt);
+
+    expect(repository.cancelExecutionJob(
+      'exec_cancelled_network',
+      new Date('2026-07-22T00:00:03.000Z')
+    )?.status).toBe('cancelled');
+    expect(repository.getJob(job.id)).toMatchObject({
+      status: 'failed',
+      completedAt: '2026-07-22T00:00:03.000Z',
+      summary: {
+        total: 1,
+        succeeded: 0,
+        failed: 1,
+        inflight: 0
+      },
+      targets: [{
+        status: 'failed',
+        success: false,
+        errorCode: 'execution_cancelled',
+        errorClass: 'terminal',
+        finishedAt: '2026-07-22T00:00:03.000Z'
+      }]
+    });
+
+    repository.close();
+  });
+
   test('schedules retryable failures and rejects a stale owner', () => {
     const databasePath = createTempDatabasePath();
     const repository = createRepository(databasePath);

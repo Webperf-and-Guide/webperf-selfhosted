@@ -68,6 +68,7 @@ import {
   regionalExecutionRecordSchema,
   type RegionalExecutionRecord
 } from './regional-runtime-record';
+import { deriveJobStatus, summarizeTargets } from '@webperf/report-core';
 
 // Must stay in sync with the immutable trigger threshold in migration
 // 20260722_003_browser_audit_artifacts.
@@ -1062,6 +1063,73 @@ export const createSqliteJobRepository = ({
     executionJob: ExecutionJob,
     nowIso: string
   ) => {
+    if (executionJob.kind === 'network_probe') {
+      const payload = networkProbeExecutionPayloadSchema.safeParse(
+        executionJob.payload
+      );
+      if (!payload.success) {
+        console.warn(JSON.stringify({
+          service: 'webperf-api',
+          warning: 'network_execution_terminal_sync_payload_invalid',
+          executionJobId: executionJob.id
+        }));
+        return;
+      }
+
+      const cancelled = executionJob.status === 'cancelled';
+      const errorCode = cancelled
+        ? 'execution_cancelled'
+        : executionJob.error?.code ?? 'execution_failed';
+      const errorMessage = cancelled
+        ? 'Network execution was cancelled before producing a result'
+        : executionJob.error?.message
+          ?? 'Network execution stopped before producing a result';
+
+      for (const jobId of payload.data.jobIds) {
+        const row = getStatement.get(jobId);
+        const job = row ? parseJob(row) : null;
+        if (!job) {
+          continue;
+        }
+
+        let changed = false;
+        const targets = job.targets.map((target) => {
+          if (target.status === 'succeeded' || target.status === 'failed') {
+            return target;
+          }
+          changed = true;
+          return {
+            ...target,
+            status: 'failed' as const,
+            latencyMs: null,
+            statusCode: null,
+            success: false,
+            probeImpl: null,
+            measurement: null,
+            slotId: null,
+            errorCode,
+            errorClass: 'terminal' as const,
+            errorMessage,
+            finishedAt: nowIso,
+            updatedAt: nowIso
+          };
+        });
+        if (!changed) {
+          continue;
+        }
+
+        persistJob({
+          ...job,
+          status: deriveJobStatus(targets),
+          completedAt: nowIso,
+          targets,
+          evaluation: null,
+          summary: summarizeTargets(targets)
+        });
+      }
+      return;
+    }
+
     if (executionJob.kind !== 'browser_audit') {
       return;
     }

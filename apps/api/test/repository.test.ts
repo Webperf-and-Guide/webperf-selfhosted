@@ -413,6 +413,22 @@ describe('sqlite control repository', () => {
       timestamp,
       timestamp
     );
+    insertExecution.run(
+      'exec_standalone_multi_pending',
+      'network_probe',
+      'job_legacy_pending_multi',
+      'queued',
+      null,
+      null,
+      0,
+      timestamp,
+      storageCrypto.stringify({
+        version: 'v1',
+        jobIds: ['job_legacy_pending_multi']
+      }),
+      timestamp,
+      timestamp
+    );
     insertExecution.finalize();
 
     const currentJob = createJob({
@@ -454,6 +470,47 @@ describe('sqlite control repository', () => {
         selectedRegions: ['tokyo', 'singapore']
       })
     );
+    const pendingLegacyTargets = currentJob.targets.map((target) => ({
+      ...target,
+      status: 'queued',
+      latencyMs: null,
+      statusCode: null,
+      success: null,
+      probeImpl: null,
+      measurement: null,
+      errorCode: null,
+      errorClass: null,
+      errorMessage: null,
+      startedAt: null,
+      finishedAt: null,
+      updatedAt: timestamp
+    }));
+    const pendingLegacyJob = {
+      ...legacyJob,
+      id: 'job_legacy_pending_multi',
+      status: 'queued',
+      startedAt: null,
+      completedAt: null,
+      targets: pendingLegacyTargets,
+      summary: {
+        total: pendingLegacyTargets.length,
+        succeeded: 0,
+        failed: 0,
+        inflight: pendingLegacyTargets.length
+      },
+      selectedRegions: ['tokyo', 'singapore']
+    };
+    database.query(`
+      INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      pendingLegacyJob.id,
+      pendingLegacyJob.url,
+      pendingLegacyJob.status,
+      pendingLegacyJob.requestedAt,
+      timestamp,
+      storageCrypto.stringify(pendingLegacyJob)
+    );
     const insertLegacyJob = database.query(`
       INSERT INTO jobs (id, url, status, requested_at, updated_at, payload_json)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -488,6 +545,29 @@ describe('sqlite control repository', () => {
       targets: [
         { region: 'tokyo' },
         { region: 'singapore' }
+      ]
+    });
+    expect(repository.getJob(pendingLegacyJob.id)).toMatchObject({
+      region: 'historical-multi-region',
+      historicalRegions: ['tokyo', 'singapore'],
+      status: 'failed',
+      summary: {
+        total: 2,
+        succeeded: 0,
+        failed: 2,
+        inflight: 0
+      },
+      targets: [
+        {
+          region: 'tokyo',
+          status: 'failed',
+          errorCode: 'single_region_upgrade_cancelled'
+        },
+        {
+          region: 'singapore',
+          status: 'failed',
+          errorCode: 'single_region_upgrade_cancelled'
+        }
       ]
     });
     for (const index of [0, 99, 100, 199, 204]) {
@@ -568,7 +648,8 @@ describe('sqlite control repository', () => {
           WHERE id IN (
             'exec_global_probe_pending',
             'exec_global_webhook_pending',
-            'exec_tokyo_probe_pending'
+            'exec_tokyo_probe_pending',
+            'exec_standalone_multi_pending'
           )
           ORDER BY id
         `)
@@ -576,6 +657,7 @@ describe('sqlite control repository', () => {
     ).toEqual([
       { id: 'exec_global_probe_pending', status: 'cancelled' },
       { id: 'exec_global_webhook_pending', status: 'cancelled' },
+      { id: 'exec_standalone_multi_pending', status: 'cancelled' },
       { id: 'exec_tokyo_probe_pending', status: 'queued' }
     ]);
     verifyDatabase.close();

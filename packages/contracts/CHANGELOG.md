@@ -1,5 +1,29 @@
 # @webperf/contracts
 
+## 0.4.0 — 2026-07-30
+
+### Minor changes
+
+- [79c7400](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/79c740035b3cfa83fd849bef14b23b919facf3e8) Publish the stateless `webperf-probe` capability contract used by both
+  self-hosted WebPerf and WebPerf & Guide Managed. The Rust probe now
+  reports its configured region, immutable runtime provenance, transport limits,
+  and admission limit, echoes correlation identifiers in measurement responses,
+  rejects mismatched regions, and fails fast with `429` when its configurable
+  in-flight guard is exhausted. Its Rust wire format rejects explicit null
+  request configurations and its documented four-hop redirect allowance now
+  follows all four redirects before rejecting a fifth. Request buffering is
+  admitted through a separate fixed memory budget with a bounded body-read
+  deadline, and lifecycle timeouts retain the last validated redirect URL and
+  redirect count for managed-service diagnostics. The self-host executor verifies
+  echoed job and target correlation identifiers when present while continuing to
+  accept legacy probe responses that omit them. — Thanks @imjlk!
+- [79c7400](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/79c740035b3cfa83fd849bef14b23b919facf3e8) Remove the superseded Regional Runtime API, contracts, execution mode, and
+  deployment profile. WebPerf Self-hosted remains a complete single-location
+  application, while WebPerf & Guide Managed orchestrates the
+  versioned stateless `webperf-probe` image through its private control plane.
+  Released SQLite migrations and retention cleanup remain compatible with
+  databases created by WebPerf 0.3.0. — Thanks @imjlk!
+
 ## 0.3.0 — 2026-07-30
 
 ### Minor changes

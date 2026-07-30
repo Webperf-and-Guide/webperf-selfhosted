@@ -3,8 +3,8 @@
 Rust network probe runtime for self-hosted WebPerf.
 
 The same stateless image is the public measurement boundary consumed by
-WebPerf & Guide's managed service at `webperf.and.guide`. The managed service
-owns provider deployment, regional fan-out, retries, persistence, aggregation,
+WebPerf & Guide Managed at `webperf.and.guide`. The managed edition owns
+provider deployment, regional fan-out, retries, persistence, aggregation,
 tenancy, and billing; the probe only authenticates and performs one bounded
 measurement.
 

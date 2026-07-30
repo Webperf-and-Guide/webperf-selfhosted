@@ -563,7 +563,7 @@
       <p class="card-copy">
         This standalone deployment measures from one fixed location. New checks, manual jobs,
         and browser audits all measure from <strong>{regionCatalog.regionLabel}</strong>
-        (<code>{regionCatalog.regionId}</code>). The WebPerf & Guide managed service
+        (<code>{regionCatalog.regionId}</code>). WebPerf & Guide Managed
         orchestrates stateless probe containers separately; that fleet logic is not
         part of this self-hosted application.
       </p>

@@ -5,7 +5,7 @@ measurement region**. The runtime location is an operator-chosen identity,
 not a city claim: every Fast Check, scheduled Check, and Browser Audit runs
 from this single location and records it on its results as provenance.
 
-The WebPerf & Guide managed service coordinates several regional probes
+WebPerf & Guide Managed coordinates several regional probes
 under one control plane; that multi-region orchestration lives outside this
 repository. A self-host installation only knows its own runtime location.
 

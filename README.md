@@ -122,7 +122,7 @@ Read [Security](docs/users/security.md),
 [self-host authentication](docs/security/auth-and-secrets.md) before external
 access.
 
-## WebPerf Self-hosted vs WebPerf & Guide
+## WebPerf Self-hosted vs WebPerf & Guide Managed
 
 | | `webperf-selfhosted` | `webperf.and.guide` |
 | --- | --- | --- |
@@ -136,7 +136,7 @@ This repository is the public source of truth for self-host contracts, schemas,
 domain models, report logic, console/API behavior, deployment examples, and
 runtime images. It intentionally excludes billing, multi-tenancy, managed
 fleet orchestration, private provider credentials, and AI analyst product
-features. The WebPerf & Guide managed service consumes the versioned
+features. WebPerf & Guide Managed consumes the versioned
 `webperf-probe` image and orchestrates its own private regional fleet without
 turning the self-hosted application into a managed worker. See
 [Managed service vs self-hosted](docs/users/managed-service-vs-self-hosted.md).

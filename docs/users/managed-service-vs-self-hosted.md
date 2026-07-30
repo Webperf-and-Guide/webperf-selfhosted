@@ -1,9 +1,10 @@
-# WebPerf Self-hosted and WebPerf & Guide
+# WebPerf Self-hosted and WebPerf & Guide Managed
 
-`WebPerf` is the product brand. This repository and the managed service have a
+`WebPerf & Guide` is the product brand. This repository and the managed
+edition have a
 deliberate ownership boundary.
 
-| Capability | WebPerf Self-hosted | WebPerf & Guide managed service |
+| Capability | WebPerf Self-hosted | WebPerf & Guide Managed |
 | --- | --- | --- |
 | Installation and upgrades | Operator-owned Compose release | Managed |
 | Organization model | One trusted organization | Hosted identities, teams, and workspaces |
@@ -39,7 +40,7 @@ automation, tenancy, or billing, it belongs in the managed product.
 
 ## Managed probe consumption
 
-The WebPerf & Guide managed service runs the public, stateless
+WebPerf & Guide Managed runs the public, stateless
 `webperf-probe` image in its regional provider fleet. Global fan-out,
 deploy/undeploy lifecycle, queueing, aggregation, FCU metering, and plan
 enforcement are private managed-service concerns. The full self-hosted

@@ -3,7 +3,7 @@
 This repository is the self-hosted/open-core WebPerf product.
 
 It should remain useful on its own for release verification without requiring
-the WebPerf & Guide managed service at `webperf.and.guide`.
+WebPerf & Guide Managed at `webperf.and.guide`.
 
 ## Included
 

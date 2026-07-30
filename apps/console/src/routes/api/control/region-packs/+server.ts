@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 // Phase 1 of issue #14: Region Packs were removed. The console proxy returns
-// 410 Gone so stale UI/clients fail fast. The WebPerf & Guide managed service may keep
+// 410 Gone so stale UI/clients fail fast. WebPerf & Guide Managed may keep
 // its own managed-region catalog outside this repository.
 const GONE_BODY = {
   error:

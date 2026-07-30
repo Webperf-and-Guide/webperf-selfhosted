@@ -1,11 +1,11 @@
-# WebPerf & Guide Managed Service vs Self-hosted
+# WebPerf & Guide Managed vs WebPerf Self-hosted
 
-`WebPerf` is the product brand.
+`WebPerf & Guide` is the product brand.
 
 The product boundary is:
 
 - `webperf-selfhosted`: self-hosted OSS/open-core product
-- `webperf.and.guide`: WebPerf & Guide managed service
+- `webperf.and.guide`: WebPerf & Guide Managed
 
 ## Self-Hosted Repo
 
@@ -45,9 +45,9 @@ It should not include:
 
 When those guides are useful, publish them on `webperf.and.guide/posts` and keep the OSS docs linked but vendor-neutral.
 
-## Managed Service Repo
+## Managed Edition Repository
 
-`webperf.and.guide` is the managed product and business layer.
+`webperf.and.guide` is the WebPerf & Guide Managed product and business layer.
 
 It should include:
 

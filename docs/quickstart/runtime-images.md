@@ -40,7 +40,7 @@ is pinned by OCI digest. It also contains:
 
 Official installation material never uses `:main` or `:latest`. A version tag
 is convenient for discovery, while the release Compose file and the WebPerf &
-Guide managed service use immutable image digests recorded in the same release.
+Guide Managed use immutable image digests recorded in the same release.
 Docker resolves that digest to the host's matching native platform manifest.
 For compatibility, `images[].sbom` names the amd64 SBOM; releases that include
 both platforms also expose `images[].sboms`, which maps each platform manifest

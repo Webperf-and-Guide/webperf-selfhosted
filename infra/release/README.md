@@ -22,7 +22,7 @@ Each release contains:
 - `runtime-metadata.json` following `runtime-metadata.schema.json`;
 - two SPDX JSON SBOMs per image (one per Linux platform) and SHA-256 checksums.
 
-The WebPerf & Guide managed service should consume the `webperf-probe` entry
+WebPerf & Guide Managed should consume the `webperf-probe` entry
 from `runtime-metadata.json` in a specific GitHub Release. It must not infer
 probe identity from `main`, `latest`, or another mutable tag. Provider
 credentials, lifecycle policy, regional fleet topology, and aggregation remain

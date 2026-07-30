@@ -7,7 +7,7 @@ import { z } from 'zod';
  * operator chooses its identity (e.g. `kr-seoul-office`,
  * `aws-ap-northeast-2`, `home-lab`). The previous 41-city catalog and
  * `regionCodeSchema` enum were removed in Phase 1 of issue #14 because that
- * SaaS fan-out model belongs to the WebPerf & Guide managed service, not to one
+ * SaaS fan-out model belongs to WebPerf & Guide Managed, not to one
  * standalone regional installation.
  *
  * Constraints:

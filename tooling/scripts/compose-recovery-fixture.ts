@@ -10,7 +10,7 @@ type RecoveryManifest = {
   };
   browserAudit: {
     id: string;
-    region: string;
+    region: string | null;
     artifactUrl: string;
     artifactSha256: string;
   };
@@ -160,6 +160,16 @@ export const resolveRecoveryJobRegions = (
     return [job.region];
   }
   return requireStringArray(job.selectedRegions, `${label}.selectedRegions`);
+};
+
+export const resolveRecoveryBrowserAuditRegion = (
+  audit: Record<string, unknown>,
+  label = 'browserAudit'
+) => {
+  if (audit.region === null || typeof audit.region === 'string') {
+    return audit.region;
+  }
+  throw new Error(`${label}.region must be a string or null`);
 };
 
 const waitForResource = async ({
@@ -344,7 +354,7 @@ const seed = async (
     },
     browserAudit: {
       id: auditId,
-      region: requireString(audit.region, 'browserAudit.region'),
+      region: resolveRecoveryBrowserAuditRegion(audit),
       artifactUrl: artifact.artifactUrl,
       artifactSha256: artifact.artifactSha256
     }
@@ -387,7 +397,7 @@ const parseManifest = async (path: string): Promise<RecoveryManifest> => {
     },
     browserAudit: {
       id: requireString(browserAudit.id, 'manifest.browserAudit.id'),
-      region: requireString(browserAudit.region, 'manifest.browserAudit.region'),
+      region: resolveRecoveryBrowserAuditRegion(browserAudit, 'manifest.browserAudit'),
       artifactUrl: requireString(browserAudit.artifactUrl, 'manifest.browserAudit.artifactUrl'),
       artifactSha256: requireString(
         browserAudit.artifactSha256,
@@ -420,7 +430,11 @@ const verify = async (baseUrl: string, token: string, manifestPath: string) => {
     ),
     'restored Browser Audit'
   );
-  if (audit.status !== 'succeeded' || audit.region !== manifest.browserAudit.region) {
+  if (
+    audit.status !== 'succeeded'
+    || resolveRecoveryBrowserAuditRegion(audit, 'restored Browser Audit')
+      !== manifest.browserAudit.region
+  ) {
     throw new Error('Restored Browser Audit does not match the recovery manifest');
   }
   const artifact = parseArtifact(audit);

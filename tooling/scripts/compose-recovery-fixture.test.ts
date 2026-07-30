@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveRecoveryJobRegions } from './compose-recovery-fixture';
+import {
+  resolveRecoveryBrowserAuditRegion,
+  resolveRecoveryJobRegions
+} from './compose-recovery-fixture';
 
 describe('Compose recovery fixture compatibility', () => {
   test('reads current single-region and published beta multi-region jobs', () => {
@@ -19,6 +22,14 @@ describe('Compose recovery fixture compatibility', () => {
     );
     expect(() => resolveRecoveryJobRegions({ selectedRegions: ['tokyo', ''] })).toThrow(
       'job.selectedRegions must be a non-empty string array'
+    );
+  });
+
+  test('preserves current and published-beta Browser Audit regions', () => {
+    expect(resolveRecoveryBrowserAuditRegion({ region: 'tokyo' })).toBe('tokyo');
+    expect(resolveRecoveryBrowserAuditRegion({ region: null })).toBeNull();
+    expect(() => resolveRecoveryBrowserAuditRegion({})).toThrow(
+      'browserAudit.region must be a string or null'
     );
   });
 });

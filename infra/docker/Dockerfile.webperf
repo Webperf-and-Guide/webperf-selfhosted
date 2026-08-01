@@ -32,7 +32,7 @@ COPY . .
 RUN bun run --cwd apps/console prepare && bun run --cwd apps/console build
 
 # --- Stage 2: runtime ---
-FROM oven/bun:1.3.13
+FROM oven/bun:1.3.13-slim
 
 WORKDIR /app
 
@@ -66,7 +66,8 @@ RUN test -s /tmp/webperf-console-build-ready \
 
 # Copy source and the console build output from the build stage.
 COPY --chown=bun:bun --from=build /app/apps/api ./apps/api
-COPY --chown=bun:bun --from=build /app/apps/console ./apps/console
+COPY --chown=bun:bun --from=build /app/apps/console/build ./apps/console/build
+COPY --chown=bun:bun --from=build /app/apps/console/package.json ./apps/console/package.json
 COPY --chown=bun:bun --from=build /app/apps/scheduler ./apps/scheduler
 COPY --chown=bun:bun --from=build /app/apps/executor ./apps/executor
 COPY --chown=bun:bun --from=build /app/packages ./packages

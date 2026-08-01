@@ -23,6 +23,7 @@ import {
   exportListResponseSchema,
   exportResourceSchema,
   listQuerySchema,
+  derivedResourceListQuerySchema,
   pageInfoSchema,
   propertySchema,
   propertyListResponseSchema,
@@ -49,6 +50,10 @@ const checkIdSchema = z.object({
 
 const listInputSchema = z.object({
   query: listQuerySchema.optional()
+});
+
+const derivedResourceListInputSchema = z.object({
+  query: derivedResourceListQuerySchema.optional()
 });
 
 const runIdSchema = z.object({
@@ -403,7 +408,7 @@ export const publicContract = populateContractRouterPaths(
     },
     comparisons: {
       list: oc
-        .input(listInputSchema)
+        .input(derivedResourceListInputSchema)
         .output(comparisonListResponseSchema)
         .route({
           method: 'GET',
@@ -434,7 +439,7 @@ export const publicContract = populateContractRouterPaths(
     },
     exports: {
       list: oc
-        .input(listInputSchema)
+        .input(derivedResourceListInputSchema)
         .output(exportListResponseSchema)
         .route({
           method: 'GET',
@@ -465,7 +470,7 @@ export const publicContract = populateContractRouterPaths(
     },
     analyses: {
       list: oc
-        .input(listInputSchema)
+        .input(derivedResourceListInputSchema)
         .output(analysisListResponseSchema)
         .route({
           method: 'GET',

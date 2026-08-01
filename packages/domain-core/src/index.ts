@@ -1,6 +1,7 @@
 import type {
   BrowserAuditWorkerRequest,
   CustomRequestConfig,
+  DerivedResourceListQuery,
   ListQuery,
   PageInfo,
   RequestHeader,
@@ -8,7 +9,7 @@ import type {
   RuntimeRegionId,
   SignedProbeMeasurementRequest
 } from '@webperf/contracts';
-import { listQuerySchema, runtimeRegionIdSchema } from '@webperf/contracts';
+import { listQuerySchema, derivedResourceListQuerySchema, runtimeRegionIdSchema } from '@webperf/contracts';
 
 /**
  * Resolve the runtime location for one standalone deployment.
@@ -54,6 +55,35 @@ export const parseListQueryFromSearchParams = (searchParams: URLSearchParams): L
     filter: searchParams.get('filter')
   });
 
+export const parseDerivedResourceListQuery = (input: {
+  pageSize?: number | string | null | undefined;
+  pageToken?: string | null | undefined;
+  filter?: string | null | undefined;
+  createdAfter?: string | null | undefined;
+  createdBefore?: string | null | undefined;
+  checkId?: string | null | undefined;
+}): DerivedResourceListQuery =>
+  derivedResourceListQuerySchema.parse({
+    pageSize: input.pageSize ?? undefined,
+    pageToken: input.pageToken ?? undefined,
+    filter: input.filter ?? undefined,
+    createdAfter: input.createdAfter ?? undefined,
+    createdBefore: input.createdBefore ?? undefined,
+    checkId: input.checkId ?? undefined
+  });
+
+export const parseDerivedResourceListQueryFromSearchParams = (
+  searchParams: URLSearchParams
+): DerivedResourceListQuery =>
+  parseDerivedResourceListQuery({
+    pageSize: searchParams.get('pageSize'),
+    pageToken: searchParams.get('pageToken'),
+    filter: searchParams.get('filter'),
+    createdAfter: searchParams.get('createdAfter'),
+    createdBefore: searchParams.get('createdBefore'),
+    checkId: searchParams.get('checkId')
+  });
+
 export const applyListQuery = <T>(
   items: T[],
   query: ListQuery | undefined,
@@ -92,6 +122,48 @@ export const applyListQuery = <T>(
       filter: normalizedFilter.length > 0 ? normalizedFilter : null
     }
   };
+};
+
+/**
+ * Extended list-query handler for derived resources (comparisons, exports,
+ * analyses) that carry a `createdAt` timestamp and an optional `checkId`.
+ *
+ * Applies text filter (via getSearchableText), date-range filter
+ * (createdAfter/createdBefore), and exact checkId match before paginating.
+ */
+export const applyDerivedResourceListQuery = <T extends { createdAt: string }>(
+  items: T[],
+  query: DerivedResourceListQuery | undefined,
+  getSearchableText: (item: T) => Iterable<unknown>,
+  getCheckId: (item: T) => string | null | undefined
+): {
+  items: T[];
+  pageInfo: PageInfo;
+} => {
+  const parsedQuery = query ?? derivedResourceListQuerySchema.parse({});
+  let filteredItems = items;
+
+  // Date-range filter
+  if (parsedQuery.createdAfter || parsedQuery.createdBefore) {
+    const after = parsedQuery.createdAfter ? new Date(parsedQuery.createdAfter).getTime() : -Infinity;
+    const before = parsedQuery.createdBefore ? new Date(parsedQuery.createdBefore).getTime() : Infinity;
+    filteredItems = filteredItems.filter((item) => {
+      const created = new Date(item.createdAt).getTime();
+      return created >= after && created <= before;
+    });
+  }
+
+  // Exact checkId filter
+  if (parsedQuery.checkId) {
+    filteredItems = filteredItems.filter((item) => getCheckId(item) === parsedQuery.checkId);
+  }
+
+  // Delegate text filter + pagination to the base applyListQuery
+  return applyListQuery(filteredItems, {
+    pageSize: parsedQuery.pageSize,
+    pageToken: parsedQuery.pageToken,
+    filter: parsedQuery.filter
+  }, getSearchableText);
 };
 
 const allowedPorts = new Set(['80', '443']);

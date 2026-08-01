@@ -265,7 +265,7 @@ exist on the host only while their loopback `debug` proxies are enabled.
 
 1. merge and formally release the stateless-probe and standalone-topology follow-up, then confirm the protected release publishes the three digest-pinned runtime images and upgrade-tested bundle
 2. keep the local artifact adapter and engine-neutral protocol stable before considering an S3-compatible backend
-3. decide whether stabilized comparison/export resources need richer server-side pagination and filtering
+3. ~~decide whether stabilized comparison/export resources need richer server-side pagination and filtering~~ — done; `derivedResourceListQuerySchema` adds `createdAfter`/`createdBefore` date-range filters and exact `checkId` matching for comparisons, exports, and analyses, backed by `applyDerivedResourceListQuery` in `@webperf/domain-core`
 4. ~~evaluate production dependency pruning and image-size budgets for the unified `webperf` image without weakening role parity~~ — done; the runtime base switched to `oven/bun:1.3.13-slim` and `.svelte-kit` build intermediates are excluded, reducing the image from 426 MB to 381 MB without removing production dependencies or runtime capabilities
 5. keep the full SQLite-backed self-host deployment at one replica unless a future public shared-state protocol makes horizontal scaling explicitly safe
 

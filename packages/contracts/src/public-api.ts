@@ -412,6 +412,19 @@ export const listQuerySchema = z.object({
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;
 
+/**
+ * Extended list query for resources that carry `createdAt` timestamps and
+ * optional `checkId` references (comparisons, exports, analyses).
+ * Adds date-range filtering (`createdAfter`/`createdBefore`) and exact
+ * `checkId` matching on top of the shared `ListQuery` text/pagination model.
+ */
+export const derivedResourceListQuerySchema = listQuerySchema.extend({
+  createdAfter: z.string().datetime().optional(),
+  createdBefore: z.string().datetime().optional(),
+  checkId: z.string().min(1).max(120).optional()
+});
+export type DerivedResourceListQuery = z.infer<typeof derivedResourceListQuerySchema>;
+
 export const pageInfoSchema = z.object({
   pageSize: z.number().int().min(1),
   totalCount: z.number().int().nonnegative(),

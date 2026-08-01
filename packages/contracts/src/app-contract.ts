@@ -22,6 +22,7 @@ import {
   createPropertySchema,
   createRouteSetSchema,
   listQuerySchema,
+  derivedResourceListQuerySchema,
   propertyListResponseSchema,
   propertySchema,
   regionsResponseSchema,
@@ -51,6 +52,10 @@ const compareQuerySchema = z.object({
 
 const listInputSchema = z.object({
   query: listQuerySchema.optional()
+});
+
+const derivedResourceListInputSchema = z.object({
+  query: derivedResourceListQuerySchema.optional()
 });
 
 export const appContract = populateContractRouterPaths(
@@ -133,15 +138,15 @@ export const appContract = populateContractRouterPaths(
         })
     },
     exports: {
-      list: oc.input(listInputSchema).output(exportListResponseSchema).route({ method: 'GET', path: '/v1/exports', inputStructure: 'detailed' }),
+      list: oc.input(derivedResourceListInputSchema).output(exportListResponseSchema).route({ method: 'GET', path: '/v1/exports', inputStructure: 'detailed' }),
       create: oc.input(createExportInputSchema).output(exportResourceSchema).route({ method: 'POST', path: '/v1/exports' }),
       get: oc.input(z.object({ params: z.object({ exportId: z.string().min(1) }) })).output(exportResourceSchema).route({ method: 'GET', path: '/v1/exports/{exportId}', inputStructure: 'detailed' })
     },
     comparisons: {
-      list: oc.input(listInputSchema).output(comparisonListResponseSchema).route({ method: 'GET', path: '/v1/comparisons', inputStructure: 'detailed' })
+      list: oc.input(derivedResourceListInputSchema).output(comparisonListResponseSchema).route({ method: 'GET', path: '/v1/comparisons', inputStructure: 'detailed' })
     },
     analyses: {
-      list: oc.input(listInputSchema).output(analysisListResponseSchema).route({ method: 'GET', path: '/v1/analyses', inputStructure: 'detailed' })
+      list: oc.input(derivedResourceListInputSchema).output(analysisListResponseSchema).route({ method: 'GET', path: '/v1/analyses', inputStructure: 'detailed' })
     },
     browserAudits: {
       list: oc.input(listInputSchema).output(browserAuditListResponseSchema).route({ method: 'GET', path: '/v1/browser-audits', inputStructure: 'detailed' }),

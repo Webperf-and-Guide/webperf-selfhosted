@@ -23,6 +23,7 @@ import {
   exportListResponseSchema,
   exportResourceSchema,
   listQuerySchema,
+  derivedResourceListQuerySchema,
   pageInfoSchema,
   propertySchema,
   propertyListResponseSchema,
@@ -49,6 +50,10 @@ const checkIdSchema = z.object({
 
 const listInputSchema = z.object({
   query: listQuerySchema.optional()
+});
+
+const derivedResourceListInputSchema = z.object({
+  query: derivedResourceListQuerySchema.optional()
 });
 
 const runIdSchema = z.object({

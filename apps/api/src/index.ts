@@ -420,6 +420,16 @@ const buildCheckProfileRunListResponse = (profileId: string, query?: ListQuery):
     ]).pageInfo
   });
 
+const safeParseDerivedQuery = (searchParams: URLSearchParams): DerivedResourceListQuery => {
+  try {
+    return parseDerivedResourceListQueryFromSearchParams(searchParams);
+  } catch (error) {
+    throw new ORPCError('BAD_REQUEST', {
+      message: `Invalid derived resource list query: ${error instanceof Error ? error.message : 'validation failed'}`
+    });
+  }
+};
+
 const buildComparisonListResponse = (query?: DerivedResourceListQuery): ComparisonListResponse => {
   const result = applyDerivedResourceListQuery(
     repository.listComparisons(),
@@ -449,7 +459,15 @@ const buildExportListResponse = (query?: DerivedResourceListQuery): ExportListRe
       exportResource.status,
       exportResource.filename
     ],
-    (exportResource) => 'checkId' in exportResource.source ? exportResource.source.checkId : null
+    (exportResource) => {
+      if ('checkId' in exportResource.source) {
+        return exportResource.source.checkId;
+      }
+      if ('comparisonId' in exportResource.source) {
+        return repository.getComparison(exportResource.source.comparisonId)?.checkId ?? null;
+      }
+      return null;
+    }
   );
   return exportListResponseSchema.parse({ exports: result.items, pageInfo: result.pageInfo });
 };
@@ -913,7 +931,7 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/v1/comparisons' && request.method === 'GET') {
-      return json(buildComparisonListResponse(parseDerivedResourceListQueryFromSearchParams(url.searchParams)));
+      return json(buildComparisonListResponse(safeParseDerivedQuery(url.searchParams)));
     }
 
     if (pathname === '/v1/comparisons' && request.method === 'POST') {
@@ -936,7 +954,7 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/v1/exports' && request.method === 'GET') {
-      return json(buildExportListResponse(parseDerivedResourceListQueryFromSearchParams(url.searchParams)));
+      return json(buildExportListResponse(safeParseDerivedQuery(url.searchParams)));
     }
 
     if (pathname === '/v1/exports' && request.method === 'POST') {
@@ -959,7 +977,7 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/v1/analyses' && request.method === 'GET') {
-      return json(buildAnalysisListResponse(parseDerivedResourceListQueryFromSearchParams(url.searchParams)));
+      return json(buildAnalysisListResponse(safeParseDerivedQuery(url.searchParams)));
     }
 
     if (pathname === '/v1/analyses' && request.method === 'POST') {

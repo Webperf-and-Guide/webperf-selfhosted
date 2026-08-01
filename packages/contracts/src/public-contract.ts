@@ -408,7 +408,7 @@ export const publicContract = populateContractRouterPaths(
     },
     comparisons: {
       list: oc
-        .input(listInputSchema)
+        .input(derivedResourceListInputSchema)
         .output(comparisonListResponseSchema)
         .route({
           method: 'GET',
@@ -439,7 +439,7 @@ export const publicContract = populateContractRouterPaths(
     },
     exports: {
       list: oc
-        .input(listInputSchema)
+        .input(derivedResourceListInputSchema)
         .output(exportListResponseSchema)
         .route({
           method: 'GET',
@@ -470,7 +470,7 @@ export const publicContract = populateContractRouterPaths(
     },
     analyses: {
       list: oc
-        .input(listInputSchema)
+        .input(derivedResourceListInputSchema)
         .output(analysisListResponseSchema)
         .route({
           method: 'GET',

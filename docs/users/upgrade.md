@@ -4,14 +4,23 @@ Treat an upgrade as a data migration, not only an image pull. The release
 Compose file is digest-pinned, the API applies ordered SQLite migrations, and
 an older binary refuses a database containing unknown newer migrations.
 
-Every formal release runs `bun run drill:compose:upgrade` against two public,
-checksum-verified bundles. The gate creates real multi-region Job and scheduled
-Check records with `v0.2.1`, retains that release's named data volume, starts
-the candidate release, and verifies the pre-migration backup, SQLite doctor,
-historical region provenance, disabled unsafe schedule, explicit migration
-acknowledgement, and retired Region Set surface. This automates the earliest
-supported public-beta upgrade path; it does not replace an operator backup or a
-staging rehearsal for custom deployments.
+Every formal release newer than `v0.4.0` runs the Compose upgrade drill against
+two public, checksum-verified bundles. The gate starts the supported `v0.4.0`
+baseline, creates a Site, Route Group, Check, and
+completed Job, stops the baseline writers, creates and verifies an explicit
+SQLite backup, retains the named data volume, starts the candidate release, and
+verifies SQLite doctor, every stored relationship, result provenance, and a new
+post-upgrade Check run. This proves the supported consolidated-runtime upgrade
+path; the drill backup remains inside its disposable test volume, so it does
+not replace an operator's off-volume backup or a staging rehearsal for custom
+deployments.
+
+Direct in-place upgrades are supported from `v0.4.0` or newer. Releases through
+`v0.3.0` used superseded runtime layouts, and the split-role GHCR packages used
+by `v0.2.x` are retired. Their archived bundles are not a supported starting
+point for the automated upgrade path. If an older deployment still exists,
+preserve its database, artifacts, environment, and locally cached images, then
+rehearse the data move into a current installation before changing production.
 
 ## 1. Prepare
 
@@ -26,115 +35,25 @@ Do not replace `SELFHOST_INTERNAL_SECRET` during an upgrade. It is part of the
 database encryption boundary. The automated drill intentionally keeps this
 secret unchanged across both versions; a production upgrade must do the same.
 
-### Phase 1 of issue #14: convert the region configuration before startup
+### Keep the supported runtime identity stable
 
-Phase 1 replaced the 41-city catalog and Region Pack resources with one fixed
-runtime location per deployment. The legacy configuration variables
-(`SELFHOST_ACTIVE_REGION_CODES_JSON`, `SELFHOST_REGION_IDS_JSON`,
-`SELFHOST_PROBE_BASE_URLS_JSON`) and the probe's `REGION_CODE`/Tokyo default
-were removed from the canonical runtime configuration.
-
-**Before starting the upgraded stack**, replace the three legacy JSON
-variables in `.env` with the single-region trio:
+`v0.4.0` and later use one consolidated `webperf` container plus
+`webperf-probe`; the optional Lighthouse runner is a third profile container.
+Keep the deployment's stable runtime location and internal service origins in
+the copied environment:
 
 ```dotenv
-SELFHOST_REGION_ID=local
+SELFHOST_REGION_ID=your-existing-stable-location
 SELFHOST_REGION_LABEL=
 SELFHOST_PROBE_BASE_URL=http://probe:8080
-```
-
-Set `SELFHOST_REGION_ID` before running `selfhost:migrate`. The migration
-refuses to rewrite a legacy saved Check when that identity is unavailable,
-because it cannot safely decide whether the old Region Set matches the new
-single deployment.
-
-Set `SELFHOST_REGION_ID` to a stable identifier for this deployment's actual
-location (for example `kr-seoul-office` or `aws-ap-northeast-2`). The probe
-reads the same value from `REGION_ID`. The `/v1/region-packs` and
-`/v1/region-sets` routes now return `410 Gone`, and the Console `/regions`
-page reports the single runtime location instead of a city catalog.
-
-The upgrade migration preserves published beta data rather than assigning old
-measurements to the new deployment location:
-
-- a historical Job with one selected region keeps that original region;
-- a historical Job with several selected regions keeps every target and the
-  original region list, and uses `historical-multi-region` only as its
-  top-level aggregate identifier;
-- a saved Check whose old Region Set contains exactly the configured
-  `SELFHOST_REGION_ID` is migrated and records that decision;
-- a saved Check whose Region Set is multi-region, missing, or different from
-  the configured runtime has its schedule disabled and reports
-  `locationMigration.status = requires_review`.
-
-For a Check that requires review, open **Checks**, edit the saved Check, confirm
-that it should now run only from this deployment, and save it. The API requires
-the explicit `acknowledgeLocationMigration` update flag, so old scheduled or
-manual behavior cannot silently collapse from several regions to one. Legacy
-Region Set rows remain encrypted in SQLite for recovery compatibility, but
-they are not exposed as a current operator workflow.
-
-### Migrate to the two-container default runtime
-
-The four Bun runtime images (`webperf-console`, `webperf-api`,
-`webperf-scheduler`, `webperf-executor`) were first consolidated into one
-multi-role `webperf` image. The default release topology now goes further:
-`WEBPERF_ROLE=standalone` supervises console, API, embedded scheduler, and
-executor in one container. `webperf-probe` stays separate, so the normal
-installation has two containers. The optional Lighthouse Browser Audit runner
-is a third profile container.
-
-**Before starting the upgraded stack**, replace any
-`webperf-console`/`webperf-api`/`webperf-scheduler`/`webperf-executor` services
-in your Compose file or release directory with the single `webperf` service.
-The release bundle's `compose.yml` already reflects this. Operators maintaining
-a custom Compose file should copy that complete service stanza. At minimum, the
-standalone supervisor requires the following exact identity and capability
-boundary in addition to `WEBPERF_ROLE=standalone`:
-
-```yaml
-services:
-  webperf:
-    init: true
-    user: "0:0"
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - KILL
-      - SETGID
-      - SETUID
-    stop_grace_period: 16m
-    environment:
-      WEBPERF_ROLE: standalone
-```
-
-The root process is a network-inert supervisor only. It uses those three
-capabilities to launch the console, API, and executor under separate non-root
-UIDs and to stop them cleanly. Omitting the explicit root supervisor identity
-or any required capability makes standalone startup fail closed.
-
-The published beta `.env` addressed the old API container as
-`http://api:8788`. Because the standalone topology has no `api` service, update
-both copied values before startup:
-
-```dotenv
 SELFHOST_ARTIFACT_UPLOAD_BASE_URL=http://webperf:8788
 SELFHOST_SCHEDULER_API_BASE_URL=http://webperf:8788
 ```
 
-Leaving either value at `http://api:8788` makes Browser Audit artifact uploads
-or an optional external scheduler target an unresolvable service name.
-
-If you previously relied on a standalone scheduler container, either remove it
-and accept the default embedded mode, or retain the optional split scheduler
-role and set `SELFHOST_SCHEDULER_MODE=external` on `webperf`. Split console,
-API, scheduler, and executor roles remain available for custom development and
-maintenance topologies, but they are not the default release layout. The probe
-(`webperf-probe`) and optional Lighthouse runner
-(`webperf-browser-audit-lighthouse`) images are unchanged.
+Changing `SELFHOST_REGION_ID` changes result provenance and can make saved
+Checks require operator review. If you maintain a custom Compose file, compare
+the complete `webperf`, `probe`, volume, security, and network definitions with
+the new release instead of changing only image references.
 
 ## 2. Stop the old topology, then pull
 
@@ -148,8 +67,8 @@ docker compose --env-file .env --profile browser-audit -f compose.yml \
   down --remove-orphans --timeout 30
 ```
 
-Confirm that the old `console`, `api`, `executor`, and optional worker
-containers are no longer running. Then enter the new release directory,
+Confirm that `webperf`, `probe`, and the optional Lighthouse container are no
+longer running. Then enter the new release directory,
 validate its copied `.env`, and pull the digest-pinned replacement:
 
 ```sh

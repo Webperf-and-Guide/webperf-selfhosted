@@ -16,15 +16,19 @@ Audit records, copies SQLite plus artifact bytes outside an isolated Compose
 volume, deletes that test volume, restores both halves, runs `migrate` and
 `doctor`, and verifies the original records and artifact digest. Formal release
 smoke also runs the same drill against the downloaded digest-pinned bundle.
-The release gate separately starts the public `v0.2.1` bundle, creates its
-legacy multi-region records, replaces the runtime with the candidate published
-bundle on the same named volume, and verifies the stored-data migration. That
-cross-version drill proves the earliest supported public beta can reach the
-current single-region model without silently reassigning historical locations
-or scheduled Checks.
-This is destructive only to its uniquely named `webperf-recovery-*` test
-project; operators must follow the stopped-writer procedure below and must
-never reuse the drill as a production backup command.
+The release gate separately starts the public `v0.4.0` supported baseline,
+creates canonical Site, Route Group, Check, and completed Job records, stops
+the baseline writers, creates an explicit SQLite backup, and replaces the
+runtime with the candidate published bundle on the same named volume. It then
+verifies that backup, runs database doctor, and checks both the stored
+relationships and a new post-upgrade Check run. That cross-version drill proves
+the supported consolidated runtime can advance without losing operator data or
+result provenance. The separate recovery drill remains the proof that backup
+bytes survive outside the disposable source volume.
+The drills are destructive only to their uniquely named `webperf-recovery-*`
+or `webperf-upgrade-*` test projects; operators must follow the stopped-writer
+procedure below and must never reuse either drill as a production backup
+command.
 
 ## Create a consistent Compose backup
 

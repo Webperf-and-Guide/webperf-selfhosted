@@ -3,29 +3,21 @@
  * Preview or delete retired GHCR packages after the Phase 2+3 runtime-image
  * consolidation (issue #14).
  *
- * The four Bun role packages remain protected while the formal release gate
- * exercises the public v0.2.1-to-current upgrade path. Removing them would
- * make the published digest-pinned v0.2.1 bundle impossible to start.
- *
  * Usage:
  *   bun run tooling/scripts/cleanup-legacy-packages.ts             # preview only
  *   bun run tooling/scripts/cleanup-legacy-packages.ts --dry-run   # preview only
  *   bun run tooling/scripts/cleanup-legacy-packages.ts --execute   # delete eligible packages
  *
  * Live deletion requires an authenticated gh CLI token with the
- * `delete:packages` scope. Active and supported-upgrade packages are never
- * eligible for deletion.
+ * `delete:packages` scope. Active packages are never eligible for deletion.
  */
 
 export const CLEANUP_CANDIDATES = [
-  'webperf-browser-audit-worker'
-] as const;
-
-export const SUPPORTED_UPGRADE_PACKAGES = [
   'webperf-api',
   'webperf-console',
   'webperf-scheduler',
-  'webperf-executor'
+  'webperf-executor',
+  'webperf-browser-audit-worker'
 ] as const;
 
 export const ACTIVE_PACKAGES = [
@@ -79,10 +71,9 @@ export const parseCleanupMode = (args: readonly string[]): CleanupMode => {
 
 export const findProtectedPackageConflicts = (
   candidates: readonly string[],
-  activePackages: readonly string[],
-  supportedUpgradePackages: readonly string[]
+  activePackages: readonly string[]
 ): string[] => {
-  const protectedPackages = new Set([...activePackages, ...supportedUpgradePackages]);
+  const protectedPackages = new Set(activePackages);
   return candidates.filter((name) => protectedPackages.has(name));
 };
 
@@ -221,8 +212,7 @@ export const runLegacyPackageCleanup = async (
 
   const conflicts = findProtectedPackageConflicts(
     CLEANUP_CANDIDATES,
-    ACTIVE_PACKAGES,
-    SUPPORTED_UPGRADE_PACKAGES
+    ACTIVE_PACKAGES
   );
   if (conflicts.length > 0) {
     dependencies.io.error(`FATAL: cleanup candidates include protected packages: ${conflicts.join(', ')}`);
@@ -231,7 +221,6 @@ export const runLegacyPackageCleanup = async (
 
   dependencies.io.log(`${mode === 'preview' ? '[PREVIEW] ' : ''}Legacy GHCR package cleanup for ${ORG}`);
   dependencies.io.log(`Active packages: ${ACTIVE_PACKAGES.join(', ')}`);
-  dependencies.io.log(`Protected upgrade packages: ${SUPPORTED_UPGRADE_PACKAGES.join(', ')}`);
   dependencies.io.log();
 
   if (mode === 'preview') {

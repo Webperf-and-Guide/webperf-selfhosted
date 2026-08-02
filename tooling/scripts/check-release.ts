@@ -283,13 +283,16 @@ for (const requiredFragment of [
 
 for (const requiredFragment of [
   'Published bundle upgrade eligibility',
-  'Published bundle v0.2.1 upgrade drill',
-  'is-newer-than "$CURRENT_VERSION" "$LEGACY_VERSION"',
+  'Published bundle supported upgrade drill',
+  "WEBPERF_SUPPORTED_UPGRADE_BASELINE: '0.4.0'",
+  'BASELINE_VERSION: ${{ env.WEBPERF_SUPPORTED_UPGRADE_BASELINE }}',
+  'is-newer-than "$CURRENT_VERSION" "$BASELINE_VERSION"',
   'needs: upgrade-eligibility',
   "if: ${{ needs.upgrade-eligibility.outputs.required == 'true' }}",
-  'LEGACY_VERSION: 0.2.1',
-  'WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:',
+  'WEBPERF_UPGRADE_BASELINE_VERSION:',
+  'WEBPERF_UPGRADE_BASELINE_COMPOSE_FILE:',
   'WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:',
+  '([.images[].name] | sort) == ["browser-audit-lighthouse", "probe", "webperf"]',
   'WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE: \'false\'',
   'bash tooling/scripts/drill-compose-upgrade.sh'
 ]) {
@@ -305,8 +308,10 @@ for (const requiredFragment of [
 
 for (const requiredFragment of [
   'SELFHOST_MIGRATION_BACKUP',
+  'selfhost-database.ts backup',
+  '/data/webperf-upgrade-baseline.sqlite',
   'compose-version-upgrade',
-  'Legacy data volume disappeared during the non-destructive upgrade'
+  'Baseline data volume disappeared during the non-destructive upgrade'
 ]) {
   if (
     composeUpgradeDrillScript !== undefined
@@ -318,8 +323,11 @@ for (const requiredFragment of [
   }
 }
 for (const requiredFragment of [
-  'historical-multi-region',
-  'locationMigration'
+  'seed-baseline',
+  'baseline-resource-persistence',
+  '/v1/sites',
+  '/v1/route-groups',
+  '/v1/checks'
 ]) {
   if (
     composeUpgradeFixtureScript !== undefined

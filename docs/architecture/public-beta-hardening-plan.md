@@ -193,7 +193,8 @@ The exact diff will stay small within each phase, but the expected surface is:
 - [x] Add init/migrate/backup/restore/doctor/maintenance commands.
 - [x] Add restart-recovery and scheduler-dispatch integration tests.
 - [x] Add a destructive isolated-volume backup/restore drill and a published
-  `v0.2.1`-to-current cross-version upgrade drill to formal release smoke.
+  supported-baseline-to-current cross-version upgrade drill to formal release
+  smoke.
 - [x] Add a Sampo changeset for durable execution; extend it with database
   operations before this phase closes.
 
@@ -260,9 +261,9 @@ The exact diff will stay small within each phase, but the expected surface is:
 ## Completion gates
 
 - [x] A clean host can install a tagged, digest-pinned Compose bundle.
-- [x] A checksum-verified `v0.2.1` bundle can retain its named volume and
-  migrate stored multi-region records into the single-region model without
-  losing historical provenance or silently retaining an unsafe schedule.
+- [x] A checksum-verified `v0.4.0` consolidated-runtime bundle can retain its
+  named volume while the candidate release preserves Site, Route Group, Check,
+  completed Job, runtime provenance, and post-upgrade execution behavior.
 - [x] Default host exposure is console-only on loopback.
 - [x] Required production secrets have no fallback.
 - [x] Manual Fast Check and scheduled Check execution work through the executor.
@@ -299,12 +300,12 @@ The exact diff will stay small within each phase, but the expected surface is:
   release-scoped runtime metadata.
 - Release run
   [30191805871](https://github.com/Webperf-and-Guide/webperf-selfhosted/actions/runs/30191805871)
-  successfully created the current annotated `v0.2.1` release with six
+  successfully created the then-current annotated `v0.2.1` release with six
   multi-architecture images, per-platform SPDX SBOMs, provenance attestations,
   checksums, and digest-pinned runtime metadata.
-- All six GHCR runtime packages are public. Anonymous registry checks confirm
-  that every `0.2.1` image tag has both `linux/amd64` and `linux/arm64`
-  manifests, without registry credentials.
+- At verification time, all six GHCR runtime packages were public. Anonymous
+  registry checks confirmed that every `0.2.1` image tag had both
+  `linux/amd64` and `linux/arm64` manifests, without registry credentials.
 - A credential-free download of the `v0.2.1` archive passed its published
   checksum. Its `runtime-metadata.json` source commit and all six image
   references match the tag and Compose file, and both default and Browser Audit
@@ -334,12 +335,12 @@ The exact diff will stay small within each phase, but the expected surface is:
 
 ### Completion evidence
 
-All six release packages (`webperf-console`, `webperf-api`,
-`webperf-scheduler`, `webperf-executor`, `webperf-probe`, and
-`webperf-browser-audit-lighthouse`) are public. The final `v0.2.1`
-published-bundle smoke used independently generated secrets, an empty Docker
-credential directory, and both default and Browser Audit profiles; no
-public-beta external gate remains.
+The active release packages (`webperf`, `webperf-probe`, and
+`webperf-browser-audit-lighthouse`) are public. The old split-role and worker
+packages were intentionally retired after consolidation and are not part of
+the supported release gate. `v0.4.0` is the minimum direct-upgrade baseline;
+newer formal releases verify its checksum-pinned bundle, retain its data
+volume, and prove stored-resource plus post-upgrade execution behavior.
 
 Each implementation commit is reviewed with `ocr review --commit <sha>`.
 Review findings are fixed before the phase is considered complete. After the

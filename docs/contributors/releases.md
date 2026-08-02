@@ -116,7 +116,17 @@ environment approval. After approval it:
 8. downloads that public archive into fresh GitHub-hosted runners, verifies its
    checksum, and starts both the default and Browser Audit profiles with an
    empty Docker credential directory so the release is proven installable by an
-   anonymous consumer.
+   anonymous consumer; and
+9. for versions newer than `v0.4.0`, starts that supported consolidated-runtime
+   baseline, stops its writers, creates an explicit SQLite backup, retains its
+   named data volume, replaces it with the candidate bundle, verifies the
+   backup, runs database doctor, verifies stored resources and provenance, and
+   completes a new Check run.
+
+The retired split-role packages are not release dependencies. The single
+`WEBPERF_SUPPORTED_UPGRADE_BASELINE` value in the published-bundle workflow is
+the deliberate minimum direct-upgrade policy and must move only with matching
+operator documentation and release notes.
 
 Formal install material never uses `main` or `latest`. The `main` and
 `sha-<commit>` image tags are development channels published only after main

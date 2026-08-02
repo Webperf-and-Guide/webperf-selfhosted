@@ -2,9 +2,9 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-legacy_compose_file="${WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE:?set WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE}"
-legacy_env_template="${WEBPERF_UPGRADE_LEGACY_ENV_TEMPLATE:?set WEBPERF_UPGRADE_LEGACY_ENV_TEMPLATE}"
-legacy_version="${WEBPERF_UPGRADE_LEGACY_VERSION:?set WEBPERF_UPGRADE_LEGACY_VERSION}"
+baseline_compose_file="${WEBPERF_UPGRADE_BASELINE_COMPOSE_FILE:?set WEBPERF_UPGRADE_BASELINE_COMPOSE_FILE}"
+baseline_env_template="${WEBPERF_UPGRADE_BASELINE_ENV_TEMPLATE:?set WEBPERF_UPGRADE_BASELINE_ENV_TEMPLATE}"
+baseline_version="${WEBPERF_UPGRADE_BASELINE_VERSION:?set WEBPERF_UPGRADE_BASELINE_VERSION}"
 current_compose_file="${WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.yml}"
 current_dev_compose_file="${WEBPERF_UPGRADE_CURRENT_DEV_COMPOSE_FILE:-$root_dir/infra/docker-compose/compose.dev.yml}"
 current_env_template="${WEBPERF_UPGRADE_CURRENT_ENV_TEMPLATE:-$root_dir/infra/docker-compose/.env.example}"
@@ -18,9 +18,9 @@ cleanup() {
     [[ "$compose_project" == webperf-upgrade-* ]] \
     && declare -F bounded_compose_down >/dev/null \
     && declare -F current >/dev/null \
-    && declare -F legacy >/dev/null; then
+    && declare -F baseline >/dev/null; then
     bounded_compose_down current >/dev/null 2>&1 || true
-    bounded_compose_down legacy >/dev/null 2>&1 || true
+    bounded_compose_down baseline >/dev/null 2>&1 || true
   fi
   rm -rf "$temp_root"
 }
@@ -28,7 +28,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-legacy_env="$temp_root/legacy.env"
+baseline_env="$temp_root/baseline.env"
 current_env="$temp_root/current.env"
 manifest_path="$temp_root/upgrade-manifest.json"
 volume_name="${compose_project}_webperf-data"
@@ -47,8 +47,8 @@ if [[ "$use_current_dev_override" != 'true' && "$use_current_dev_override" != 'f
 fi
 
 for required_file in \
-  "$legacy_compose_file" \
-  "$legacy_env_template" \
+  "$baseline_compose_file" \
+  "$baseline_env_template" \
   "$current_compose_file" \
   "$current_env_template"; do
   if [[ ! -f "$required_file" ]]; then
@@ -78,8 +78,8 @@ compose_with() {
     "$@"
 }
 
-legacy() {
-  compose_with "$legacy_env" -f "$legacy_compose_file" "$@"
+baseline() {
+  compose_with "$baseline_env" -f "$baseline_compose_file" "$@"
 }
 
 current() {
@@ -141,13 +141,13 @@ internal_secret="$(generate_secret)"
 probe_secret="$(generate_secret)"
 browser_audit_secret="$(generate_secret)"
 
-cp "$legacy_env_template" "$legacy_env"
+cp "$baseline_env_template" "$baseline_env"
 cp "$current_env_template" "$current_env"
 UPGRADE_ADMIN_TOKEN="$admin_token" \
 UPGRADE_INTERNAL_SECRET="$internal_secret" \
 UPGRADE_PROBE_SECRET="$probe_secret" \
 UPGRADE_BROWSER_AUDIT_SECRET="$browser_audit_secret" \
-python3 - "$legacy_env" "$current_env" <<'PY'
+python3 - "$baseline_env" "$current_env" <<'PY'
 import os
 from pathlib import Path
 import sys
@@ -164,7 +164,7 @@ def read_env(path: Path):
 def write_env(path: Path, values):
     path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
 
-legacy_path = Path(sys.argv[1])
+baseline_path = Path(sys.argv[1])
 current_path = Path(sys.argv[2])
 shared = {
     'SELFHOST_ADMIN_TOKEN': os.environ['UPGRADE_ADMIN_TOKEN'],
@@ -180,35 +180,26 @@ shared = {
     'BROWSER_AUDIT_DEBUG_PORT': '0',
 }
 
-legacy = read_env(legacy_path)
-legacy.update(shared)
-legacy.update({
-    'SELFHOST_ACTIVE_REGION_CODES_JSON': '["tokyo","singapore"]',
-    'SELFHOST_REGION_IDS_JSON': '{"tokyo":"JP","singapore":"SG"}',
-    'SELFHOST_PROBE_BASE_URLS_JSON': '{"tokyo":"http://probe:8080","singapore":"http://probe:8080"}',
+baseline = read_env(baseline_path)
+baseline.update(shared)
+baseline.update({
+    'SELFHOST_REGION_ID': 'upgrade-drill',
+    'SELFHOST_REGION_LABEL': 'Supported upgrade baseline',
+    'SELFHOST_PROBE_BASE_URL': 'http://probe:8080',
+    'SELFHOST_ARTIFACT_UPLOAD_BASE_URL': 'http://webperf:8788',
+    'SELFHOST_SCHEDULER_API_BASE_URL': 'http://webperf:8788',
+    'SELFHOST_SCHEDULER_MODE': 'disabled',
     'SELFHOST_SCHEDULER_POLL_INTERVAL_SECONDS': '3600',
     'SELFHOST_MIGRATION_BACKUP': 'false',
 })
-write_env(legacy_path, legacy)
-
-legacy_api_origin = 'http://api:8788'
-for key in (
-    'SELFHOST_ARTIFACT_UPLOAD_BASE_URL',
-    'SELFHOST_SCHEDULER_API_BASE_URL',
-):
-    if legacy.get(key) != legacy_api_origin:
-        raise SystemExit(
-            f'Published beta environment no longer exposes the expected {key} migration fixture'
-        )
+write_env(baseline_path, baseline)
 
 current = read_env(current_path)
 current.update(shared)
 current.update({
-    'SELFHOST_REGION_ID': 'tokyo',
-    'SELFHOST_REGION_LABEL': 'Tokyo upgrade runtime',
+    'SELFHOST_REGION_ID': 'upgrade-drill',
+    'SELFHOST_REGION_LABEL': 'Supported upgrade candidate',
     'SELFHOST_PROBE_BASE_URL': 'http://probe:8080',
-    # Model the two service-origin edits required when an operator copies the
-    # published beta environment into the standalone topology.
     'SELFHOST_ARTIFACT_UPLOAD_BASE_URL': 'http://webperf:8788',
     'SELFHOST_SCHEDULER_API_BASE_URL': 'http://webperf:8788',
     'SELFHOST_SCHEDULER_MODE': 'disabled',
@@ -216,7 +207,7 @@ current.update({
 })
 write_env(current_path, current)
 PY
-chmod 600 "$legacy_env" "$current_env"
+chmod 600 "$baseline_env" "$current_env"
 
 wait_for_api_debug() {
   local runner="$1"
@@ -246,23 +237,33 @@ wait_for_api_debug() {
   exit 1
 }
 
-legacy_base_url="$(wait_for_api_debug legacy api)"
+baseline_base_url="$(wait_for_api_debug baseline webperf probe)"
 WEBPERF_UPGRADE_ADMIN_TOKEN="$admin_token" \
   bun "$root_dir/tooling/scripts/compose-upgrade-fixture.ts" \
-    seed-legacy "$legacy_base_url" "$manifest_path"
+    seed-baseline "$baseline_base_url" "$manifest_path"
 
-# Stop every legacy writer, retain the named data volume, and replace only the
-# runtime topology. This models an operator following the release upgrade path.
-legacy --profile debug stop api-debug api
-legacy_down_status=0
-legacy --profile debug down --remove-orphans --timeout 30 || legacy_down_status=$?
+# Stop every baseline writer and create the operator backup that precedes a
+# production upgrade. Automatic migration backups are intentionally conditional
+# on pending migrations, so this explicit backup is the invariant for every
+# supported version transition, including schema-neutral releases.
+baseline --profile debug stop api-debug webperf
+baseline run --rm --no-deps --user 1000:1000 --entrypoint bun webperf \
+  /app/tooling/scripts/selfhost-database.ts backup \
+  --database /data/webperf.sqlite \
+  --output /data/webperf-upgrade-baseline.sqlite
+baseline --profile debug stop probe
+
+# Retain the named data volume and replace only the runtime topology. This
+# models an operator following the release upgrade path.
+baseline_down_status=0
+baseline --profile debug down --remove-orphans --timeout 30 || baseline_down_status=$?
 if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
-  echo "Legacy data volume disappeared during the non-destructive upgrade: $volume_name" >&2
+  echo "Baseline data volume disappeared during the non-destructive upgrade: $volume_name" >&2
   exit 1
 fi
-if (( legacy_down_status != 0 )); then
-  echo "Legacy Compose teardown failed with status $legacy_down_status" >&2
-  exit "$legacy_down_status"
+if (( baseline_down_status != 0 )); then
+  echo "Baseline Compose teardown failed with status $baseline_down_status" >&2
+  exit "$baseline_down_status"
 fi
 
 if [[ "$use_current_dev_override" == 'true' ]]; then
@@ -271,7 +272,7 @@ fi
 current_base_url="$(wait_for_api_debug current webperf probe)"
 
 current run --rm --no-deps --user 1000:1000 --entrypoint sh webperf -c \
-  'set -- /data/webperf.sqlite.backup-*; test -f "$1"'
+  'test -s /data/webperf-upgrade-baseline.sqlite'
 doctor_output_path="$temp_root/doctor-output.log"
 current run --rm --no-deps --user 1000:1000 --entrypoint bun webperf \
   /app/tooling/scripts/selfhost-database.ts doctor \
@@ -313,4 +314,4 @@ WEBPERF_UPGRADE_ADMIN_TOKEN="$admin_token" \
     verify-current "$current_base_url" "$manifest_path"
 
 printf '{"ok":true,"drill":"compose-version-upgrade","from":"%s","storedData":"verified"}\n' \
-  "$legacy_version"
+  "$baseline_version"

@@ -113,7 +113,7 @@
     },
     "packages/config": {
       "name": "@webperf/config",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@webperf/contracts": "workspace:*",
         "zod": "^4.1.12",

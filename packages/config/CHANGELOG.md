@@ -1,5 +1,13 @@
 # @webperf/config
 
+## 0.4.2 — 2026-08-02
+
+### Patch changes
+
+- [3283567](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/3283567b319b9c00edcb28033d6c361c81fa92f0) Keep native main development-image publishing independent from source-pinned
+  formal release validation, and clarify that protected releases publish GHCR
+  images while npm package publication remains a separate future concern. — Thanks @imjlk!
+
 ## 0.4.1 — 2026-08-02
 
 ### Patch changes

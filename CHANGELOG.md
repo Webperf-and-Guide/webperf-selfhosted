@@ -4,6 +4,14 @@ All notable WebPerf self-hosted changes are recorded here. Package-level
 versioning and changelogs are generated from
 [Sampo](https://github.com/bruits/sampo) changesets.
 
+## [0.5.1] — 2026-08-02
+
+### Changes
+
+- Keep native main development-image publishing independent from source-pinned formal release validation, and clarify that protected releases publish GHCR images while npm package publication remains a separate future concern.
+
+<!-- webperf-release: from=0.5.0; changesets=sha256:693404e041dd544398b15d695fc9db2566f55b3e77c434b4beebcbdd86884f69 -->
+
 ## [0.5.0] — 2026-08-02
 
 ### Changes
@@ -92,3 +100,4 @@ First public-beta release of the complete self-hosted runtime.
 [0.3.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.3.0
 [0.4.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.4.0
 [0.5.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.5.0
+[0.5.1]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.5.1

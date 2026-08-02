@@ -9,7 +9,7 @@ import type {
   RuntimeRegionId,
   SignedProbeMeasurementRequest
 } from '@webperf/contracts';
-import { listQuerySchema, derivedResourceListQuerySchema, runtimeRegionIdSchema } from '@webperf/contracts';
+import { derivedResourceListQuerySchema, listQuerySchema, runtimeRegionIdSchema } from '@webperf/contracts';
 
 /**
  * Resolve the runtime location for one standalone deployment.

@@ -105,7 +105,7 @@ environment approval. After approval it:
 
 1. builds and publishes the unified `webperf` image (serving the console, API,
    scheduler, and executor roles via `WEBPERF_ROLE`), the Rust probe, and the
-   Lighthouse reference runner for Linux/amd64;
+   Lighthouse reference runner for Linux/amd64 and Linux/arm64;
 2. tags each image with the version and source SHA;
 3. emits OCI SBOM/provenance plus GitHub digest-bound attestations;
 4. generates same-commit runtime metadata and standalone SPDX JSON SBOMs;
@@ -122,6 +122,10 @@ environment approval. After approval it:
    named data volume, replaces it with the candidate bundle, verifies the
    backup, runs database doctor, verifies stored resources and provenance, and
    completes a new Check run.
+
+Source-pinned formal-release CI uses a release-specific concurrency group. It
+does not share the native `main` push group, so release validation cannot evict
+a queued development-image publication while an earlier main run is finishing.
 
 The retired split-role packages are not release dependencies. The single
 `WEBPERF_SUPPORTED_UPGRADE_BASELINE` value in the published-bundle workflow is

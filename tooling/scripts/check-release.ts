@@ -413,6 +413,20 @@ for (const requiredFragment of [
   }
 }
 if (ciWorkflow !== undefined) {
+  const document = parseWorkflowDocument(ciWorkflow, 'ci.yml');
+  const expectedConcurrencyGroup = "ci-${{ inputs.source_sha != '' && format('release-{0}', inputs.source_sha) || github.event.pull_request.number || github.ref }}";
+  const expectedCancelExpression = "${{ github.event_name == 'pull_request' }}";
+  if (document?.concurrency?.group !== expectedConcurrencyGroup) {
+    violations.push(
+      'ci.yml: formal release calls must use a source-prefixed concurrency group distinct from native main push CI'
+    );
+  }
+  if (document?.concurrency?.['cancel-in-progress'] !== expectedCancelExpression) {
+    violations.push(
+      'ci.yml: only superseded pull request CI may cancel an in-progress run'
+    );
+  }
+
   const checkoutCount = ciWorkflow.match(/uses: actions\/checkout@/g)?.length ?? 0;
   const sourcePinnedCheckoutCount = ciWorkflow
     .match(/ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/g)?.length ?? 0;

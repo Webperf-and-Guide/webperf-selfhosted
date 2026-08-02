@@ -22,6 +22,10 @@ export const containsMutableContainerTag = (content: string) =>
     .test(content);
 
 export type WorkflowPolicyDocument = {
+  concurrency?: {
+    group?: unknown;
+    'cancel-in-progress'?: unknown;
+  };
   jobs?: Record<string, {
     permissions?: unknown;
     strategy?: {

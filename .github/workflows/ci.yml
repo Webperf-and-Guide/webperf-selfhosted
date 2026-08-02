@@ -16,7 +16,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # A source-pinned formal release call shares github.ref with native main
+  # push CI. Give it a distinct group so it cannot evict the queued main run
+  # that publishes the mutable development channel.
+  group: ci-${{ inputs.source_sha != '' && format('release-{0}', inputs.source_sha) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

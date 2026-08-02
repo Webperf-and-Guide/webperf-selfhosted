@@ -103,6 +103,7 @@ Current repo state as of 2026-08-02:
 - probe request signing in `packages/domain-core` now uses stable key ordering so Bun/TypeScript signers match the Rust probe verifier for local and managed smoke flows
 - root public-facing metadata now includes `SECURITY.md`, `CHANGELOG.md`, and stronger contributor guidance so the repo is closer to GitHub/public launch shape
 - required CI now gates shared development-channel publishing for all three runtime images, so workspace dependency changes cannot leave only part of the runtime set stale
+- source-pinned formal release CI now uses a release-specific concurrency group instead of sharing the native `main` push group, so protected release validation cannot evict a queued development-image publication; generated release PR copy also distinguishes GHCR publication from the separate future npm concern
 - the GitHub `release` Environment requires `imjlk` approval and accepts only `main` workflow dispatches or `v*.*.*` tags before formal publication
 - the console IA now has a real route split around `/`, `/resources`, `/checks`, `/reports`, and `/regions`, backed by a shared workspace component and route-loader helper
 - `packages/ui` now drives a shared token/theme system for both OSS and cloud apps, with Tailwind v4 entrypoints and minimal shadcn-compatible primitive exports

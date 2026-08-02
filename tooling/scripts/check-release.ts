@@ -8,8 +8,10 @@ import {
 } from './release-bundle';
 import { retiredReleasePaths } from './retired-release-paths';
 import {
+  cancelsOnlySupersededPullRequestCi,
   containsMutableContainerTag,
   extractWorkflowActionReferences,
+  hasCollisionSafeCiConcurrency,
   hasExactPermissions,
   isImmutableActionReference,
   parseWorkflowYaml,
@@ -414,14 +416,12 @@ for (const requiredFragment of [
 }
 if (ciWorkflow !== undefined) {
   const document = parseWorkflowDocument(ciWorkflow, 'ci.yml');
-  const expectedConcurrencyGroup = "ci-${{ inputs.source_sha != '' && format('release-{0}', inputs.source_sha) || github.event.pull_request.number || github.ref }}";
-  const expectedCancelExpression = "${{ github.event_name == 'pull_request' }}";
-  if (document?.concurrency?.group !== expectedConcurrencyGroup) {
+  if (document === undefined || !hasCollisionSafeCiConcurrency(document)) {
     violations.push(
       'ci.yml: formal release calls must use a source-prefixed concurrency group distinct from native main push CI'
     );
   }
-  if (document?.concurrency?.['cancel-in-progress'] !== expectedCancelExpression) {
+  if (document === undefined || !cancelsOnlySupersededPullRequestCi(document)) {
     violations.push(
       'ci.yml: only superseded pull request CI may cancel an in-progress run'
     );

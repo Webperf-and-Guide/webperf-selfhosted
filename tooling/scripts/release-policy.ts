@@ -40,6 +40,31 @@ export type WorkflowYamlParseResult =
   | { ok: true; document: WorkflowPolicyDocument }
   | { ok: false; reason: 'invalid_yaml' | 'invalid_mapping' };
 
+const normalizedWorkflowExpression = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : undefined;
+
+export function hasCollisionSafeCiConcurrency(
+  document: WorkflowPolicyDocument
+): boolean {
+  const group = normalizedWorkflowExpression(document.concurrency?.group);
+  if (group === undefined) {
+    return false;
+  }
+
+  return /^ci-\$\{\{\s*inputs\.source_sha\s*!=\s*(['"])\1\s*&&\s*format\(\s*(['"])release-\{0\}\2\s*,\s*inputs\.source_sha\s*\)\s*\|\|\s*github\.event\.pull_request\.number\s*\|\|\s*github\.ref\s*\}\}$/.test(group);
+}
+
+export function cancelsOnlySupersededPullRequestCi(
+  document: WorkflowPolicyDocument
+): boolean {
+  const cancelInProgress = normalizedWorkflowExpression(
+    document.concurrency?.['cancel-in-progress']
+  );
+  return /^\$\{\{\s*github\.event_name\s*==\s*(['"])pull_request\1\s*\}\}$/.test(
+    cancelInProgress ?? ''
+  );
+}
+
 export function parseWorkflowYaml(content: string): WorkflowYamlParseResult {
   let document: unknown;
   try {

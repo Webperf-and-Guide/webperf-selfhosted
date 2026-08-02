@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  cancelsOnlySupersededPullRequestCi,
   containsMutableContainerTag,
   extractWorkflowActionReferences,
+  hasCollisionSafeCiConcurrency,
   hasExactPermissions,
   isImmutableActionReference,
   parseWorkflowYaml,
@@ -57,6 +59,52 @@ describe('release workflow policy helpers', () => {
       packages: 'write',
       'id-token': 'write'
     }, expected)).toBe(false);
+  });
+
+  test('recognizes collision-safe CI concurrency across cosmetic YAML formatting', () => {
+    const compact = parseWorkflowYaml(`
+concurrency:
+  group: ci-\${{ inputs.source_sha != '' && format('release-{0}', inputs.source_sha) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: \${{ github.event_name == 'pull_request' }}
+`);
+    const folded = parseWorkflowYaml(`
+concurrency:
+  group: >-
+    ci-\${{ inputs.source_sha != "" &&
+    format("release-{0}", inputs.source_sha) ||
+    github.event.pull_request.number || github.ref }}
+  cancel-in-progress: >-
+    \${{ github.event_name == "pull_request" }}
+`);
+
+    for (const parsed of [compact, folded]) {
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) {
+        expect(hasCollisionSafeCiConcurrency(parsed.document)).toBe(true);
+        expect(cancelsOnlySupersededPullRequestCi(parsed.document)).toBe(true);
+      }
+    }
+  });
+
+  test('rejects concurrency that can collide with or cancel native main CI', () => {
+    const colliding = parseWorkflowYaml(`
+concurrency:
+  group: ci-\${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+`);
+    const sourceAfterFallback = parseWorkflowYaml(`
+concurrency:
+  group: ci-\${{ github.event.pull_request.number || format('release-{0}', inputs.source_sha) || github.ref }}
+  cancel-in-progress: \${{ github.event_name != 'workflow_call' }}
+`);
+
+    for (const parsed of [colliding, sourceAfterFallback]) {
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) {
+        expect(hasCollisionSafeCiConcurrency(parsed.document)).toBe(false);
+        expect(cancelsOnlySupersededPullRequestCi(parsed.document)).toBe(false);
+      }
+    }
   });
 
   test('parses workflow job permissions and rejects malformed documents', () => {

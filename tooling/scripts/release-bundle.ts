@@ -409,7 +409,7 @@ export function renderReleasePullRequest({
     '- Verify the root and package changelogs match the intended operator-visible changes.',
     '- Confirm version changes and any migration notes before merging.',
     '',
-    `After merge, the protected release workflow will prepare \`v${release.nextVersion}\` when that tag does not already exist. Registry publication remains separate from this repository release.`,
+    `After merge, the protected release workflow will publish the GHCR images and install bundle for \`v${release.nextVersion}\` when that tag does not already exist. npm package publication remains a separate future concern.`,
     '',
     '<!-- webperf-release-pr: generated; schema=1 -->',
     ''

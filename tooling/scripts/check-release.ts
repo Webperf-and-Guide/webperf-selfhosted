@@ -8,8 +8,10 @@ import {
 } from './release-bundle';
 import { retiredReleasePaths } from './retired-release-paths';
 import {
+  cancelsOnlySupersededPullRequestCi,
   containsMutableContainerTag,
   extractWorkflowActionReferences,
+  hasCollisionSafeCiConcurrency,
   hasExactPermissions,
   isImmutableActionReference,
   parseWorkflowYaml,
@@ -413,6 +415,18 @@ for (const requiredFragment of [
   }
 }
 if (ciWorkflow !== undefined) {
+  const document = parseWorkflowDocument(ciWorkflow, 'ci.yml');
+  if (document === undefined || !hasCollisionSafeCiConcurrency(document)) {
+    violations.push(
+      'ci.yml: formal release calls must use a source-prefixed concurrency group distinct from native main push CI'
+    );
+  }
+  if (document === undefined || !cancelsOnlySupersededPullRequestCi(document)) {
+    violations.push(
+      'ci.yml: only superseded pull request CI may cancel an in-progress run'
+    );
+  }
+
   const checkoutCount = ciWorkflow.match(/uses: actions\/checkout@/g)?.length ?? 0;
   const sourcePinnedCheckoutCount = ciWorkflow
     .match(/ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/g)?.length ?? 0;

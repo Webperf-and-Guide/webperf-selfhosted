@@ -51,6 +51,13 @@ For compatibility, `images[].sbom` names the amd64 SBOM; releases that include
 both platforms also expose `images[].sboms`, which maps each platform manifest
 digest to its SBOM file.
 
+Direct release-bundle upgrades are supported from `v0.4.0`, the first release
+of the current consolidated topology. The earlier `webperf-console`,
+`webperf-api`, `webperf-scheduler`, `webperf-executor`, and
+`webperf-browser-audit-worker` packages are retired and are not needed by the
+release gate. Versions newer than the baseline must prove a same-volume
+`v0.4.0` upgrade before the formal release completes.
+
 The metadata schema and bundle contract live under
 [infra/release](../../infra/release/README.md). Managed consumers must fetch
 `runtime-metadata.json` from a specific GitHub Release instead of reading a

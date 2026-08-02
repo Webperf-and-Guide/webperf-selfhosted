@@ -1,14 +1,34 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+const fixture = {
+  runtimeRegionId: 'upgrade-drill',
+  siteName: 'Supported upgrade site',
+  siteBaseUrl: 'https://example.com/',
+  routeGroupName: 'Supported upgrade routes',
+  routeLabel: 'Homepage',
+  routeUrl: 'https://example.com/',
+  checkName: 'Supported upgrade check',
+  checkNote: 'must remain runnable after the release upgrade',
+  jobUrl: 'https://example.com/',
+  jobNote: 'supported baseline upgrade evidence'
+} as const;
+
 type UpgradeManifest = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   siteId: string;
   routeGroupId: string;
+  routeId: string;
   checkId: string;
   jobId: string;
-  sourceRegions: ['tokyo', 'singapore'];
+  runtimeRegionId: typeof fixture.runtimeRegionId;
 };
+
+class UpgradeFixtureTransportError extends Error {}
+
+const REQUEST_TIMEOUT_MS = 20_000;
+const JOB_POLL_ATTEMPTS = 180;
+const JOB_POLL_INTERVAL_MS = 1_000;
 
 const requireArgument = (index: number, label: string) => {
   const value = process.argv[index]?.trim();
@@ -49,11 +69,24 @@ const requireObject = (value: unknown, label: string): Record<string, unknown> =
   return value as Record<string, unknown>;
 };
 
+const requireArray = (value: unknown, label: string): unknown[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+  return value;
+};
+
 const requireString = (value: unknown, label: string) => {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
+};
+
+const requireExact = (value: unknown, expected: unknown, label: string) => {
+  if (value !== expected) {
+    throw new Error(`${label} changed across the release upgrade`);
+  }
 };
 
 const requestJson = async (
@@ -91,10 +124,10 @@ const request = async (
         authorization: `Bearer ${token}`,
         ...init.headers
       },
-      signal: init.signal ?? AbortSignal.timeout(20_000)
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
   } catch (error) {
-    throw new Error(`${init.method ?? 'GET'} ${path} transport failed`, {
+    throw new UpgradeFixtureTransportError(`${init.method ?? 'GET'} ${path} transport failed`, {
       cause: error instanceof Error ? error : undefined
     });
   }
@@ -111,74 +144,149 @@ const postJson = (
   body: JSON.stringify(body)
 });
 
-const seedLegacy = async (
+const waitForSucceededJob = async (
+  baseUrl: string,
+  token: string,
+  jobId: string
+) => {
+  let lastStatus = 'unknown';
+  let lastTransportError: UpgradeFixtureTransportError | undefined;
+
+  // A network measurement may legitimately take a few minutes. Keep the
+  // release gate patient enough for a cold Compose runner while bounding each
+  // individual request separately so a stalled connection cannot consume the
+  // entire polling budget.
+  for (let attempt = 0; attempt < JOB_POLL_ATTEMPTS; attempt += 1) {
+    try {
+      const job = requireObject(
+        await requestJson(baseUrl, token, `/v1/jobs/${encodeURIComponent(jobId)}`),
+        'job'
+      );
+      lastStatus = typeof job.status === 'string' ? job.status : 'invalid';
+
+      if (lastStatus === 'succeeded') {
+        return job;
+      }
+      if (lastStatus === 'failed' || lastStatus === 'partial') {
+        throw new Error(`Upgrade fixture job ${jobId} reached terminal status ${lastStatus}`);
+      }
+    } catch (error) {
+      if (!(error instanceof UpgradeFixtureTransportError)) {
+        throw error;
+      }
+      lastTransportError = error;
+    }
+
+    await Bun.sleep(JOB_POLL_INTERVAL_MS);
+  }
+
+  if (lastStatus === 'unknown' && lastTransportError !== undefined) {
+    throw new Error(
+      `Upgrade fixture job ${jobId} never became reachable: ${lastTransportError.message}`,
+      { cause: lastTransportError }
+    );
+  }
+
+  throw new Error(`Upgrade fixture job ${jobId} timed out in status ${lastStatus}`);
+};
+
+const verifySucceededJob = (
+  job: Record<string, unknown>,
+  jobId: string,
+  expectedNote?: string
+) => {
+  requireExact(job.id, jobId, 'job.id');
+  requireExact(job.url, fixture.jobUrl, 'job.url');
+  if (expectedNote !== undefined) {
+    requireExact(job.note, expectedNote, 'job.note');
+  }
+  requireExact(job.status, 'succeeded', 'job.status');
+  requireExact(job.region, fixture.runtimeRegionId, 'job.region');
+
+  const targets = requireArray(job.targets, 'job.targets');
+  if (targets.length !== 1) {
+    throw new Error('Upgraded job must retain exactly one runtime target');
+  }
+  const target = requireObject(targets[0], 'job.targets[0]');
+  requireExact(target.jobId, jobId, 'job.targets[0].jobId');
+  requireExact(target.region, fixture.runtimeRegionId, 'job.targets[0].region');
+  requireExact(target.status, 'succeeded', 'job.targets[0].status');
+  requireExact(target.success, true, 'job.targets[0].success');
+
+  const summary = requireObject(job.summary, 'job.summary');
+  requireExact(summary.total, 1, 'job.summary.total');
+  requireExact(summary.succeeded, 1, 'job.summary.succeeded');
+  requireExact(summary.failed, 0, 'job.summary.failed');
+  requireExact(summary.inflight, 0, 'job.summary.inflight');
+};
+
+const seedBaseline = async (
   baseUrl: string,
   token: string,
   manifestPath: string
 ) => {
   const siteResponse = requireObject(
-    await postJson(baseUrl, token, '/v1/properties', {
-      name: 'Upgrade drill site',
-      baseUrl: 'https://example.com/'
+    await postJson(baseUrl, token, '/v1/sites', {
+      name: fixture.siteName,
+      baseUrl: fixture.siteBaseUrl
     }),
     'site response'
   );
-  const site = requireObject(siteResponse.property, 'site response.property');
+  const site = requireObject(siteResponse.site, 'site response.site');
   const siteId = requireString(site.id, 'site.id');
 
   const routeGroupResponse = requireObject(
-    await postJson(baseUrl, token, '/v1/route-sets', {
+    await postJson(baseUrl, token, '/v1/route-groups', {
       propertyId: siteId,
-      name: 'Upgrade drill routes',
-      routes: [{ label: 'Homepage', url: 'https://example.com/' }]
+      name: fixture.routeGroupName,
+      routes: [{ label: fixture.routeLabel, url: fixture.routeUrl }]
     }),
     'route group response'
   );
-  const routeGroup = requireObject(routeGroupResponse.routeSet, 'route group response.routeSet');
-  const routeGroupId = requireString(routeGroup.id, 'routeGroup.id');
-
-  const regionPackResponse = requireObject(
-    await postJson(baseUrl, token, '/v1/region-packs', {
-      name: 'Legacy APAC pair',
-      regions: ['tokyo', 'singapore']
-    }),
-    'region pack response'
+  const routeGroup = requireObject(
+    routeGroupResponse.routeGroup,
+    'route group response.routeGroup'
   );
-  const regionPack = requireObject(regionPackResponse.regionPack, 'region pack response.regionPack');
-  const regionPackId = requireString(regionPack.id, 'regionPack.id');
+  const routeGroupId = requireString(routeGroup.id, 'routeGroup.id');
+  const routes = requireArray(routeGroup.routes, 'routeGroup.routes');
+  if (routes.length !== 1) {
+    throw new Error('Baseline route group must contain exactly one route');
+  }
+  const route = requireObject(routes[0], 'routeGroup.routes[0]');
+  const routeId = requireString(route.id, 'route.id');
 
   const checkResponse = requireObject(
-    await postJson(baseUrl, token, '/v1/check-profiles', {
+    await postJson(baseUrl, token, '/v1/checks', {
       propertyId: siteId,
       routeSetId: routeGroupId,
-      regionPackId,
-      name: 'Legacy scheduled global check',
-      note: 'must require explicit single-region review',
-      scheduleIntervalMinutes: 60
+      name: fixture.checkName,
+      note: fixture.checkNote
     }),
     'check response'
   );
-  const check = requireObject(checkResponse.profile, 'check response.profile');
+  const check = requireObject(checkResponse.check, 'check response.check');
   const checkId = requireString(check.id, 'check.id');
 
   const jobResponse = requireObject(
     await postJson(baseUrl, token, '/v1/jobs', {
-      url: 'https://example.com/',
-      regions: ['tokyo', 'singapore'],
-      note: 'legacy multi-region upgrade evidence'
+      url: fixture.jobUrl,
+      note: fixture.jobNote
     }),
     'job response'
   );
-  const job = requireObject(jobResponse.job, 'job response.job');
-  const jobId = requireString(job.id, 'job.id');
+  const createdJob = requireObject(jobResponse.job, 'job response.job');
+  const jobId = requireString(createdJob.id, 'job.id');
+  const job = await waitForSucceededJob(baseUrl, token, jobId);
+  verifySucceededJob(job, jobId, fixture.jobNote);
 
   const manifest: UpgradeManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     siteId,
     routeGroupId,
+    routeId,
     checkId,
     jobId,
-    sourceRegions: ['tokyo', 'singapore']
+    runtimeRegionId: fixture.runtimeRegionId
   };
   const destination = resolve(manifestPath);
   await writeFile(destination, `${JSON.stringify(manifest, null, 2)}\n`, {
@@ -186,7 +294,7 @@ const seedLegacy = async (
     mode: 0o600,
     flag: 'wx'
   });
-  console.log(JSON.stringify({ ok: true, command: 'seed-legacy', manifest }));
+  console.log(JSON.stringify({ ok: true, command: 'seed-baseline', manifest }));
 };
 
 const parseManifest = async (path: string): Promise<UpgradeManifest> => {
@@ -202,25 +310,20 @@ const parseManifest = async (path: string): Promise<UpgradeManifest> => {
     );
   }
   const payload = requireObject(rawPayload, 'upgrade manifest');
-  if (payload.schemaVersion !== 1) {
-    throw new Error('Upgrade manifest schemaVersion must be 1');
+  if (payload.schemaVersion !== 2) {
+    throw new Error('Upgrade manifest schemaVersion must be 2');
   }
-  const sourceRegions = payload.sourceRegions;
-  if (
-    !Array.isArray(sourceRegions)
-    || sourceRegions.length !== 2
-    || sourceRegions[0] !== 'tokyo'
-    || sourceRegions[1] !== 'singapore'
-  ) {
-    throw new Error('Upgrade manifest source regions changed');
+  if (payload.runtimeRegionId !== fixture.runtimeRegionId) {
+    throw new Error('Upgrade manifest runtime region changed');
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     siteId: requireString(payload.siteId, 'manifest.siteId'),
     routeGroupId: requireString(payload.routeGroupId, 'manifest.routeGroupId'),
+    routeId: requireString(payload.routeId, 'manifest.routeId'),
     checkId: requireString(payload.checkId, 'manifest.checkId'),
     jobId: requireString(payload.jobId, 'manifest.jobId'),
-    sourceRegions: ['tokyo', 'singapore']
+    runtimeRegionId: fixture.runtimeRegionId
   };
 };
 
@@ -230,122 +333,117 @@ const verifyCurrent = async (
   manifestPath: string
 ) => {
   const manifest = await parseManifest(manifestPath);
-  const job = requireObject(
-    await requestJson(baseUrl, token, `/v1/jobs/${encodeURIComponent(manifest.jobId)}`),
-    'migrated job'
+
+  const site = requireObject(
+    await requestJson(baseUrl, token, `/v1/sites/${encodeURIComponent(manifest.siteId)}`),
+    'upgraded site'
   );
-  if (job.region !== 'historical-multi-region') {
-    throw new Error('Migrated multi-region Job lost its explicit aggregate identity');
+  requireExact(site.id, manifest.siteId, 'site.id');
+  requireExact(site.name, fixture.siteName, 'site.name');
+  requireExact(site.baseUrl, fixture.siteBaseUrl, 'site.baseUrl');
+
+  const routeGroup = requireObject(
+    await requestJson(
+      baseUrl,
+      token,
+      `/v1/route-groups/${encodeURIComponent(manifest.routeGroupId)}`
+    ),
+    'upgraded route group'
+  );
+  requireExact(routeGroup.id, manifest.routeGroupId, 'routeGroup.id');
+  requireExact(routeGroup.propertyId, manifest.siteId, 'routeGroup.propertyId');
+  requireExact(routeGroup.name, fixture.routeGroupName, 'routeGroup.name');
+  const routes = requireArray(routeGroup.routes, 'routeGroup.routes');
+  if (routes.length !== 1) {
+    throw new Error('Upgraded route group must retain exactly one route');
   }
-  if (!Array.isArray(job.historicalRegions)) {
-    throw new Error('Migrated Job is missing its historical region list');
-  }
-  if (JSON.stringify(job.historicalRegions) !== JSON.stringify(manifest.sourceRegions)) {
-    throw new Error('Migrated Job lost its historical region list');
-  }
-  const targets = Array.isArray(job.targets) ? job.targets : [];
-  const targetRegions = targets
-    .map((target) => requireObject(target, 'job target').region)
-    .filter((region): region is string => typeof region === 'string')
-    .sort();
-  if (JSON.stringify(targetRegions) !== JSON.stringify([...manifest.sourceRegions].sort())) {
-    throw new Error('Migrated Job target provenance changed');
-  }
+  const route = requireObject(routes[0], 'routeGroup.routes[0]');
+  requireExact(route.id, manifest.routeId, 'route.id');
+  requireExact(route.label, fixture.routeLabel, 'route.label');
+  requireExact(route.url, fixture.routeUrl, 'route.url');
 
   const check = requireObject(
+    await requestJson(baseUrl, token, `/v1/checks/${encodeURIComponent(manifest.checkId)}`),
+    'upgraded check'
+  );
+  requireExact(check.id, manifest.checkId, 'check.id');
+  requireExact(check.propertyId, manifest.siteId, 'check.propertyId');
+  requireExact(check.routeSetId, manifest.routeGroupId, 'check.routeSetId');
+  requireExact(check.name, fixture.checkName, 'check.name');
+  requireExact(check.note, fixture.checkNote, 'check.note');
+  requireExact(check.locationMigration, null, 'check.locationMigration');
+
+  const baselineJob = requireObject(
+    await requestJson(baseUrl, token, `/v1/jobs/${encodeURIComponent(manifest.jobId)}`),
+    'upgraded baseline job'
+  );
+  verifySucceededJob(baselineJob, manifest.jobId, fixture.jobNote);
+
+  const runResponse = requireObject(
+    await postJson(
+      baseUrl,
+      token,
+      `/v1/checks/${encodeURIComponent(manifest.checkId)}/runs`,
+      {}
+    ),
+    'post-upgrade check run response'
+  );
+  const runCheck = requireObject(runResponse.check, 'post-upgrade check run response.check');
+  requireExact(runCheck.id, manifest.checkId, 'post-upgrade check.id');
+  const runJobs = requireArray(runResponse.jobs, 'post-upgrade check run response.jobs');
+  if (runJobs.length !== 1) {
+    throw new Error('Post-upgrade Check must create exactly one Job');
+  }
+  const createdRunJob = requireObject(runJobs[0], 'post-upgrade check run response.jobs[0]');
+  const runJobId = requireString(createdRunJob.id, 'post-upgrade job.id');
+  const completedRunJob = await waitForSucceededJob(baseUrl, token, runJobId);
+  verifySucceededJob(completedRunJob, runJobId);
+
+  const runList = requireObject(
     await requestJson(
       baseUrl,
       token,
-      `/v1/check-profiles/${encodeURIComponent(manifest.checkId)}`
+      `/v1/checks/${encodeURIComponent(manifest.checkId)}/runs?pageSize=10`
     ),
-    'migrated check'
+    'post-upgrade check run list'
   );
-  if (check.schedule !== null) {
-    throw new Error('Migrated multi-region Check schedule must be disabled');
-  }
-  const migration = requireObject(check.locationMigration, 'check.locationMigration');
-  if (
-    migration.status !== 'requires_review'
-    || migration.reason !== 'legacy_multi_region'
-    || JSON.stringify(migration.sourceRegions) !== JSON.stringify(manifest.sourceRegions)
-    || migration.runtimeRegionId !== 'tokyo'
-  ) {
-    throw new Error('Migrated Check did not preserve its explicit review state');
-  }
-
-  const blockedRun = await request(
-    baseUrl,
-    token,
-    `/v1/check-profiles/${encodeURIComponent(manifest.checkId)}/runs`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json'
-      },
-      body: '{}'
-    }
-  );
-  await blockedRun.body?.cancel();
-  if (blockedRun.status !== 409) {
-    throw new Error(`Migrated Check must reject execution before review (got ${blockedRun.status})`);
-  }
-
-  const acceptedResponse = requireObject(
-    await requestJson(
-      baseUrl,
-      token,
-      `/v1/check-profiles/${encodeURIComponent(manifest.checkId)}`,
-      {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          propertyId: manifest.siteId,
-          routeSetId: manifest.routeGroupId,
-          name: requireString(check.name, 'check.name'),
-          note: typeof check.note === 'string' ? check.note : undefined,
-          acknowledgeLocationMigration: true
-        })
-      }
-    ),
-    'acknowledged check response'
-  );
-  const acceptedCheck = requireObject(acceptedResponse.profile, 'acknowledged check');
-  const acceptedMigration = requireObject(
-    acceptedCheck.locationMigration,
-    'acknowledged check.locationMigration'
-  );
-  if (acceptedMigration.status !== 'accepted' || typeof acceptedMigration.acknowledgedAt !== 'string') {
-    throw new Error('Migrated Check acknowledgement was not persisted');
-  }
-
-  const removedRegionSets = await request(baseUrl, token, '/v1/region-sets');
-  await removedRegionSets.body?.cancel();
-  if (removedRegionSets.status !== 410) {
-    throw new Error(`Retired Region Set endpoint must return 410 (got ${removedRegionSets.status})`);
+  const runs = requireArray(runList.runs, 'post-upgrade check run list.runs');
+  const persistedRun = runs.find((candidate) => {
+    const run = requireObject(candidate, 'post-upgrade check run');
+    const runRoutes = requireArray(run.routes, 'post-upgrade check run.routes');
+    return runRoutes.some((routeCandidate) => {
+      const runRoute = requireObject(routeCandidate, 'post-upgrade check run route');
+      return runRoute.jobId === runJobId;
+    });
+  });
+  if (!persistedRun) {
+    throw new Error('Post-upgrade Check run was not persisted');
   }
 
   console.log(JSON.stringify({
     ok: true,
     command: 'verify-current',
-    jobId: manifest.jobId,
-    checkId: manifest.checkId,
-    historicalRegions: manifest.sourceRegions,
-    migrationStatus: acceptedMigration.status
+    verification: 'baseline-resource-persistence',
+    baselineJobId: manifest.jobId,
+    postUpgradeJobId: runJobId,
+    runtimeRegionId: manifest.runtimeRegionId
   }));
 };
 
-const command = requireArgument(2, 'command');
-const baseUrl = parseBaseUrl(requireArgument(3, 'base URL'));
-const manifestPath = requireArgument(4, 'manifest path');
-const token = requireEnvironment('WEBPERF_UPGRADE_ADMIN_TOKEN');
+if (import.meta.main) {
+  const command = requireArgument(2, 'command');
+  const baseUrl = parseBaseUrl(requireArgument(3, 'base URL'));
+  const manifestPath = requireArgument(4, 'manifest path');
+  const token = requireEnvironment('WEBPERF_UPGRADE_ADMIN_TOKEN');
 
-switch (command) {
-  case 'seed-legacy':
-    await seedLegacy(baseUrl, token, manifestPath);
-    break;
-  case 'verify-current':
-    await verifyCurrent(baseUrl, token, manifestPath);
-    break;
-  default:
-    throw new Error(`Unknown upgrade fixture command: ${command}`);
+  switch (command) {
+    case 'seed-baseline':
+      await seedBaseline(baseUrl, token, manifestPath);
+      break;
+    case 'verify-current':
+      await verifyCurrent(baseUrl, token, manifestPath);
+      break;
+    default:
+      throw new Error(`Unknown upgrade fixture command: ${command}`);
+  }
 }

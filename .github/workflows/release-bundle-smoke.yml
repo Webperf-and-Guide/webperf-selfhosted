@@ -25,6 +25,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # v0.4.0 is the first published release with the supported consolidated
+  # three-image runtime and two-container default topology. Advance this only
+  # as an explicit support-policy change.
+  WEBPERF_SUPPORTED_UPGRADE_BASELINE: '0.4.0'
+
 concurrency:
   group: release-bundle-smoke-${{ inputs.version }}
   cancel-in-progress: false
@@ -246,18 +252,18 @@ jobs:
         id: version
         env:
           CURRENT_VERSION: ${{ inputs.version }}
-          LEGACY_VERSION: 0.2.1
+          BASELINE_VERSION: ${{ env.WEBPERF_SUPPORTED_UPGRADE_BASELINE }}
         shell: bash
         run: |
           set -euo pipefail
           result="$(bun tooling/scripts/release-bundle.ts \
-            is-newer-than "$CURRENT_VERSION" "$LEGACY_VERSION")"
+            is-newer-than "$CURRENT_VERSION" "$BASELINE_VERSION")"
           required="$(jq -er '.newer | if type == "boolean" then tostring else error("invalid") end' \
             <<<"$result")"
           echo "required=${required}" >> "$GITHUB_OUTPUT"
 
   upgrade:
-    name: Published bundle v0.2.1 upgrade drill
+    name: Published bundle supported upgrade drill
     needs: upgrade-eligibility
     if: ${{ needs.upgrade-eligibility.outputs.required == 'true' }}
     runs-on: ubuntu-latest
@@ -281,17 +287,17 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
-      - name: Download legacy and current public release bundles
+      - name: Download baseline and current public release bundles
         id: bundles
         env:
           CURRENT_VERSION: ${{ inputs.version }}
-          LEGACY_VERSION: 0.2.1
+          BASELINE_VERSION: ${{ env.WEBPERF_SUPPORTED_UPGRADE_BASELINE }}
           RELEASE_SOURCE_DIRECTORY: ${{ github.workspace }}/release-source
         shell: bash
         run: |
           set -euo pipefail
           bun tooling/scripts/release-bundle.ts validate-version "$CURRENT_VERSION" >/dev/null
-          bun tooling/scripts/release-bundle.ts validate-version "$LEGACY_VERSION" >/dev/null
+          bun tooling/scripts/release-bundle.ts validate-version "$BASELINE_VERSION" >/dev/null
           source_sha="$(git -C "$RELEASE_SOURCE_DIRECTORY" rev-parse HEAD)"
           test "$(tr -d '\r\n' < "$RELEASE_SOURCE_DIRECTORY/VERSION")" = "$CURRENT_VERSION"
           release_root="$(mktemp -d "${RUNNER_TEMP}/webperf-upgrade-bundles.XXXXXX")"
@@ -322,22 +328,30 @@ jobs:
             test -f "${version_root}/${bundle_name}/runtime-metadata.json"
             printf '%s' "${version_root}/${bundle_name}"
           }
-          legacy_bundle="$(download_bundle "$LEGACY_VERSION")"
+          baseline_bundle="$(download_bundle "$BASELINE_VERSION")"
           current_bundle="$(download_bundle "$CURRENT_VERSION")"
+          jq -e --arg version "$BASELINE_VERSION" '
+            .version == $version
+            and .tag == ("v" + $version)
+            and (.sourceCommit | test("^[0-9a-f]{40}$|^[0-9a-f]{64}$"))
+            and (([.images[].name] | sort) == ["browser-audit-lighthouse", "probe", "webperf"])
+            and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
+          ' "${baseline_bundle}/runtime-metadata.json" >/dev/null
           jq -e --arg version "$CURRENT_VERSION" --arg source_sha "$source_sha" '
             .version == $version
             and .tag == ("v" + $version)
             and .sourceCommit == $source_sha
+            and (([.images[].name] | sort) == ["browser-audit-lighthouse", "probe", "webperf"])
             and ([.images[].reference | test("^ghcr\\.io/webperf-and-guide/webperf(-[a-z][a-z-]*)?@sha256:[0-9a-f]{64}$")] | all)
           ' "${current_bundle}/runtime-metadata.json" >/dev/null
-          echo "legacy_version=${LEGACY_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "legacy_directory=${legacy_bundle}" >> "$GITHUB_OUTPUT"
+          echo "baseline_version=${BASELINE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "baseline_directory=${baseline_bundle}" >> "$GITHUB_OUTPUT"
           echo "current_directory=${current_bundle}" >> "$GITHUB_OUTPUT"
-      - name: Upgrade stored v0.2.1 data with published images
+      - name: Upgrade stored supported-baseline data with published images
         env:
-          WEBPERF_UPGRADE_LEGACY_VERSION: ${{ steps.bundles.outputs.legacy_version }}
-          WEBPERF_UPGRADE_LEGACY_COMPOSE_FILE: ${{ steps.bundles.outputs.legacy_directory }}/compose.yml
-          WEBPERF_UPGRADE_LEGACY_ENV_TEMPLATE: ${{ steps.bundles.outputs.legacy_directory }}/.env.example
+          WEBPERF_UPGRADE_BASELINE_VERSION: ${{ steps.bundles.outputs.baseline_version }}
+          WEBPERF_UPGRADE_BASELINE_COMPOSE_FILE: ${{ steps.bundles.outputs.baseline_directory }}/compose.yml
+          WEBPERF_UPGRADE_BASELINE_ENV_TEMPLATE: ${{ steps.bundles.outputs.baseline_directory }}/.env.example
           WEBPERF_UPGRADE_CURRENT_COMPOSE_FILE: ${{ steps.bundles.outputs.current_directory }}/compose.yml
           WEBPERF_UPGRADE_CURRENT_ENV_TEMPLATE: ${{ steps.bundles.outputs.current_directory }}/.env.example
           WEBPERF_UPGRADE_USE_CURRENT_DEV_OVERRIDE: 'false'

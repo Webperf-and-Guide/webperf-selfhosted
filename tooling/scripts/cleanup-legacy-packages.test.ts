@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   ACTIVE_PACKAGES,
   CLEANUP_CANDIDATES,
-  SUPPORTED_UPGRADE_PACKAGES,
   executePackageDeletes,
   findProtectedPackageConflicts,
   hasDeletePackagesScope,
@@ -42,24 +41,22 @@ describe('legacy GHCR package cleanup', () => {
     expect(hasDeletePackagesScope('HTTP/2.0 200 OK\n')).toBe(false);
   });
 
-  test('keeps active and supported-upgrade packages out of the cleanup plan', () => {
-    expect([...CLEANUP_CANDIDATES]).toEqual(['webperf-browser-audit-worker']);
-    expect([...SUPPORTED_UPGRADE_PACKAGES]).toEqual([
+  test('retires the split-role packages while keeping active packages protected', () => {
+    expect([...CLEANUP_CANDIDATES]).toEqual([
       'webperf-api',
       'webperf-console',
       'webperf-scheduler',
-      'webperf-executor'
+      'webperf-executor',
+      'webperf-browser-audit-worker'
     ]);
     expect(findProtectedPackageConflicts(
       CLEANUP_CANDIDATES,
-      ACTIVE_PACKAGES,
-      SUPPORTED_UPGRADE_PACKAGES
+      ACTIVE_PACKAGES
     )).toEqual([]);
     expect(findProtectedPackageConflicts(
       ['webperf-api', 'webperf'],
-      ACTIVE_PACKAGES,
-      SUPPORTED_UPGRADE_PACKAGES
-    )).toEqual(['webperf-api', 'webperf']);
+      ACTIVE_PACKAGES
+    )).toEqual(['webperf']);
   });
 
   test('does not authenticate or delete during the default preview', async () => {
@@ -139,8 +136,8 @@ describe('legacy GHCR package cleanup', () => {
 
     expect(exitCode).toBe(0);
     expect(deleted).toEqual([...CLEANUP_CANDIDATES]);
-    expect(deleted.some((name) => SUPPORTED_UPGRADE_PACKAGES.includes(
-      name as typeof SUPPORTED_UPGRADE_PACKAGES[number]
+    expect(deleted.some((name) => ACTIVE_PACKAGES.includes(
+      name as typeof ACTIVE_PACKAGES[number]
     ))).toBe(false);
   });
 

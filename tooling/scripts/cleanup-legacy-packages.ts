@@ -1,119 +1,271 @@
 #!/usr/bin/env bun
 /**
- * Delete legacy GHCR packages that are no longer referenced by CI, release,
- * or Compose after the Phase 2+3 image consolidation (issue #14).
+ * Preview or delete retired GHCR packages after the Phase 2+3 runtime-image
+ * consolidation (issue #14).
  *
- * These packages were published up to v0.4.0 and may still be pulled by
- * operators pinned to an older digest-pinned Compose bundle. Do NOT run
- * this script until you are confident no operator needs the old images
- * for a cross-version upgrade drill.
+ * The four Bun role packages remain protected while the formal release gate
+ * exercises the public v0.2.1-to-current upgrade path. Removing them would
+ * make the published digest-pinned v0.2.1 bundle impossible to start.
  *
  * Usage:
- *   bun run tooling/scripts/cleanup-legacy-packages.ts --dry-run   # list what would be deleted
- *   bun run tooling/scripts/cleanup-legacy-packages.ts             # actually delete
+ *   bun run tooling/scripts/cleanup-legacy-packages.ts             # preview only
+ *   bun run tooling/scripts/cleanup-legacy-packages.ts --dry-run   # preview only
+ *   bun run tooling/scripts/cleanup-legacy-packages.ts --execute   # delete eligible packages
  *
- * Requires a gh token with the `delete:packages` scope:
- *   gh auth refresh --scopes delete:packages
- *
- * The active packages (webperf, webperf-probe, webperf-browser-audit-lighthouse)
- * are never deleted.
+ * Live deletion requires an authenticated gh CLI token with the
+ * `delete:packages` scope. Active and supported-upgrade packages are never
+ * eligible for deletion.
  */
 
-const LEGACY_PACKAGES = [
+export const CLEANUP_CANDIDATES = [
+  'webperf-browser-audit-worker'
+] as const;
+
+export const SUPPORTED_UPGRADE_PACKAGES = [
   'webperf-api',
   'webperf-console',
   'webperf-scheduler',
-  'webperf-executor',
-  'webperf-browser-audit-worker'
-];
+  'webperf-executor'
+] as const;
 
-const ACTIVE_PACKAGES = [
+export const ACTIVE_PACKAGES = [
   'webperf',
   'webperf-probe',
   'webperf-browser-audit-lighthouse'
-];
+] as const;
 
 const ORG = 'Webperf-and-Guide';
+const USAGE = 'Usage: bun run tooling/scripts/cleanup-legacy-packages.ts [--dry-run | --execute]';
 
-// Reject unknown arguments so a typo like --help or --force doesn't
-// silently select live deletion mode.
-const VALID_ARGS = new Set(['--dry-run', process.argv[0], process.argv[1]]);
-const unknownArgs = process.argv.filter((arg) => !VALID_ARGS.has(arg));
-if (unknownArgs.length > 0) {
-  console.error(`Unknown argument(s): ${unknownArgs.join(', ')}`);
-  console.error('Usage: bun run tooling/scripts/cleanup-legacy-packages.ts [--dry-run]');
-  process.exit(2);
-}
+type CleanupMode = 'preview' | 'execute';
 
-const DRY_RUN = process.argv.includes('--dry-run');
+export type PackageDeleteResult = {
+  name: string;
+  ok: boolean;
+  alreadyGone: boolean;
+  error?: string;
+};
 
-// Guard: if a legacy list accidentally contains an active package, abort.
-const conflict = LEGACY_PACKAGES.filter((name) => ACTIVE_PACKAGES.includes(name));
-if (conflict.length > 0) {
-  console.error(`FATAL: these packages are in both LEGACY and ACTIVE lists: ${conflict.join(', ')}`);
-  process.exit(2);
-}
+export type GhDeleteAccessCheck =
+  | { ok: true }
+  | { ok: false; reason: 'gh_unavailable' | 'missing_delete_packages_scope' };
 
-async function deletePackage(name: string): Promise<{ name: string; ok: boolean; alreadyGone: boolean; error?: string }> {
-  const url = `/orgs/${ORG}/packages/container/${name}`;
+type CleanupIo = {
+  log(message?: string): void;
+  error(message: string): void;
+  write(message: string): void;
+};
+
+type CleanupDependencies = {
+  verifyGhDeleteAccess(): Promise<GhDeleteAccessCheck>;
+  deletePackage(name: string): Promise<PackageDeleteResult>;
+  io: CleanupIo;
+};
+
+export const parseCleanupMode = (args: readonly string[]): CleanupMode => {
+  const validArguments = new Set(['--dry-run', '--execute']);
+  const unknownArguments = args.filter((argument) => !validArguments.has(argument));
+
+  if (unknownArguments.length > 0) {
+    throw new Error(`Unknown argument(s): ${unknownArguments.join(', ')}`);
+  }
+
+  if (args.includes('--dry-run') && args.includes('--execute')) {
+    throw new Error('--dry-run and --execute cannot be used together');
+  }
+
+  return args.includes('--execute') ? 'execute' : 'preview';
+};
+
+export const findProtectedPackageConflicts = (
+  candidates: readonly string[],
+  activePackages: readonly string[],
+  supportedUpgradePackages: readonly string[]
+): string[] => {
+  const protectedPackages = new Set([...activePackages, ...supportedUpgradePackages]);
+  return candidates.filter((name) => protectedPackages.has(name));
+};
+
+const normalizeGhError = (stderr: string, exitCode: number): string => {
+  const message = stderr.trim().replace(/\s+/g, ' ').slice(0, 500);
+  return message || `gh exited with status ${exitCode}`;
+};
+
+export const hasDeletePackagesScope = (response: string): boolean => {
+  const scopeHeader = response
+    .split(/\r?\n/)
+    .find((line) => line.toLowerCase().startsWith('x-oauth-scopes:'));
+  if (!scopeHeader) {
+    return false;
+  }
+
+  return scopeHeader
+    .slice(scopeHeader.indexOf(':') + 1)
+    .split(',')
+    .map((scope) => scope.trim())
+    .includes('delete:packages');
+};
+
+const verifyGhDeleteAccess = async (): Promise<GhDeleteAccessCheck> => {
+  try {
+    const proc = Bun.spawn(['gh', 'api', '--include', '/user'], {
+      stdout: 'pipe',
+      // Do not reflect raw gh transport/authentication diagnostics; classify
+      // the failure below and give the operator a safe remediation command.
+      stderr: 'ignore'
+    });
+    const stdoutPromise = new Response(proc.stdout).text();
+    const [exitCode, stdout] = await Promise.all([
+      proc.exited,
+      stdoutPromise
+    ]);
+
+    if (exitCode !== 0) {
+      return { ok: false, reason: 'gh_unavailable' };
+    }
+
+    return hasDeletePackagesScope(stdout)
+      ? { ok: true }
+      : { ok: false, reason: 'missing_delete_packages_scope' };
+  } catch {
+    return { ok: false, reason: 'gh_unavailable' };
+  }
+};
+
+const deletePackage = async (name: string): Promise<PackageDeleteResult> => {
+  const url = `/orgs/${ORG}/packages/container/${encodeURIComponent(name)}`;
+
   try {
     const proc = Bun.spawn(['gh', 'api', '--method', 'DELETE', url], {
-      stdout: 'pipe',
+      stdout: 'ignore',
       stderr: 'pipe'
     });
-    const [exitCode] = await Promise.all([proc.exited]);
+    const stderrPromise = new Response(proc.stderr).text();
+    const [exitCode, stderr] = await Promise.all([proc.exited, stderrPromise]);
+
     if (exitCode === 0) {
       return { name, ok: true, alreadyGone: false };
     }
-    const stderr = await new Response(proc.stderr).text();
-    // 404 / "not found" means the package was already deleted in a prior run — treat as success.
-    if (stderr.includes('404') || stderr.toLowerCase().includes('not found')) {
+
+    const normalizedError = normalizeGhError(stderr, exitCode);
+    if (normalizedError.includes('404') || normalizedError.toLowerCase().includes('not found')) {
       return { name, ok: true, alreadyGone: true };
     }
-    return { name, ok: false, alreadyGone: false, error: stderr.trim() };
+
+    return { name, ok: false, alreadyGone: false, error: normalizedError };
   } catch (error) {
-    return { name, ok: false, alreadyGone: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      name,
+      ok: false,
+      alreadyGone: false,
+      error: error instanceof Error ? error.message.slice(0, 500) : 'Unable to start gh'
+    };
   }
-}
+};
 
-console.log(`${DRY_RUN ? '[DRY RUN] ' : ''}Legacy GHCR package cleanup for ${ORG}`);
-console.log(`Active packages (never deleted): ${ACTIVE_PACKAGES.join(', ')}`);
-console.log('');
+export const executePackageDeletes = async (
+  candidates: readonly string[],
+  deleteCandidate: (name: string) => Promise<PackageDeleteResult>,
+  io: CleanupIo
+): Promise<{ ok: boolean; deleted: number; alreadyGone: number }> => {
+  let deleted = 0;
+  let alreadyGone = 0;
 
-if (DRY_RUN) {
-  for (const name of LEGACY_PACKAGES) {
-    console.log(`  Would delete: ${name}`);
+  for (const name of candidates) {
+    io.write(`  Deleting ${name}... `);
+    const result = await deleteCandidate(name);
+
+    if (result.ok && result.alreadyGone) {
+      io.log('OK (already gone)');
+      alreadyGone += 1;
+      continue;
+    }
+
+    if (result.ok) {
+      io.log('OK');
+      deleted += 1;
+      continue;
+    }
+
+    io.log(`FAILED: ${result.error ?? 'unknown gh error'}`);
+    io.error('Aborting after the first unexpected error to avoid a partial cleanup.');
+    return { ok: false, deleted, alreadyGone };
   }
-  console.log('');
-  console.log('Run without --dry-run to actually delete.');
-  process.exit(0);
-}
 
-let succeeded = 0;
-let alreadyGone = 0;
-let failed = 0;
+  return { ok: true, deleted, alreadyGone };
+};
 
-for (const name of LEGACY_PACKAGES) {
-  process.stdout.write(`  Deleting ${name}... `);
-  const result = await deletePackage(name);
-  if (result.ok && result.alreadyGone) {
-    console.log('OK (already gone)');
-    alreadyGone++;
-  } else if (result.ok) {
-    console.log('OK');
-    succeeded++;
-  } else {
-    console.log(`FAILED: ${result.error}`);
-    failed++;
+const defaultDependencies: CleanupDependencies = {
+  verifyGhDeleteAccess,
+  deletePackage,
+  io: {
+    log: (message = '') => console.log(message),
+    error: (message) => console.error(message),
+    write: (message) => process.stdout.write(message)
   }
-}
+};
 
-console.log('');
-console.log(`Done: ${succeeded} deleted, ${alreadyGone} already gone, ${failed} failed.`);
+export const runLegacyPackageCleanup = async (
+  args: readonly string[],
+  dependencies: CleanupDependencies = defaultDependencies
+): Promise<number> => {
+  let mode: CleanupMode;
 
-if (failed > 0) {
-  console.log('');
-  console.log('If you see 403 errors, run:');
-  console.log('  gh auth refresh --scopes delete:packages');
-  process.exit(1);
+  try {
+    mode = parseCleanupMode(args);
+  } catch (error) {
+    dependencies.io.error(error instanceof Error ? error.message : 'Invalid arguments');
+    dependencies.io.error(USAGE);
+    return 2;
+  }
+
+  const conflicts = findProtectedPackageConflicts(
+    CLEANUP_CANDIDATES,
+    ACTIVE_PACKAGES,
+    SUPPORTED_UPGRADE_PACKAGES
+  );
+  if (conflicts.length > 0) {
+    dependencies.io.error(`FATAL: cleanup candidates include protected packages: ${conflicts.join(', ')}`);
+    return 2;
+  }
+
+  dependencies.io.log(`${mode === 'preview' ? '[PREVIEW] ' : ''}Legacy GHCR package cleanup for ${ORG}`);
+  dependencies.io.log(`Active packages: ${ACTIVE_PACKAGES.join(', ')}`);
+  dependencies.io.log(`Protected upgrade packages: ${SUPPORTED_UPGRADE_PACKAGES.join(', ')}`);
+  dependencies.io.log();
+
+  if (mode === 'preview') {
+    for (const name of CLEANUP_CANDIDATES) {
+      dependencies.io.log(`  Would delete: ${name}`);
+    }
+    dependencies.io.log();
+    dependencies.io.log('Pass --execute to perform the listed deletions.');
+    return 0;
+  }
+
+  const accessCheck = await dependencies.verifyGhDeleteAccess();
+  if (!accessCheck.ok) {
+    const message = accessCheck.reason === 'missing_delete_packages_scope'
+      ? 'GitHub token is missing delete:packages. Run `gh auth refresh --scopes delete:packages` and retry.'
+      : 'GitHub CLI access check failed. Run `gh auth status --hostname github.com` and retry.';
+    dependencies.io.error(message);
+    return 1;
+  }
+
+  const result = await executePackageDeletes(
+    CLEANUP_CANDIDATES,
+    dependencies.deletePackage,
+    dependencies.io
+  );
+  if (!result.ok) {
+    return 1;
+  }
+
+  dependencies.io.log();
+  dependencies.io.log(`Done: ${result.deleted} deleted, ${result.alreadyGone} already gone.`);
+  return 0;
+};
+
+if (import.meta.main) {
+  process.exit(await runLegacyPackageCleanup(process.argv.slice(2)));
 }

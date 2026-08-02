@@ -423,12 +423,25 @@ const buildCheckProfileRunListResponse = (profileId: string, query?: ListQuery):
 const safeParseDerivedQuery = (searchParams: URLSearchParams): DerivedResourceListQuery => {
   try {
     return parseDerivedResourceListQueryFromSearchParams(searchParams);
-  } catch (error) {
+  } catch {
     throw new ORPCError('BAD_REQUEST', {
-      message: `Invalid derived resource list query: ${error instanceof Error ? error.message : 'validation failed'}`
+      message: 'Invalid derived resource list query'
     });
   }
 };
+
+const buildComparisonCheckIdIndex = (
+  query?: DerivedResourceListQuery
+): ReadonlyMap<string, string> => query?.checkId
+  ? new Map(repository.listComparisons().map((comparison) => [comparison.id, comparison.checkId]))
+  : new Map();
+
+const resolveDerivedSourceCheckId = (
+  source: { checkId: string } | { comparisonId: string },
+  comparisonCheckIdIndex: ReadonlyMap<string, string>
+): string | null => 'checkId' in source
+  ? source.checkId
+  : comparisonCheckIdIndex.get(source.comparisonId) ?? null;
 
 const buildComparisonListResponse = (query?: DerivedResourceListQuery): ComparisonListResponse => {
   const result = applyDerivedResourceListQuery(
@@ -447,6 +460,7 @@ const buildComparisonListResponse = (query?: DerivedResourceListQuery): Comparis
 };
 
 const buildExportListResponse = (query?: DerivedResourceListQuery): ExportListResponse => {
+  const comparisonCheckIdIndex = buildComparisonCheckIdIndex(query);
   const result = applyDerivedResourceListQuery(
     repository.listExports(),
     query,
@@ -459,20 +473,13 @@ const buildExportListResponse = (query?: DerivedResourceListQuery): ExportListRe
       exportResource.status,
       exportResource.filename
     ],
-    (exportResource) => {
-      if ('checkId' in exportResource.source) {
-        return exportResource.source.checkId;
-      }
-      if ('comparisonId' in exportResource.source) {
-        return repository.getComparison(exportResource.source.comparisonId)?.checkId ?? null;
-      }
-      return null;
-    }
+    (exportResource) => resolveDerivedSourceCheckId(exportResource.source, comparisonCheckIdIndex)
   );
   return exportListResponseSchema.parse({ exports: result.items, pageInfo: result.pageInfo });
 };
 
 const buildAnalysisListResponse = (query?: DerivedResourceListQuery): AnalysisListResponse => {
+  const comparisonCheckIdIndex = buildComparisonCheckIdIndex(query);
   const result = applyDerivedResourceListQuery(
     repository.listAnalyses(),
     query,
@@ -486,7 +493,7 @@ const buildAnalysisListResponse = (query?: DerivedResourceListQuery): AnalysisLi
       'comparisonId' in analysis.source ? analysis.source.comparisonId : null,
       analysis.output.narrative
     ],
-    (analysis) => 'checkId' in analysis.source ? analysis.source.checkId : null
+    (analysis) => resolveDerivedSourceCheckId(analysis.source, comparisonCheckIdIndex)
   );
   return analysisListResponseSchema.parse({ analyses: result.items, pageInfo: result.pageInfo });
 };
@@ -931,7 +938,11 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/v1/comparisons' && request.method === 'GET') {
-      return json(buildComparisonListResponse(safeParseDerivedQuery(url.searchParams)));
+      try {
+        return json(buildComparisonListResponse(safeParseDerivedQuery(url.searchParams)));
+      } catch (error) {
+        return toJsonError(error);
+      }
     }
 
     if (pathname === '/v1/comparisons' && request.method === 'POST') {
@@ -954,7 +965,11 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/v1/exports' && request.method === 'GET') {
-      return json(buildExportListResponse(safeParseDerivedQuery(url.searchParams)));
+      try {
+        return json(buildExportListResponse(safeParseDerivedQuery(url.searchParams)));
+      } catch (error) {
+        return toJsonError(error);
+      }
     }
 
     if (pathname === '/v1/exports' && request.method === 'POST') {
@@ -977,7 +992,11 @@ const routeRequest = async (request: Request) => {
     }
 
     if (pathname === '/v1/analyses' && request.method === 'GET') {
-      return json(buildAnalysisListResponse(safeParseDerivedQuery(url.searchParams)));
+      try {
+        return json(buildAnalysisListResponse(safeParseDerivedQuery(url.searchParams)));
+      } catch (error) {
+        return toJsonError(error);
+      }
     }
 
     if (pathname === '/v1/analyses' && request.method === 'POST') {

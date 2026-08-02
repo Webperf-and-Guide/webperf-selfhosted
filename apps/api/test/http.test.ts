@@ -872,6 +872,21 @@ describe('api service monitoring expansion', () => {
         expect.arrayContaining([customComparison.id, regressionComparison.id])
       );
 
+      for (const resource of ['comparisons', 'exports', 'analyses']) {
+        const invalidQueryResponse = await fetch(
+          `${harness.baseUrl}/v1/${resource}?createdAfter=not-a-date`
+        );
+        const invalidQueryPayload = await invalidQueryResponse.json() as {
+          error: string;
+          code: string;
+        };
+        expect(invalidQueryResponse.status).toBe(400);
+        expect(invalidQueryPayload).toMatchObject({
+          error: 'Invalid derived resource list query',
+          code: 'BAD_REQUEST'
+        });
+      }
+
       const exportJsonResponse = await fetch(`${harness.baseUrl}/v1/exports`, {
         method: 'POST',
         headers: {
@@ -883,6 +898,7 @@ describe('api service monitoring expansion', () => {
         })
       });
       expect(exportJsonResponse.status).toBe(201);
+      const exportFromComparison = await exportJsonResponse.json() as { id: string };
 
       const exportCsvResponse = await fetch(`${harness.baseUrl}/v1/exports`, {
         method: 'POST',
@@ -895,6 +911,7 @@ describe('api service monitoring expansion', () => {
         })
       });
       expect(exportCsvResponse.status).toBe(201);
+      const exportFromCheck = await exportCsvResponse.json() as { id: string };
 
       const exportsPageResponse = await fetch(`${harness.baseUrl}/v1/exports?pageSize=1`);
       const exportsPagePayload = await exportsPageResponse.json() as {
@@ -915,6 +932,19 @@ describe('api service monitoring expansion', () => {
       expect(filteredExportsPayload.pageInfo.filter).toBe('csv');
       expect(filteredExportsPayload.exports[0]?.format).toBe('csv');
 
+      const exportsForCheckResponse = await fetch(
+        `${harness.baseUrl}/v1/exports?pageSize=5&checkId=${encodeURIComponent(thresholdProfile.id)}`
+      );
+      const exportsForCheckPayload = await exportsForCheckResponse.json() as {
+        exports: Array<{ id: string }>;
+        pageInfo: { totalCount: number };
+      };
+      expect(exportsForCheckResponse.status).toBe(200);
+      expect(exportsForCheckPayload.pageInfo.totalCount).toBe(2);
+      expect(exportsForCheckPayload.exports.map(({ id }) => id)).toEqual(
+        expect.arrayContaining([exportFromComparison.id, exportFromCheck.id])
+      );
+
       const analysisFromComparison = await createAnalysis(harness.baseUrl, {
         source: { type: 'comparison', comparisonId: comparison.id },
         kind: 'regression_summary'
@@ -925,7 +955,7 @@ describe('api service monitoring expansion', () => {
       });
       expect(analysisFromComparison.status).toBe('succeeded');
 
-      await createAnalysis(harness.baseUrl, {
+      const analysisFromRun = await createAnalysis(harness.baseUrl, {
         source: { type: 'run', runId: latestRun.id, checkId: thresholdProfile.id },
         kind: 'regression_summary'
       });
@@ -997,6 +1027,24 @@ describe('api service monitoring expansion', () => {
       expect(filteredAnalysesPayload.pageInfo.totalCount).toBe(1);
       expect(filteredAnalysesPayload.pageInfo.filter).toBe('run');
       expect(filteredAnalysesPayload.analyses[0]?.source.type).toBe('run');
+
+      const analysesForCheckResponse = await fetch(
+        `${harness.baseUrl}/v1/analyses?pageSize=10&checkId=${encodeURIComponent(thresholdProfile.id)}`
+      );
+      const analysesForCheckPayload = await analysesForCheckResponse.json() as {
+        analyses: Array<{ id: string }>;
+        pageInfo: { totalCount: number };
+      };
+      expect(analysesForCheckResponse.status).toBe(200);
+      expect(analysesForCheckPayload.pageInfo.totalCount).toBe(4);
+      expect(analysesForCheckPayload.analyses.map(({ id }) => id)).toEqual(
+        expect.arrayContaining([
+          analysisFromComparison.id,
+          analysisFromRun.id,
+          regressionAnalyses[0]!.id,
+          regressionAnalyses[1]!.id
+        ])
+      );
 
       const alphaAuditResponse = await fetch(`${harness.baseUrl}/v1/browser-audits`, {
         method: 'POST',

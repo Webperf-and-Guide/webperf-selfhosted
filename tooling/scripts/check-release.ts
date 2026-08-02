@@ -310,6 +310,8 @@ for (const requiredFragment of [
   'SELFHOST_MIGRATION_BACKUP',
   'selfhost-database.ts backup',
   '/data/webperf-upgrade-baseline.sqlite',
+  'selfhost-database.ts doctor',
+  'Upgraded database doctor verification failed',
   'compose-version-upgrade',
   'Baseline data volume disappeared during the non-destructive upgrade'
 ]) {

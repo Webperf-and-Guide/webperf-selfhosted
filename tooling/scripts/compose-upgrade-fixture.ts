@@ -26,6 +26,10 @@ type UpgradeManifest = {
 
 class UpgradeFixtureTransportError extends Error {}
 
+const REQUEST_TIMEOUT_MS = 20_000;
+const JOB_POLL_ATTEMPTS = 180;
+const JOB_POLL_INTERVAL_MS = 1_000;
+
 const requireArgument = (index: number, label: string) => {
   const value = process.argv[index]?.trim();
   if (!value) {
@@ -120,7 +124,7 @@ const request = async (
         authorization: `Bearer ${token}`,
         ...init.headers
       },
-      signal: init.signal ?? AbortSignal.timeout(20_000)
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
   } catch (error) {
     throw new UpgradeFixtureTransportError(`${init.method ?? 'GET'} ${path} transport failed`, {
@@ -146,8 +150,13 @@ const waitForSucceededJob = async (
   jobId: string
 ) => {
   let lastStatus = 'unknown';
+  let lastTransportError: UpgradeFixtureTransportError | undefined;
 
-  for (let attempt = 0; attempt < 180; attempt += 1) {
+  // A network measurement may legitimately take a few minutes. Keep the
+  // release gate patient enough for a cold Compose runner while bounding each
+  // individual request separately so a stalled connection cannot consume the
+  // entire polling budget.
+  for (let attempt = 0; attempt < JOB_POLL_ATTEMPTS; attempt += 1) {
     try {
       const job = requireObject(
         await requestJson(baseUrl, token, `/v1/jobs/${encodeURIComponent(jobId)}`),
@@ -165,9 +174,17 @@ const waitForSucceededJob = async (
       if (!(error instanceof UpgradeFixtureTransportError)) {
         throw error;
       }
+      lastTransportError = error;
     }
 
-    await Bun.sleep(1_000);
+    await Bun.sleep(JOB_POLL_INTERVAL_MS);
+  }
+
+  if (lastStatus === 'unknown' && lastTransportError !== undefined) {
+    throw new Error(
+      `Upgrade fixture job ${jobId} never became reachable: ${lastTransportError.message}`,
+      { cause: lastTransportError }
+    );
   }
 
   throw new Error(`Upgrade fixture job ${jobId} timed out in status ${lastStatus}`);

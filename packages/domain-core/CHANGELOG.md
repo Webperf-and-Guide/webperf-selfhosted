@@ -1,5 +1,19 @@
 # @webperf/domain-core
 
+## 0.5.0 — 2026-08-02
+
+### Minor changes
+
+- [ba45816](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/ba458160908e9367d5f3fbea909e995d88775334) Add date-range (`createdAfter`/`createdBefore`) and exact `checkId`
+  filtering to the comparison, export, and analysis list endpoints. The new
+  `derivedResourceListQuerySchema` extends the shared `listQuerySchema`
+  with these optional fields, and `applyDerivedResourceListQuery` in
+  `@webperf/domain-core` applies them before text-search and pagination. — Thanks @imjlk!
+
+### Patch changes
+
+- Updated dependencies: contracts@0.5.0
+
 ## 0.4.0 — 2026-07-30
 
 ### Minor changes

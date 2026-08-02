@@ -4,6 +4,16 @@ All notable WebPerf self-hosted changes are recorded here. Package-level
 versioning and changelogs are generated from
 [Sampo](https://github.com/bruits/sampo) changesets.
 
+## [0.5.0] — 2026-08-02
+
+### Changes
+
+- Add date-range (`createdAfter`/`createdBefore`) and exact `checkId` filtering to the comparison, export, and analysis list endpoints. The new `derivedResourceListQuerySchema` extends the shared `listQuerySchema` with these optional fields, and `applyDerivedResourceListQuery` in `@webperf/domain-core` applies them before text-search and pagination.
+- Reduce the consolidated `webperf` runtime image from 426 MB to 381 MB by using the Bun slim runtime base and excluding console build intermediates, without removing production dependencies or runtime capabilities.
+- Set `v0.4.0` as the minimum supported direct-upgrade baseline and make formal releases prove same-volume data preservation with the consolidated runtime. The retired split-role GHCR packages are no longer release dependencies.
+
+<!-- webperf-release: from=0.4.0; changesets=sha256:0cbb37e8ee7a4c4317f8b6809cb9eb8c2d1dc7956f14f6107cdf571f2efde57a -->
+
 ## [0.4.0] — 2026-07-30
 
 ### Changes
@@ -81,3 +91,4 @@ First public-beta release of the complete self-hosted runtime.
 [0.2.1]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.2.1
 [0.3.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.3.0
 [0.4.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.4.0
+[0.5.0]: https://github.com/Webperf-and-Guide/webperf-selfhosted/releases/tag/v0.5.0

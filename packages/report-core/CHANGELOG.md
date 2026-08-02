@@ -1,5 +1,11 @@
 # @webperf/report-core
 
+## 0.1.4 — 2026-08-02
+
+### Patch changes
+
+- Updated dependencies: contracts@0.5.0
+
 ## 0.1.3 — 2026-07-30
 
 ### Patch changes

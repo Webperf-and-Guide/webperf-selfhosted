@@ -1,5 +1,17 @@
 # @webperf/config
 
+## 0.4.1 — 2026-08-02
+
+### Patch changes
+
+- [db51124](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/db511247f55d104221c281924b4923cd15045411) Reduce the consolidated `webperf` runtime image from 426 MB to 381 MB by
+  using the Bun slim runtime base and excluding console build intermediates,
+  without removing production dependencies or runtime capabilities. — Thanks @imjlk!
+- [db51124](https://github.com/Webperf-and-Guide/webperf-selfhosted/commit/db511247f55d104221c281924b4923cd15045411) Set `v0.4.0` as the minimum supported direct-upgrade baseline and make formal
+  releases prove same-volume data preservation with the consolidated runtime.
+  The retired split-role GHCR packages are no longer release dependencies. — Thanks @imjlk!
+- Updated dependencies: contracts@0.5.0
+
 ## 0.4.0 — 2026-07-30
 
 ### Minor changes
